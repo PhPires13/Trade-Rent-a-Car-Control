@@ -1,6 +1,6 @@
 # Trade Rent a Car — Sistema de Gestão de Frota
 
-**PRD + Especificação Funcional** · **Versão 1.0** · **17/07/2026** · Stack: a definir
+**PRD + Especificação Funcional** · **Versão 1.1** · **17/07/2026** · Stack: a definir
 
 > Substitui os controles feitos hoje em planilhas (`Frota.xlsx`, `multas e autuacoes.xlsx` e a planilha de conciliação bancária/financeira da Luciana). O [Anexo](#anexo--mapeamento-das-planilhas-atuais) mapeia as planilhas para as seções deste documento.
 
@@ -133,11 +133,11 @@ erDiagram
 ### 4.1 Veículos e cadastros de apoio
 
 **Veículo** 📄 — placa (única), renavam, chassi, marca/modelo/ano, data e valor de aquisição, KM atual, motorista atual, chave reserva (sim/não/dúvida), rastreador (fornecedor + vigência), bateria (troca, fornecedor, garantia), licenciamento, status (`Disponível`, `Alocado`, `Em manutenção`, `Inativo`, `Vendido`).
-- **Categoria** ✅ — carros de categorias diferentes têm valores semanais diferentes (relevante nas trocas temporárias). Cadastro simples: nome + valor semanal de referência 💡.
+- **Categoria** ✅ — carros de categorias diferentes têm valores semanais diferentes (relevante nas trocas temporárias). Cadastro simples: nome + valor semanal de referência 💡. Referências atuais ✅: **Gol R$ 650/semana, Voyage R$ 750/semana**, podendo variar conforme o combinado com cada motorista.
 - **Uso** ✅ — `Locação` (frota, protegida pela Auto Truck) ou `Fora de locação` (pessoais — HB20, Tracker, Onix — com seguradora; só acompanham multas, manutenção e documentos; sem alocação, cobrança ou indicadores de rentabilidade da frota).
 - Status muda automaticamente ao alocar / abrir manutenção; ajustável manualmente 💡.
 
-**Plano de proteção (frota — Auto Truck)** ✅ — mensalidade por veículo (coluna "$ AT" da planilha: R$ 274/304/366 📄), taxa adicional que dá direito a **franquias gratuitas** em eventos, e **auxílio motorista profissional** (ver 4.6). **Seguro (pessoais)** — seguradora, apólice, franquia, vigência.
+**Plano de proteção (frota — Auto Truck)** ✅ — mensalidade por veículo (coluna "$ AT 19" da planilha: R$ 274/304/366 📄; o "19" é o **número de veículos assegurados** na Auto Truck ✅), taxa adicional que dá direito a **duas franquias gratuitas a cada 12 meses** ✅, e **auxílio motorista profissional** (ver 4.6). **Seguro (pessoais)** — seguradora, apólice, franquia, vigência.
 
 **Cliente / Motorista** — nome, CPF/CNPJ (único), telefone/WhatsApp, CNH (número, categoria, **validade** 📄), endereço, dia da semana de vencimento ✅, status (`Ativo`, `Inadimplente`, `Inativo`). Alerta de CNH vencida ao alocar.
 **Condutor autorizado** 📄 — nome, CPF/CNH opcionais, contato, cliente relacionado. Usado no FICI.
@@ -165,28 +165,32 @@ Regras:
 
 Tudo o que o cliente deve vira **cobrança**; todo pagamento é um **recebimento** vinculado a uma ou mais cobranças.
 
-**Origens de cobrança:** aluguel semanal (gerada automaticamente no dia de vencimento do cliente), nota de débito (ver abaixo), repasse de manutenção/avaria, repasse de sinistro/franquia, excedente de km.
+**Origens de cobrança:** aluguel semanal (gerada automaticamente no dia de vencimento do cliente), nota de débito (ver abaixo), repasse de manutenção/avaria, repasse de sinistro/franquia, excedente de km, **encargos por atraso** (ver abaixo).
 
 **Cobrança** — cliente, alocação/veículo, origem, referência (semana/mês), valor, vencimento, status (`Pendente`, `Parcial`, `Pago`, `Atrasado`), saldo devedor.
 **Recebimento** — cliente, cobranças quitadas, valor, data, forma (Pix ✅ padrão, dinheiro, transferência), comprovante opcional.
 
-**Nota de Débito (ND)** 📄✅ — prática atual: multas repassadas são agrupadas numa ND numerada (ex.: ND 046 reúne 5 multas do mesmo motorista) e cobradas de uma vez. No sistema: número sequencial (mantém a numeração atual), cliente, itens incluídos, total, emissão, status. Emitir a ND cria a cobrança e marca as multas como `Cobrado`; o recebimento marca como `Recebido`. Uma multa só pode estar em uma ND ativa. A ND pode incluir outros repasses (avaria, excedente de km) 💡.
+**Nota de Débito (ND)** 📄✅ — prática atual: multas repassadas são agrupadas numa ND numerada (ex.: ND 046 reúne 5 multas do mesmo motorista) e cobradas de uma vez. No sistema: **numeração automática**, continuando a sequência atual ✅ (hoje é manual), cliente, itens incluídos, total, emissão, status. Emitir a ND cria a cobrança e marca as multas como `Cobrado`; o recebimento marca como `Recebido`. Uma multa só pode estar em uma ND ativa. A ND pode incluir outros repasses (avaria, excedente de km, encargos) 💡.
 
-**Classificação fiscal dos créditos** ✅ — a base do imposto (DAS/Simples) é calculada **somente sobre a receita de locação**, então todo crédito é classificado:
+**Encargos por atraso** ✅ — passaram a ser cobrados recentemente dos motoristas que pagam em atraso (antes não eram). Gerados sobre cobranças atrasadas; regra de cálculo a definir (ver pontos em aberto) 💡. **Não entram na fatura** e, portanto, **ficam fora da base do DAS** ✅ — são classificados como pagamentos diversos.
 
-| Classe | O que entra | Documento emitido | Entra na base do DAS? |
+**Dívidas de contratos encerrados / cobrança judicial** ✅ — motoristas que encerraram o contrato devendo (hoje acompanhados na aba "em aberto" da conciliação bancária) são encaminhados para **cobrança judicial**. O sistema mantém as cobranças do ex-cliente com o saldo devedor visível e status `Em cobrança judicial` 💡.
+
+**Classificação fiscal dos créditos** ✅ — regra confirmada: **o DAS (Simples) incide somente sobre a receita de locação** — o aluguel dos veículos, que recebe **fatura**. Tudo o mais que entra na conta **não** é tributado: os demais pagamentos dos motoristas (multas, manutenções, caução, franquia, encargos de atraso) recebem apenas **nota de débito**, e créditos que não vêm de motorista (auxílio motorista profissional, venda de veículo) não têm documento. O quadro abaixo só organiza essa regra em três grupos:
+
+| Grupo | O que entra | Documento emitido | Entra na base do DAS? |
 |--------|-------------|-------------------|----------------------|
-| **Receita de locação** | Aluguel semanal (incl. ajustes de troca temporária) | **Fatura** | **Sim** |
-| **Repasses / pagamentos diversos** | Multas, manutenção/avaria, franquia de evento, excedente de km, caução | **Nota de débito** | Não |
-| **Outros créditos** | Auxílio motorista profissional, venda de veículos | — | Não (fora da receita de locação) |
+| **Receita de locação** (aluguel) | Pagamento semanal do aluguel (incl. ajustes de troca temporária) | **Fatura** | **Sim** |
+| **Pagamentos diversos** (o resto que o motorista paga) | Multas, manutenção/avaria, franquia de evento, excedente de km, caução, **encargos por atraso** ✅ | **Nota de débito** | Não |
+| **Outros créditos** (não vêm de motorista) | Auxílio motorista profissional, venda de veículos | — | Não |
 
-O sistema totaliza por mês a **base de cálculo do DAS** (hoje controlada à mão em planilha separada pela Luciana). A emissão da fatura/ND em si continua no processo atual (fora do escopo v1).
+O sistema totaliza por mês a **base de cálculo do DAS** (hoje controlada à mão na planilha de conciliação bancária da Luciana). A emissão da fatura/ND continua no processo atual (fora do escopo v1). **Reforma tributária** ✅: a fatura de locação provavelmente passará a ser **nota fiscal emitida em sistema externo** (como já ocorre nas notas da Oftalmics); quando isso acontecer, o sistema apenas registra o número/valor do documento para conciliação 💡.
 
 **Regras de lançamento do recebimento** 💡 *(mecânica proposta, trava contra erro de lançamento)*:
 - O valor alocado a cada cobrança não pode passar do saldo devedor dela; o total alocado não pode passar do valor recebido.
 - Distribuição automática da mais antiga para a mais nova, ou manual.
 - Sobra vira **crédito/adiantamento** do cliente ou **reforço de caução** — nunca "pago a mais" numa cobrança.
-- Atraso além de X dias (configurável) → cliente `Inadimplente`.
+- Cliente vira `Inadimplente` a partir de **1 dia** de atraso ✅ (limite configurável 💡); cobranças atrasadas passam a gerar **encargos por atraso**.
 - Alternativa ao pagamento: **abater da caução** (quando existir), com o mesmo efeito de quitação.
 
 ### 4.4 Caução (opcional)
@@ -210,6 +214,7 @@ Nem todo cliente tem caução ✅. Quando existe:
 - Para cada item o sistema guarda a **última execução** (km e data) e calcula o **próximo vencimento** (última execução + intervalo), comparando com o KM atual (alimentado pelas leituras mensais — ver 4.8).
 - **Alerta antecipado** quando o item se aproxima do vencimento (ex.: faltando N km, estimado pela média de km/mês do veículo 💡) e alerta forte quando estoura.
 - Registrar uma manutenção da categoria correspondente zera o ciclo do item.
+- A **lista de itens é aberta** ✅ — dá para acrescentar peças/manutenções novas a qualquer momento depois do sistema pronto (a tabela inicial de intervalos será levantada com os donos; não precisa estar completa no dia 1).
 - Vigências por data (bateria/garantia, rastreador, licenciamento) geram alertas do mesmo painel.
 
 ### 4.6 Sinistros, eventos e auxílio motorista profissional
@@ -218,7 +223,7 @@ Nem todo cliente tem caução ✅. Quando existe:
 
 **Evento na associação** ✅ — se acionou a Auto Truck: data do evento e **franquia/cota** usada (pode ser gratuita pela taxa adicional do plano). O histórico de eventos por veículo acompanha a sinistralidade e o saldo de franquias gratuitas.
 
-**Auxílio motorista profissional** ✅ — quando uma **colisão** deixa o veículo na oficina por **mais de 7 dias**, a associação paga o auxílio (aparece na conciliação bancária como "retorno seguro auxílio motorista profissional"). No sistema:
+**Auxílio motorista profissional** ✅ — quando uma **colisão** deixa o veículo na oficina por **mais de 7 dias**, a associação paga o auxílio no valor de **um salário mínimo cheio** ✅ (aparece na conciliação bancária como "retorno seguro auxílio motorista profissional"). No sistema:
 - O acompanhamento de dias parado da manutenção vinculada ao sinistro dispara o alerta "auxílio a solicitar" ao passar de 7 dias 💡.
 - Registro: sinistro/manutenção vinculados, período, valor, status (`A solicitar`, `Solicitado`, `Recebido`).
 - Contabilizado como **outro crédito** (fora da base do DAS ✅) e como receita do veículo no resultado por unidade.
@@ -286,8 +291,9 @@ Um **registro por veículo por mês de referência** ✅ (reconfirmado: o contro
 
 **Relatórios (v1 mínimo):**
 - **Base de cálculo do DAS** por mês (receita de locação × pagamentos diversos × outros créditos) ✅.
-- Financeiro por veículo (receitas, custos, resultado); recebíveis por cliente; extrato por cliente.
+- Financeiro por veículo (receitas, custos, resultado); recebíveis por cliente; extrato por cliente; dívidas em cobrança judicial.
 - NDs emitidas/pagas; caução por cliente; custos de manutenção e dias parado; sinistros/eventos e franquias usadas; multas por órgão/status; KM por mês; resultado de compra/venda.
+- **Exportação para a contabilidade** ✅ — necessidade confirmada: qualquer um desses relatórios (em especial a base do DAS, recebimentos e NDs) pode ser exportado (Excel/CSV/PDF) para envio ao contador.
 
 ---
 
@@ -306,7 +312,9 @@ Um **registro por veículo por mês de referência** ✅ (reconfirmado: o contro
 
 **Fase 1 (MVP):** **plano de manutenção preventiva por km + KM mensal (prioridade nº 1 dos donos ✅)**, cadastros (veículos com categorias e uso, clientes, condutores, fornecedores, órgãos, plano de proteção), alocação com trocas temporárias, cobranças/recebimentos com classificação fiscal, NDs, caução opcional, manutenção com dias parado, sinistros/eventos com auxílio, multas com FICI/NIC, compra/venda, painel e alertas.
 
-**Fase 2:** relatórios avançados e exportação; anexos (fotos, notas, laudos); notificações a clientes (WhatsApp/e-mail); **carga inicial de dados (opcional)** — planilhas atuais ou outra base organizada ✅; emissão de fatura/ND pelo sistema.
+**Fase 1 inclui também** a exportação simples (Excel/CSV) dos relatórios para a contabilidade ✅.
+
+**Fase 2:** relatórios avançados; anexos (fotos, notas, laudos); notificações a clientes (WhatsApp/e-mail); **carga inicial de dados (opcional)** — planilhas atuais ou outra base organizada ✅; emissão de fatura/ND pelo sistema (ou integração com o sistema externo de NF que vier com a reforma tributária ✅).
 
 **Fase 3:** portal/app do cliente; integração com órgãos; contratos; telemetria/GPS.
 
@@ -321,24 +329,27 @@ Registro das decisões dos donos (entrevistas de 17/07/2026):
 | 1 | Trocas de carro por conserto | **Troca temporária** sem encerrar a alocação; o valor semanal pode mudar, principalmente entre categorias diferentes. |
 | 2 | Campo "ND" das planilhas | **Nota de débito ao motorista** — agrupa multas repassadas numa cobrança única numerada. |
 | 3 | Carros pessoais (HB20, Tracker P, Onix) | Entram como **fora de locação** — só multas, manutenção e documentos. |
-| 4 | Proteção da frota | **Associação Auto Truck** (pessoais usam seguradora). Plano tem taxa extra com direito a **franquias gratuitas**. |
-| 5 | Campo "$ AT 19" da aba Frota | **Mensalidade da Auto Truck** por veículo. |
+| 4 | Proteção da frota | **Associação Auto Truck** (pessoais usam seguradora). Taxa extra dá direito a **duas franquias gratuitas a cada 12 meses**. |
+| 5 | Campo "$ AT 19" da aba Frota | **Mensalidade da Auto Truck** por veículo; o "19" é o **número de veículos assegurados**. |
 | 6 | Quilometragem | **Rotina mensal** — um registro por veículo por mês; o sistema cobra leituras pendentes. Pequenas variações em torno dos 30 dias são aceitáveis. *(Reconfirmada pelos dois donos em 17/07.)* |
 | 7 | Pagamento semanal | **Dia de vencimento por cliente** (dia da semana em que pegou o carro), via **Pix**. |
 | 8 | Caução | **Opcional** — nem sempre é cobrada. |
 | 9 | Importação das planilhas | **Opcional/adiada** — carga inicial pode usar outros dados organizados. |
-| 10 | Auxílio motorista profissional | Colisão + oficina **> 7 dias** → associação paga o auxílio ("retorno seguro auxílio motorista profissional" na conciliação bancária). |
+| 10 | Auxílio motorista profissional | Colisão + oficina **> 7 dias** → associação paga **um salário mínimo cheio** ("retorno seguro auxílio motorista profissional" na conciliação bancária). |
 | 11 | Classificação fiscal (DAS) | **DAS calculado só sobre a receita de locação** (com fatura). Multas, manutenções, caução e franquias são pagamentos diversos com **nota de débito**, fora da base. Auxílio e venda de veículos também ficam fora. |
-| 12 | Prioridade do sistema | **Controle de manutenção preventiva por km** ("troca de óleo a cada X km, correia a cada X km...") é o mais importante para os donos — deve ser o carro-chefe do MVP. |
+| 12 | Prioridade do sistema | **Controle de manutenção preventiva por km** ("troca de óleo a cada X km, correia a cada X km...") é o mais importante para os donos — deve ser o carro-chefe do MVP. O plano de itens é **extensível** (dá para acrescentar peças depois do sistema pronto). |
+| 13 | Encargos por atraso | Passaram a ser **cobrados** dos motoristas que pagam em atraso (antes não eram). **Sem fatura → fora da base do DAS** (pagamento diverso). |
+| 14 | Inadimplência | Cliente vira inadimplente a partir de **1 dia** de atraso. |
+| 15 | Valores semanais de referência | **Gol R$ 650/semana, Voyage R$ 750/semana**, com variações conforme o combinado com cada motorista. |
+| 16 | Numeração de documentos | **ND numerada automaticamente pelo sistema** (continua a sequência atual). Fatura de locação segue emitida manualmente pela Luciana; com a **reforma tributária** deve virar NF emitida em sistema externo. |
+| 17 | Cobrança judicial | Ex-clientes que encerraram contrato devendo (aba "em aberto" da conciliação) vão para **cobrança judicial**; o sistema mantém o saldo com status próprio. |
+| 18 | Contabilidade | Os relatórios precisam ser **exportáveis para envio à contabilidade** (base do DAS, recebimentos, NDs). |
 
 **Pontos em aberto:**
-1. Valor exato do auxílio motorista profissional (salário mínimo cheio? por período? por evento?).
-2. Quantas franquias gratuitas a taxa adicional dá direito e qual a vigência/renovação.
-3. Prazo (X dias) de atraso para marcar cliente como inadimplente.
-4. Se o "19" em "$ AT 19" é o dia de vencimento da mensalidade da associação.
-5. Lista final de categorias de veículo e valores semanais de referência.
-6. Estrutura da planilha de conciliação bancária/financeira da Luciana (ainda não analisada — pode refinar o módulo financeiro).
-7. **Tabela de itens do plano de preventivas e seus intervalos de km** (óleo a cada quantos km? correia? velas? óleo de freio/caixa?) — colher com os donos por modelo de carro.
+1. **Regra de cálculo dos encargos por atraso** (percentual ou valor fixo? por dia/semana de atraso? incide sobre o quê?).
+2. **Tabela de itens do plano de preventivas e seus intervalos de km** (óleo a cada quantos km? correia? velas? óleo de freio/caixa?) — Luciana vai levantar com o outro dono; a lista pode ser complementada depois do sistema pronto.
+3. Estrutura da planilha de **conciliação bancária** da Luciana — incluí-la no repositório ajudaria a refinar o módulo financeiro (já sabemos que tem a aba "em aberto" das dívidas em cobrança judicial).
+4. **Sistema externo de emissão de NF** pós-reforma tributária — definir integração/registro quando a mudança entrar em vigor.
 
 ---
 
@@ -355,7 +366,9 @@ Registro das decisões dos donos (entrevistas de 17/07/2026):
 - **Proteção veicular** — cobertura da frota pela associação (Auto Truck); diferente de seguro tradicional.
 - **Evento** — acionamento da proteção num sinistro ("evento Auto Truck").
 - **Franquia / cota de participação** — valor pago para acionar a proteção; pode ser gratuita pela taxa adicional do plano.
-- **Auxílio motorista profissional** — crédito pago pela associação quando o conserto de colisão passa de 7 dias.
+- **Auxílio motorista profissional** — crédito de um salário mínimo pago pela associação quando o conserto de colisão passa de 7 dias.
+- **Encargos por atraso** — valor adicional cobrado do motorista que paga em atraso; sem fatura, fora da base do DAS.
+- **Cobrança judicial** — cobrança na justiça das dívidas de ex-clientes que encerraram contrato devendo.
 - **Fora de locação** — veículo pessoal acompanhado no sistema sem alocação/cobrança.
 - **Sinistro** — acidente/dano/roubo; "Associado" = nosso condutor, "Terceiro" = terceiro envolvido.
 - **AIT** — Auto de Infração de Trânsito.
