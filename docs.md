@@ -1,6 +1,6 @@
 # Trade Rent a Car — Sistema de Gestão de Frota
 
-**PRD + Especificação Funcional** · **Versão 1.1** · **17/07/2026** · Stack: a definir
+**PRD + Especificação Funcional** · **Versão 1.1.1** · **17/07/2026** · Stack: a definir
 
 > Substitui os controles feitos hoje em planilhas (`Frota.xlsx`, `multas e autuacoes.xlsx` e a planilha de conciliação bancária/financeira da Luciana). O [Anexo](#anexo--mapeamento-das-planilhas-atuais) mapeia as planilhas para as seções deste documento.
 
@@ -172,7 +172,7 @@ Tudo o que o cliente deve vira **cobrança**; todo pagamento é um **recebimento
 
 **Nota de Débito (ND)** 📄✅ — prática atual: multas repassadas são agrupadas numa ND numerada (ex.: ND 046 reúne 5 multas do mesmo motorista) e cobradas de uma vez. No sistema: **numeração automática**, continuando a sequência atual ✅ (hoje é manual), cliente, itens incluídos, total, emissão, status. Emitir a ND cria a cobrança e marca as multas como `Cobrado`; o recebimento marca como `Recebido`. Uma multa só pode estar em uma ND ativa. A ND pode incluir outros repasses (avaria, excedente de km, encargos) 💡.
 
-**Encargos por atraso** ✅ — passaram a ser cobrados recentemente dos motoristas que pagam em atraso (antes não eram). Gerados sobre cobranças atrasadas; regra de cálculo a definir (ver pontos em aberto) 💡. **Não entram na fatura** e, portanto, **ficam fora da base do DAS** ✅ — são classificados como pagamentos diversos.
+**Encargos por atraso** ✅ — o contrato prevê encargos, mas na prática cobram **menos que o contratual, para não pesar para o motorista**. Referência atual: **5% de multa para atraso de até ~4 dias e 10% para atrasos maiores** — com flexibilidade caso a caso (ex.: motorista com semanas atrasadas colocando as contas em dia paga só 5%). No sistema 💡: o encargo é **sugerido automaticamente** pela regra (5%/10%, configurável) sobre a cobrança atrasada, e o dono pode **ajustar ou zerar** o valor antes de confirmar. **Não entram na fatura** e, portanto, **ficam fora da base do DAS** ✅ — são classificados como pagamentos diversos.
 
 **Dívidas de contratos encerrados / cobrança judicial** ✅ — motoristas que encerraram o contrato devendo (hoje acompanhados na aba "em aberto" da conciliação bancária) são encaminhados para **cobrança judicial**. O sistema mantém as cobranças do ex-cliente com o saldo devedor visível e status `Em cobrança judicial` 💡.
 
@@ -293,7 +293,8 @@ Um **registro por veículo por mês de referência** ✅ (reconfirmado: o contro
 - **Base de cálculo do DAS** por mês (receita de locação × pagamentos diversos × outros créditos) ✅.
 - Financeiro por veículo (receitas, custos, resultado); recebíveis por cliente; extrato por cliente; dívidas em cobrança judicial.
 - NDs emitidas/pagas; caução por cliente; custos de manutenção e dias parado; sinistros/eventos e franquias usadas; multas por órgão/status; KM por mês; resultado de compra/venda.
-- **Exportação para a contabilidade** ✅ — necessidade confirmada: qualquer um desses relatórios (em especial a base do DAS, recebimentos e NDs) pode ser exportado (Excel/CSV/PDF) para envio ao contador.
+- **Despesas do mês** ✅ — total de gastos do período (manutenções, mensalidades da proteção, multas absorvidas, custos de compra/venda), por veículo e consolidado.
+- **Exportação para a contabilidade** ✅ — necessidade confirmada: qualquer um desses relatórios pode ser exportado (Excel/CSV/PDF) para envio ao contador — tanto as **receitas/faturas** (base do DAS, recebimentos, NDs) quanto as **despesas do mês**.
 
 ---
 
@@ -338,18 +339,18 @@ Registro das decisões dos donos (entrevistas de 17/07/2026):
 | 10 | Auxílio motorista profissional | Colisão + oficina **> 7 dias** → associação paga **um salário mínimo cheio** ("retorno seguro auxílio motorista profissional" na conciliação bancária). |
 | 11 | Classificação fiscal (DAS) | **DAS calculado só sobre a receita de locação** (com fatura). Multas, manutenções, caução e franquias são pagamentos diversos com **nota de débito**, fora da base. Auxílio e venda de veículos também ficam fora. |
 | 12 | Prioridade do sistema | **Controle de manutenção preventiva por km** ("troca de óleo a cada X km, correia a cada X km...") é o mais importante para os donos — deve ser o carro-chefe do MVP. O plano de itens é **extensível** (dá para acrescentar peças depois do sistema pronto). |
-| 13 | Encargos por atraso | Passaram a ser **cobrados** dos motoristas que pagam em atraso (antes não eram). **Sem fatura → fora da base do DAS** (pagamento diverso). |
+| 13 | Encargos por atraso | Passaram a ser **cobrados** (antes não eram). Prática atual: **5% até ~4 dias de atraso, 10% acima disso**, cobrando menos que o contrato prevê para não pesar — e com flexibilidade caso a caso. **Sem fatura → fora da base do DAS** (pagamento diverso). |
 | 14 | Inadimplência | Cliente vira inadimplente a partir de **1 dia** de atraso. |
 | 15 | Valores semanais de referência | **Gol R$ 650/semana, Voyage R$ 750/semana**, com variações conforme o combinado com cada motorista. |
 | 16 | Numeração de documentos | **ND numerada automaticamente pelo sistema** (continua a sequência atual). Fatura de locação segue emitida manualmente pela Luciana; com a **reforma tributária** deve virar NF emitida em sistema externo. |
 | 17 | Cobrança judicial | Ex-clientes que encerraram contrato devendo (aba "em aberto" da conciliação) vão para **cobrança judicial**; o sistema mantém o saldo com status próprio. |
-| 18 | Contabilidade | Os relatórios precisam ser **exportáveis para envio à contabilidade** (base do DAS, recebimentos, NDs). |
+| 18 | Contabilidade | Os relatórios precisam ser **exportáveis para envio à contabilidade** — receitas/faturas (base do DAS, recebimentos, NDs) **e também as despesas do mês**. |
 
 **Pontos em aberto:**
-1. **Regra de cálculo dos encargos por atraso** (percentual ou valor fixo? por dia/semana de atraso? incide sobre o quê?).
-2. **Tabela de itens do plano de preventivas e seus intervalos de km** (óleo a cada quantos km? correia? velas? óleo de freio/caixa?) — Luciana vai levantar com o outro dono; a lista pode ser complementada depois do sistema pronto.
-3. Estrutura da planilha de **conciliação bancária** da Luciana — incluí-la no repositório ajudaria a refinar o módulo financeiro (já sabemos que tem a aba "em aberto" das dívidas em cobrança judicial).
-4. **Sistema externo de emissão de NF** pós-reforma tributária — definir integração/registro quando a mudança entrar em vigor.
+1. **Tabela de itens do plano de preventivas e seus intervalos de km** (óleo a cada quantos km? correia? velas? óleo de freio/caixa?) — Luciana vai levantar com o outro dono; a lista pode ser complementada depois do sistema pronto.
+2. Estrutura da planilha de **conciliação bancária** da Luciana — incluí-la no repositório ajudaria a refinar o módulo financeiro (já sabemos que tem a aba "em aberto" das dívidas em cobrança judicial).
+3. **Sistema externo de emissão de NF** pós-reforma tributária — definir integração/registro quando a mudança entrar em vigor.
+4. Encargos por atraso: confirmar o limite exato de dias entre 5% e 10% (hoje "~4 dias") e se incidem só sobre o aluguel ou sobre qualquer cobrança atrasada.
 
 ---
 
