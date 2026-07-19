@@ -1,6 +1,6 @@
 # Trade Rent a Car — Sistema de Gestão de Frota
 
-**PRD + Especificação Funcional** · **Versão 1.2** · **18/07/2026** · Stack: a definir
+**PRD + Especificação Funcional** · **Versão 1.2** · **18/07/2026**
 
 > Substitui os controles feitos hoje em planilhas (`Frota.xlsx`, `multas e autuacoes.xlsx` e a planilha de conciliação bancária/financeira da Luciana). O [Anexo](#anexo--mapeamento-das-planilhas-atuais) mapeia as planilhas para as seções deste documento.
 
@@ -9,7 +9,7 @@
 - ✅ **Confirmado** — decisão ou explicação dada pelos donos (registradas na [Seção 8](#8-decisões-confirmadas-e-pontos-em-aberto)).
 - 💡 **Proposta** — sugestão de funcionamento a validar; nada aqui é definitivo, especialmente mecânicas de sistema que não existem nas planilhas.
 
-O documento descreve **o quê** o sistema precisa fazer (domínio e regras). **Não** define telas/UI — isso será desenhado depois, junto com a escolha da stack.
+O documento descreve **o quê** o sistema precisa fazer (domínio e regras) nas Seções 1–9. O **como** será construído (stack) está no documento separado [Planejamento técnico](docs-tecnico.md). Telas/UI não são prescritas — serão desenhadas durante a implementação.
 
 ---
 
@@ -24,6 +24,7 @@ O documento descreve **o quê** o sistema precisa fazer (domínio e regras). **N
 7. [Roadmap](#7-roadmap)
 8. [Decisões confirmadas e pontos em aberto](#8-decisões-confirmadas-e-pontos-em-aberto)
 9. [Glossário](#9-glossário)
+- [Planejamento técnico (stack)](docs-tecnico.md)
 - [Anexo — Mapeamento das planilhas atuais](#anexo--mapeamento-das-planilhas-atuais)
 
 ---
