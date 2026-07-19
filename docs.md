@@ -1,6 +1,6 @@
 # Trade Rent a Car — Sistema de Gestão de Frota
 
-**PRD + Especificação Funcional** · **Versão 1.1.1** · **17/07/2026** · Stack: a definir
+**PRD + Especificação Funcional** · **Versão 1.2** · **18/07/2026** · Stack: a definir
 
 > Substitui os controles feitos hoje em planilhas (`Frota.xlsx`, `multas e autuacoes.xlsx` e a planilha de conciliação bancária/financeira da Luciana). O [Anexo](#anexo--mapeamento-das-planilhas-atuais) mapeia as planilhas para as seções deste documento.
 
@@ -32,6 +32,8 @@ O documento descreve **o quê** o sistema precisa fazer (domínio e regras). **N
 
 ### 1.1 O negócio
 Locadora de veículos com foco em **motoristas de aplicativo** (região de BH). Frota de ~20 carros de locação (Gol, Voyage, Fiorino, Virtus, Tracker) 📄, alugados por **valor semanal** pago via Pix ✅. A frota é protegida pela **associação Auto Truck**; os donos também têm carros pessoais (com seguradora) acompanhados nas mesmas planilhas ✅. Dois donos operam tudo, cada um em seu computador.
+
+**Modelo do negócio (ciclo do ativo)** ✅: a empresa **compra o carro usado, aluga por um período relativamente curto e vende antes que a manutenção pesada comece a consumir a rentabilidade** (a "desmobilização"). A decisão de vender não é só por km ou idade — é pelo **retorno financeiro que o carro já gerou** (referência: vender quando recupera ~70–80% do valor investido) e pelo **quanto de manutenção ele está dando**. O sistema existe, em grande parte, para dar essa resposta por carro (ver 4.9).
 
 ### 1.2 Problemas que o sistema resolve
 Hoje o controle está espalhado em planilhas (uma aba por carro nas multas; abas de frota, sinistros e KM; planilha financeira separada), gerando risco de:
@@ -92,7 +94,7 @@ Uso simultâneo: os dois podem editar ao mesmo tempo; vale a última gravação,
 - **Auxílio motorista profissional** — crédito da associação quando conserto de colisão passa de 7 dias ✅.
 - **Multa / Autuação** — infração com FICI, trâmite e repasse 📄.
 - **Registro de KM** — leitura mensal de odômetro por veículo ✅.
-- **Compra / Venda** — entrada e saída de veículos da frota.
+- **Compra / Venda / Desmobilização** — entrada e saída de veículos da frota, com ficha financeira acumulada e indicadores que apontam a hora de vender ✅.
 - **Órgão Autuador**, **Fornecedor**, **Plano de proteção/seguro** — cadastros de apoio.
 
 ### 3.2 Diagrama
@@ -132,7 +134,7 @@ erDiagram
 
 ### 4.1 Veículos e cadastros de apoio
 
-**Veículo** 📄 — placa (única), renavam, chassi, marca/modelo/ano, data e valor de aquisição, KM atual, motorista atual, chave reserva (sim/não/dúvida), rastreador (fornecedor + vigência), bateria (troca, fornecedor, garantia), licenciamento, status (`Disponível`, `Alocado`, `Em manutenção`, `Inativo`, `Vendido`).
+**Veículo** 📄 — placa (única), renavam, chassi, marca/modelo/ano, data e valor de aquisição, **KM na compra** e KM atual, motorista atual, chave reserva (sim/não/dúvida), rastreador (fornecedor + vigência), bateria (troca, fornecedor, garantia), **IPVA e licenciamento** ✅ (ano, valor, situação), **valor estimado de venda** (FIPE/mercado, atualizado manualmente 💡 — usado na desmobilização, ver 4.9), status (`Disponível`, `Alocado`, `Em manutenção`, `Inativo`, `Vendido`).
 - **Categoria** ✅ — carros de categorias diferentes têm valores semanais diferentes (relevante nas trocas temporárias). Cadastro simples: nome + valor semanal de referência 💡. Referências atuais ✅: **Gol R$ 650/semana, Voyage R$ 750/semana**, podendo variar conforme o combinado com cada motorista.
 - **Uso** ✅ — `Locação` (frota, protegida pela Auto Truck) ou `Fora de locação` (pessoais — HB20, Tracker, Onix — com seguradora; só acompanham multas, manutenção e documentos; sem alocação, cobrança ou indicadores de rentabilidade da frota).
 - Status muda automaticamente ao alocar / abrir manutenção; ajustável manualmente 💡.
@@ -203,19 +205,29 @@ Nem todo cliente tem caução ✅. Quando existe:
 
 ### 4.5 Manutenção e gastos
 
-**Manutenção** — veículo, tipo (`Preventiva`/`Corretiva`), categoria (óleo, freios, correia dentada, velas, bateria, rastreador... 📄), oficina, descrição, KM, **entrada/saída** (→ dias parado), origem do custo (`Evento da proteção` ou `Particular`), vínculo com sinistro, vínculo com a troca temporária (se o cliente pegou substituto), anexos.
+**Manutenção** — veículo, tipo (`Preventiva`/`Corretiva`/`Esporádica`), categoria (óleo e filtro, alinhamento, correia dentada, óleo da caixa, pneus, suspensão, embreagem, velas, freios, funilaria, bateria, rastreador... 📄✅), oficina, **descrição do reparo** (importante: o tipo de serviço feito influencia a avaliação do carro para desmobilização ✅), KM, **entrada/saída** (→ dias parado), origem do custo (`Evento da proteção` ou `Particular`), vínculo com sinistro, vínculo com a troca temporária (se o cliente pegou substituto), anexos.
 
 **Custo × repasse** 💡 *(estrutura proposta sobre prática confirmada de que a cobrança difere do gasto)*:
 - **Custo real** (pago à oficina/associação — pode ser zero se coberto por franquia gratuita ✅) e **valor cobrado do cliente** são independentes; o sistema registra os dois e a diferença.
 - Responsável: `Empresa` ou `Cliente`. Se cliente → repasse (`A cobrar` → `Cobrado` → `Recebido`), podendo sair da caução.
 
 **Plano de manutenção preventiva por km** ✅ — **prioridade nº 1 do sistema segundo os donos**: "troca de óleo a cada X km, troca de correia a cada X km" — praticamente todas as manutenções seguem intervalos de quilometragem (as planilhas já anotam isso: "MANUTENCAO 100.000 odômetro / 50.000 rodados", correia dentada, óleo de freio, óleo da caixa, velas 📄).
-- Cada veículo tem um **plano de preventivas**: lista de itens com **intervalo em km** (e/ou tempo, quando aplicável) 💡. Os intervalos padrão podem vir do modelo do carro e ser ajustados por veículo (valores X a definir — ver pontos em aberto).
+- Cada veículo tem um **plano de preventivas**: lista de itens com **intervalo em km**. **Tabela confirmada pelos donos** ✅:
+
+| Item | Intervalo |
+|------|-----------|
+| Troca de óleo e filtro | a cada **10.000 km** |
+| Alinhamento | a cada **10.000 km** |
+| Kit correia dentada + óleo da caixa de marcha | a cada **60.000 km** |
+| Pneus (2 unidades) | a cada **30.000 km** (em uso mais severo, **20.000 km**) |
+
+- Além das preventivas por km, há as **manutenções esporádicas** ✅ (sem intervalo fixo — registradas quando ocorrem e **pesam na avaliação de desmobilização**, ver 4.9): **suspensão** (homocinéticas, kit coxim, amortecedores dianteiros/traseiros, pivô, ponteira), **embreagem** e **jogo de velas**.
+- Os intervalos são configuráveis por veículo/modelo 💡 (ex.: pneu a 20 mil para carros de rodagem pesada).
 - Para cada item o sistema guarda a **última execução** (km e data) e calcula o **próximo vencimento** (última execução + intervalo), comparando com o KM atual (alimentado pelas leituras mensais — ver 4.8).
 - **Alerta antecipado** quando o item se aproxima do vencimento (ex.: faltando N km, estimado pela média de km/mês do veículo 💡) e alerta forte quando estoura.
 - Registrar uma manutenção da categoria correspondente zera o ciclo do item.
-- A **lista de itens é aberta** ✅ — dá para acrescentar peças/manutenções novas a qualquer momento depois do sistema pronto (a tabela inicial de intervalos será levantada com os donos; não precisa estar completa no dia 1).
-- Vigências por data (bateria/garantia, rastreador, licenciamento) geram alertas do mesmo painel.
+- A **lista de itens é aberta** ✅ — dá para acrescentar peças/manutenções novas a qualquer momento depois do sistema pronto.
+- Vigências por data (bateria/garantia, rastreador, **IPVA**, licenciamento) geram alertas do mesmo painel.
 
 ### 4.6 Sinistros, eventos e auxílio motorista profissional
 
@@ -229,6 +241,8 @@ Nem todo cliente tem caução ✅. Quando existe:
 - Contabilizado como **outro crédito** (fora da base do DAS ✅) e como receita do veículo no resultado por unidade.
 
 Roubo/furto: muda o status do veículo até recuperação/baixa (caso real: veículo roubado e liberado do pátio do Detran 📄).
+
+**Sinistro pesa na desmobilização** ✅ — o histórico de sinistros do carro e **o tipo de reparo feito** (estrutural/funilaria vs. estético) entram na avaliação do veículo para venda (ver 4.9); por isso a descrição do reparo deve ser registrada com cuidado.
 
 ### 4.7 Multas e autuações
 
@@ -256,11 +270,35 @@ Um **registro por veículo por mês de referência** ✅ (reconfirmado: o contro
 - Km rodados atribuídos a quem estava com o carro (alocação/troca temporária); troca no meio do mês consolida os trechos.
 - Alimenta os gatilhos do **plano de manutenção preventiva** (4.5) — é a leitura mensal que diz quando cada item (óleo, correia...) está vencendo.
 
-### 4.9 Compra e venda de veículos
+### 4.9 Compra, venda e desmobilização
 
-- **Compra** — data, valor, vendedor, forma de pagamento/financiamento, custos de entrada, KM. Veículo entra como `Disponível` (ou `Fora de locação`). Multas anteriores à aquisição → responsável `Vendedor anterior` 📄.
+- **Compra** — data, valor, vendedor, forma de pagamento/financiamento, custos de entrada, KM na compra. Veículo entra como `Disponível` (ou `Fora de locação`). Multas anteriores à aquisição → responsável `Vendedor anterior` 📄.
 - **Venda** — só sem alocação ativa; data, valor, comprador, custos, KM. Status → `Vendido`, histórico preservado. Crédito da venda classificado como **outro crédito** (fora da base do DAS) ✅.
-- **Resultado por veículo** 💡 = venda − compra − custos de entrada/saída − manutenções/sinistros − mensalidades de proteção + receita de locação + auxílios recebidos.
+
+#### Ficha financeira do veículo (acumulada desde a compra)
+Calculada automaticamente a partir dos lançamentos que já existem nos outros módulos — nada é digitado duas vezes:
+- **Investido:** valor de compra + custos de entrada.
+- **Receita acumulada:** aluguéis recebidos + auxílios motorista + repasses recebidos.
+- **Despesas acumuladas:** manutenções (custo real), mensalidades da proteção, IPVA/licenciamento, franquias de eventos, multas absorvidas.
+- **Resultado operacional** = receita − despesas; **% do investimento recuperado** = resultado operacional ÷ investido.
+- **Resultado final** (após a venda) = resultado operacional + valor de venda − custos de venda − investido.
+
+#### Apoio à decisão de desmobilização ✅💡
+O objetivo confirmado pelos donos: **identificar cedo o carro que dá muita manutenção e programar a venda** — a referência prática é vender quando o carro **recuperou ~70–80% do investimento** ✅. Em vez de uma "nota" opaca, o sistema mostra **indicadores objetivos e o motivo de cada recomendação** 💡:
+
+| Indicador | Cálculo | O que sinaliza |
+|-----------|---------|----------------|
+| % do investimento recuperado | resultado operacional ÷ investido | ≥ 70–80% → janela de venda ✅ |
+| Custo de manutenção por km | custo de manutenção ÷ km rodados (últimos 6 meses) | tendência de alta → carro "carente" |
+| Custo de manutenção por mês | idem, por mês | comparável entre carros da frota |
+| Dias parado em oficina | soma dos dias parado (últimos 6 meses) | carro que não gera receita |
+| Manutenções esporádicas pesadas | contagem/custo (suspensão, embreagem, correia...) ✅ | desgaste estrutural chegando |
+| Histórico de sinistros | qtde e tipo de reparo ✅ | deprecia o valor de revenda |
+| Valor estimado de venda | FIPE/mercado (manual) 💡 | quanto ainda vale na ponta |
+
+- **Recomendação por carro** 💡: `🟢 Manter` / `🟡 Observar` / `🟠 Preparar venda` / `🔴 Vender` — derivada dos indicadores acima com limites configuráveis (ex.: % recuperado ≥ 75% **ou** custo de manutenção/km acima da média da frota por 3 meses → `🟠`). A recomendação sempre exibe **quais critérios dispararam**, para o dono confirmar ou ignorar.
+- **Ranking da frota** 💡: os carros ordenados da melhor para a pior situação (resultado, custo/km, dias parados), destacando os candidatos à desmobilização.
+- **Reposição** 💡: visão simples de quantos carros estão em rota de venda e quanto deve entrar com as vendas, para planejar a recompra e manter a frota no tamanho desejado.
 
 ---
 
@@ -269,9 +307,11 @@ Um **registro por veículo por mês de referência** ✅ (reconfirmado: o contro
 *(necessidades de visibilidade — o desenho das telas será feito na fase de implementação)*
 
 **O que precisa estar visível de imediato (painel):**
-- Frota por status; **carros parados e há quantos dias** (com destaque quando passa de 7 dias em conserto de colisão — auxílio a solicitar).
+- Frota por status e **taxa de ocupação** (alugados ÷ frota); **carros parados e há quantos dias** (com destaque quando passa de 7 dias em conserto de colisão — auxílio a solicitar).
+- **Preventivas vencendo/vencidas por carro** (óleo, alinhamento, correia, pneus) ✅.
+- **Ranking de desmobilização** (4.9): % do investimento recuperado e candidatos à venda com o motivo ✅💡.
 - Cobranças da semana (a receber, recebido, atrasado); inadimplentes; NDs e cauções em aberto.
-- Prazos de FICI a vencer; sinistros abertos; vigências (rastreador, bateria, licenciamento, CNHs).
+- Prazos de FICI a vencer; sinistros abertos; vigências (rastreador, bateria, IPVA, licenciamento, CNHs).
 
 **Alertas:**
 
@@ -288,9 +328,12 @@ Um **registro por veículo por mês de referência** ✅ (reconfirmado: o contro
 | Franquia de km excedida | KM do mês acima da franquia (alocações limitadas) |
 | Caução insuficiente | Saldo menor que débitos pendentes |
 | Sinistro aberto | Sem conclusão/regularização |
+| Candidato à desmobilização | % recuperado atingiu a faixa-alvo, ou custo de manutenção/dias parados acima do limite 💡 |
+| IPVA / licenciamento | Vencimento se aproximando ✅ |
 
 **Relatórios (v1 mínimo):**
 - **Base de cálculo do DAS** por mês (receita de locação × pagamentos diversos × outros créditos) ✅.
+- **Ficha financeira e indicadores por veículo** (4.9): investido, receita, despesas, % recuperado, custo de manutenção por km/mês, dias parados, ranking da frota ✅💡.
 - Financeiro por veículo (receitas, custos, resultado); recebíveis por cliente; extrato por cliente; dívidas em cobrança judicial.
 - NDs emitidas/pagas; caução por cliente; custos de manutenção e dias parado; sinistros/eventos e franquias usadas; multas por órgão/status; KM por mês; resultado de compra/venda.
 - **Despesas do mês** ✅ — total de gastos do período (manutenções, mensalidades da proteção, multas absorvidas, custos de compra/venda), por veículo e consolidado.
@@ -305,13 +348,13 @@ Um **registro por veículo por mês de referência** ✅ (reconfirmado: o contro
 3. Multa chega → sistema aponta cliente da data → FICI no prazo (evita NIC) → acompanhar resultado (penalidade/advertência) → agrupar em **ND** → cobrar/receber (ou caução).
 4. Fechar KM do mês → excedente (se limitado) → cobrar/abater.
 5. Encerrar alocação → acerto de caução → veículo disponível → nova alocação.
-6. Vender veículo → resultado por unidade; crédito fora da base do DAS.
+6. Acompanhar indicadores do carro (% recuperado, custo de manutenção/km, dias parados) → recomendação de **desmobilização** → vender → resultado final por unidade; crédito da venda fora da base do DAS → repor a frota.
 
 ---
 
 ## 7. Roadmap
 
-**Fase 1 (MVP):** **plano de manutenção preventiva por km + KM mensal (prioridade nº 1 dos donos ✅)**, cadastros (veículos com categorias e uso, clientes, condutores, fornecedores, órgãos, plano de proteção), alocação com trocas temporárias, cobranças/recebimentos com classificação fiscal, NDs, caução opcional, manutenção com dias parado, sinistros/eventos com auxílio, multas com FICI/NIC, compra/venda, painel e alertas.
+**Fase 1 (MVP):** **plano de manutenção preventiva por km + KM mensal (prioridade nº 1 dos donos ✅)**, cadastros (veículos com categorias e uso, clientes, condutores, fornecedores, órgãos, plano de proteção), alocação com trocas temporárias, cobranças/recebimentos com classificação fiscal, NDs, caução opcional, manutenção com dias parado, sinistros/eventos com auxílio, multas com FICI/NIC, compra/venda com **ficha financeira e indicadores de desmobilização** ✅, painel e alertas.
 
 **Fase 1 inclui também** a exportação simples (Excel/CSV) dos relatórios para a contabilidade ✅.
 
@@ -345,12 +388,16 @@ Registro das decisões dos donos (entrevistas de 17/07/2026):
 | 16 | Numeração de documentos | **ND numerada automaticamente pelo sistema** (continua a sequência atual). Fatura de locação segue emitida manualmente pela Luciana; com a **reforma tributária** deve virar NF emitida em sistema externo. |
 | 17 | Cobrança judicial | Ex-clientes que encerraram contrato devendo (aba "em aberto" da conciliação) vão para **cobrança judicial**; o sistema mantém o saldo com status próprio. |
 | 18 | Contabilidade | Os relatórios precisam ser **exportáveis para envio à contabilidade** — receitas/faturas (base do DAS, recebimentos, NDs) **e também as despesas do mês**. |
+| 19 | Modelo de desmobilização | O negócio é **comprar usado → alugar → vender antes da manutenção pesada**. Referência: vender quando o carro **recuperou ~70–80% do investimento**. As manutenções lançadas alimentam a avaliação do carro; **sinistros e o tipo de reparo feito depreciam a avaliação**. O sistema deve apontar os candidatos à venda. |
+| 20 | Tabela de preventivas | **Óleo e filtro: 10.000 km · Alinhamento: 10.000 km · Kit correia dentada + óleo da caixa: 60.000 km · Pneus (2 un.): 30.000 km (ou 20.000 em uso severo)**. Esporádicas sem intervalo fixo: suspensão (homocinéticas, coxins, amortecedores, pivô, ponteira), embreagem, velas. |
+| 21 | Despesas do veículo | Incluem também **seguro/proteção e IPVA**, acompanhados por carro. |
 
 **Pontos em aberto:**
-1. **Tabela de itens do plano de preventivas e seus intervalos de km** (óleo a cada quantos km? correia? velas? óleo de freio/caixa?) — Luciana vai levantar com o outro dono; a lista pode ser complementada depois do sistema pronto.
-2. Estrutura da planilha de **conciliação bancária** da Luciana — incluí-la no repositório ajudaria a refinar o módulo financeiro (já sabemos que tem a aba "em aberto" das dívidas em cobrança judicial).
-3. **Sistema externo de emissão de NF** pós-reforma tributária — definir integração/registro quando a mudança entrar em vigor.
-4. Encargos por atraso: confirmar o limite exato de dias entre 5% e 10% (hoje "~4 dias") e se incidem só sobre o aluguel ou sobre qualquer cobrança atrasada.
+1. Estrutura da planilha de **conciliação bancária** da Luciana — incluí-la no repositório ajudaria a refinar o módulo financeiro (já sabemos que tem a aba "em aberto" das dívidas em cobrança judicial).
+2. **Sistema externo de emissão de NF** pós-reforma tributária — definir integração/registro quando a mudança entrar em vigor.
+3. Encargos por atraso: confirmar o limite exato de dias entre 5% e 10% (hoje "~4 dias") e se incidem só sobre o aluguel ou sobre qualquer cobrança atrasada.
+4. Desmobilização: confirmar a **faixa-alvo exata** do % recuperado (70? 75? 80?) e os **limites** dos demais critérios (custo de manutenção/km, dias parados) que disparam a recomendação de venda.
+5. **Valor de revenda**: será atualizado manualmente (consulta FIPE/mercado) ou há interesse em integração automática no futuro?
 
 ---
 
@@ -370,6 +417,8 @@ Registro das decisões dos donos (entrevistas de 17/07/2026):
 - **Auxílio motorista profissional** — crédito de um salário mínimo pago pela associação quando o conserto de colisão passa de 7 dias.
 - **Encargos por atraso** — valor adicional cobrado do motorista que paga em atraso; sem fatura, fora da base do DAS.
 - **Cobrança judicial** — cobrança na justiça das dívidas de ex-clientes que encerraram contrato devendo.
+- **Desmobilização** — vender o carro no momento certo do ciclo: depois de recuperar ~70–80% do investimento e antes de a manutenção pesada consumir a rentabilidade.
+- **Ficha financeira do veículo** — visão acumulada por carro: investido, receitas, despesas, % do investimento recuperado e resultado.
 - **Fora de locação** — veículo pessoal acompanhado no sistema sem alocação/cobrança.
 - **Sinistro** — acidente/dano/roubo; "Associado" = nosso condutor, "Terceiro" = terceiro envolvido.
 - **AIT** — Auto de Infração de Trânsito.
