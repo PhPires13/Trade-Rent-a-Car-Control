@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block titulo %}Painel — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-6 text-2xl font-bold">Painel</h1>
+
+<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+  <div class="rounded-lg bg-marca-preto p-4 text-white shadow">
+    <div class="text-3xl font-black text-marca-amarelo">{{ total_veiculos }}</div>
+    <div class="text-sm text-gray-300">Veículos na frota</div>
+  </div>
+  {% for status, qtde in veiculos_por_status.items %}
+  <div class="rounded-lg bg-white p-4 shadow">
+    <div class="text-3xl font-black">{{ qtde }}</div>
+    <div class="text-sm text-gray-500">{{ status }}</div>
+  </div>
+  {% endfor %}
+  <div class="rounded-lg bg-white p-4 shadow">
+    <div class="text-3xl font-black">{{ total_clientes_ativos }}</div>
+    <div class="text-sm text-gray-500">Clientes ativos</div>
+  </div>
+</div>
+
+<p class="mt-8 text-sm text-gray-500">
+  Fundação do sistema — os módulos de KM mensal e manutenção preventiva chegam na próxima etapa
+  (ver <code>ETAPAS.md</code>). Cadastros de veículos e clientes já funcionam em
+  <a href="{% url 'admin:index' %}" class="text-marca-preto underline">Cadastros</a>.
+</p>
+{% endblock %}

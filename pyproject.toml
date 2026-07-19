@@ -1,0 +1,34 @@
+[project]
+name = "trade-rent-a-car"
+version = "0.1.0"
+description = "Sistema de gestão de frota de locação — Trade Rent a Car"
+requires-python = ">=3.13"
+dependencies = [
+    "django>=5.2,<6.0",
+    "django-environ>=0.12",
+    "whitenoise>=6.9",
+    "gunicorn>=23.0",
+    "django-simple-history>=3.10",
+    "psycopg[binary]>=3.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-django>=4.11",
+    "ruff>=0.14",
+    "pre-commit>=4.3",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings_test"
+python_files = ["tests.py", "test_*.py"]
+addopts = "-q"
