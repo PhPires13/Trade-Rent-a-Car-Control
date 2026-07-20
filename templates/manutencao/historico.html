@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Manutenções — {{ veiculo.placa }}{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Manutenções — {{ veiculo }}</h1>
+  <div class="flex gap-3 text-sm">
+    <a href="{% url 'manutencao:registrar' veiculo.pk %}"
+       class="rounded bg-marca-amarelo px-3 py-1 font-semibold text-marca-preto hover:brightness-95">+ Registrar</a>
+    <a href="{% url 'manutencao:preventivas' %}" class="py-1 underline">← Preventivas</a>
+  </div>
+</div>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Data</th>
+        <th class="px-3 py-2">Item</th>
+        <th class="px-3 py-2">Tipo</th>
+        <th class="px-3 py-2">KM</th>
+        <th class="px-3 py-2">Descrição</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for m in manutencoes %}
+      <tr>
+        <td class="px-3 py-2">{{ m.data|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2 font-medium">{{ m.item|default:"—" }}</td>
+        <td class="px-3 py-2">{{ m.get_tipo_display }}</td>
+        <td class="px-3 py-2">{{ m.km|intcomma|default:"—" }}</td>
+        <td class="px-3 py-2 text-gray-600">{{ m.descricao }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-3 py-4 text-gray-500">Nenhuma manutenção registrada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

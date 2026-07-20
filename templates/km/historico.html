@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}KM — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Quilometragem — {{ veiculo }}</h1>
+  <a href="{% url 'km:lista' %}" class="text-sm underline">← Registro mensal</a>
+</div>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Mês</th>
+        <th class="px-3 py-2">Data</th>
+        <th class="px-3 py-2">KM</th>
+        <th class="px-3 py-2">KM ant.</th>
+        <th class="px-3 py-2">Dias</th>
+        <th class="px-3 py-2">KM utilizado</th>
+        <th class="px-3 py-2">Média/dia</th>
+        <th class="px-3 py-2">Média/mês</th>
+        <th class="px-3 py-2">Obs.</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for registro in registros %}
+      <tr>
+        <td class="px-3 py-2 font-medium">{{ registro.mes_referencia|date:"m/Y" }}</td>
+        <td class="px-3 py-2">{{ registro.data_leitura|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">{{ registro.km|intcomma }}</td>
+        <td class="px-3 py-2">{{ registro.km_anterior|intcomma|default:"—" }}</td>
+        <td class="px-3 py-2">{{ registro.dias|default:"—" }}</td>
+        <td class="px-3 py-2 font-semibold">{{ registro.km_utilizado|intcomma|default:"—" }}</td>
+        <td class="px-3 py-2">{{ registro.media_dia|floatformat:0|default:"—" }}</td>
+        <td class="px-3 py-2">{{ registro.media_mes|floatformat:0|default:"—" }}</td>
+        <td class="px-3 py-2 text-gray-500">{{ registro.observacoes|default:"" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9" class="px-3 py-4 text-gray-500">Nenhuma leitura registrada para este veículo.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,7 @@
+from django.apps import AppConfig
+
+
+class KmConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.km"
+    verbose_name = "Quilometragem"

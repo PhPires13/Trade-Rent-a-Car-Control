@@ -30,6 +30,8 @@
       </a>
       <nav class="flex items-center gap-4 text-sm">
         <a href="{% url 'painel' %}" class="hover:text-marca-amarelo">Painel</a>
+        <a href="{% url 'km:lista' %}" class="hover:text-marca-amarelo">KM Mensal</a>
+        <a href="{% url 'manutencao:preventivas' %}" class="hover:text-marca-amarelo">Preventivas</a>
         <a href="{% url 'admin:index' %}" class="hover:text-marca-amarelo">Cadastros</a>
         <form method="post" action="{% url 'logout' %}" class="inline">
           {% csrf_token %}

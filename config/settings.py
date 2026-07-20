@@ -33,6 +33,8 @@ INSTALLED_APPS = [
     "simple_history",
     "apps.frota",
     "apps.pessoas",
+    "apps.km",
+    "apps.manutencao",
 ]
 
 MIDDLEWARE = [

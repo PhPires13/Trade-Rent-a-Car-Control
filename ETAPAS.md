@@ -17,14 +17,21 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 
 **Pendente do usuário:** criar conta no Railway + Postgres (Neon) e fazer o primeiro deploy quando quiser publicar.
 
+### Etapa 2 — KM mensal + Plano de preventivas (19/07/2026) — prioridade nº 1 dos donos
+- [x] **Registro mensal de KM** (`/km/`): um registro por veículo/mês, KM ANT e dias herdados automaticamente do mês anterior (1º registro usa o KM da compra), médias/dia e /mês calculadas, bloqueio de KM menor que o anterior, atualização do KM atual do veículo
+- [x] **Pendências do mês**: lista de veículos de locação sem leitura, com registro inline (data + odômetro) e navegação por mês
+- [x] **Plano de preventivas** (`/manutencao/preventivas/`): itens confirmados pelos donos já cadastrados via migração (óleo/filtro 10 mil; alinhamento 10 mil; correia + óleo de caixa 60 mil; pneus 30 mil), intervalos personalizáveis por veículo (ex.: pneus 20 mil), lista de itens aberta
+- [x] **Ciclo por item**: última execução → próxima aos X km → status Em dia / Próxima (≤1.000 km) / Vencida / Sem registro; registrar manutenção zera o ciclo
+- [x] **Registro de manutenção** (formulário) e histórico por veículo — campos financeiros ficam para a etapa 5
+- [x] **Painel** com alertas: preventivas vencidas/próximas por carro e leituras de KM pendentes
+- [x] 25 testes passando; telas verificadas no navegador
+
+**Nota:** o vínculo do KM/manutenção com o cliente da alocação entra na etapa 3 (alocações).
+
 ## 🔜 Próximas
 
-### Etapa 2 — KM mensal + Plano de preventivas (prioridade nº 1 dos donos)
-- Registro mensal de KM por veículo (KM ANT automático, médias, pendências do mês)
-- Plano de preventivas por veículo (tabela confirmada: óleo/filtro e alinhamento 10 mil km; correia + óleo de caixa 60 mil; pneus 30/20 mil) com última execução e próximo vencimento
-- Alertas de preventiva vencendo/vencida no painel
-
 ### Etapa 3 — Alocações
+- Vincular KM mensal e manutenções ao cliente da alocação vigente
 - Alocação (valor semanal, dia de vencimento, caução opcional, KM de entrega/devolução)
 - Trocas temporárias (carro substituto com ajuste de valor)
 - Linha do tempo por veículo

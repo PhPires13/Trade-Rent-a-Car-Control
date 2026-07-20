@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}KM Mensal — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Registro mensal de KM — {{ mes|date:"m/Y" }}</h1>
+  <form method="get" class="flex items-center gap-2">
+    <input type="month" name="mes" value="{{ mes|date:'Y-m' }}"
+           class="rounded border border-gray-300 px-2 py-1 text-sm">
+    <button class="rounded bg-marca-preto px-3 py-1 text-sm text-white hover:bg-gray-800">Ver mês</button>
+  </form>
+</div>
+
+{% if pendentes %}
+<h2 class="mb-2 font-semibold text-red-700">Leituras pendentes ({{ pendentes|length }})</h2>
+<div class="mb-8 overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">KM atual</th>
+        <th class="px-3 py-2">Data da leitura</th>
+        <th class="px-3 py-2">KM lido</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for veiculo in pendentes %}
+      <tr>
+        <td class="px-3 py-2 font-medium">
+          <a href="{% url 'km:historico' veiculo.pk %}" class="underline decoration-marca-amarelo decoration-2">
+            {{ veiculo.placa }}</a>
+          <span class="text-gray-500">{{ veiculo.marca_modelo }}</span>
+        </td>
+        <td class="px-3 py-2">{{ veiculo.km_atual|intcomma }}</td>
+        <form method="post" action="{% url 'km:registrar' veiculo.pk %}">
+          {% csrf_token %}
+          <td class="px-3 py-2">
+            <input type="date" name="data_leitura" value="{{ hoje|date:'Y-m-d' }}" required
+                   class="rounded border border-gray-300 px-2 py-1">
+          </td>
+          <td class="px-3 py-2">
+            <input type="number" name="km" min="0" required placeholder="odômetro"
+                   class="w-28 rounded border border-gray-300 px-2 py-1">
+          </td>
+          <td class="px-3 py-2">
+            <button class="rounded bg-marca-amarelo px-3 py-1 font-semibold text-marca-preto hover:brightness-95">
+              Registrar
+            </button>
+          </td>
+        </form>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="mb-8 rounded bg-green-50 px-4 py-3 text-sm text-green-800">
+  ✓ Todos os veículos de locação têm leitura registrada em {{ mes|date:"m/Y" }}.
+</p>
+{% endif %}
+
+<h2 class="mb-2 font-semibold">Leituras do mês ({{ registros|length }})</h2>
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-left">
+      <tr>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Data</th>
+        <th class="px-3 py-2">KM</th>
+        <th class="px-3 py-2">KM ant.</th>
+        <th class="px-3 py-2">Dias</th>
+        <th class="px-3 py-2">KM utilizado</th>
+        <th class="px-3 py-2">Média/dia</th>
+        <th class="px-3 py-2">Média/mês</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for registro in registros %}
+      <tr>
+        <td class="px-3 py-2 font-medium">
+          <a href="{% url 'km:historico' registro.veiculo.pk %}" class="underline decoration-marca-amarelo decoration-2">
+            {{ registro.veiculo.placa }}</a>
+        </td>
+        <td class="px-3 py-2">{{ registro.data_leitura|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">{{ registro.km|intcomma }}</td>
+        <td class="px-3 py-2">{{ registro.km_anterior|intcomma|default:"—" }}</td>
+        <td class="px-3 py-2">{{ registro.dias|default:"—" }}</td>
+        <td class="px-3 py-2 font-semibold">{{ registro.km_utilizado|intcomma|default:"—" }}</td>
+        <td class="px-3 py-2">{{ registro.media_dia|floatformat:0|default:"—" }}</td>
+        <td class="px-3 py-2">{{ registro.media_mes|floatformat:0|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="px-3 py-4 text-gray-500">Nenhuma leitura registrada neste mês.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

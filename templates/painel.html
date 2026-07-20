@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% load humanize %}
 
 {% block titulo %}Painel — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <h1 class="mb-6 text-2xl font-bold">Painel</h1>
 
-<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+<div class="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
   <div class="rounded-lg bg-marca-preto p-4 text-white shadow">
     <div class="text-3xl font-black text-marca-amarelo">{{ total_veiculos }}</div>
     <div class="text-sm text-gray-300">Veículos na frota</div>
@@ -22,9 +23,45 @@
   </div>
 </div>
 
-<p class="mt-8 text-sm text-gray-500">
-  Fundação do sistema — os módulos de KM mensal e manutenção preventiva chegam na próxima etapa
-  (ver <code>ETAPAS.md</code>). Cadastros de veículos e clientes já funcionam em
-  <a href="{% url 'admin:index' %}" class="text-marca-preto underline">Cadastros</a>.
-</p>
+<div class="grid gap-6 lg:grid-cols-2">
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>Preventivas em alerta</span>
+      <a href="{% url 'manutencao:preventivas' %}" class="text-sm font-normal underline">ver plano →</a>
+    </h2>
+    {% if alertas_preventivas %}
+    <ul class="space-y-2 text-sm">
+      {% for veiculo, itens in alertas_preventivas %}
+      <li class="rounded border-l-4 border-red-400 bg-red-50 px-3 py-2">
+        <span class="font-semibold">{{ veiculo.placa }}</span> ({{ veiculo.km_atual|intcomma }} km):
+        {% for p in itens %}
+          {{ p.item.nome }}
+          {% if p.faltam_km <= 0 %}<span class="font-semibold text-red-700">vencida há {{ p.faltam_km|intcomma|cut:"-" }} km</span>
+          {% else %}<span class="text-yellow-800">faltam {{ p.faltam_km|intcomma }} km</span>{% endif %}
+          {% if not forloop.last %} · {% endif %}
+        {% endfor %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-green-700">✓ Nenhuma preventiva vencida ou próxima.</p>
+    {% endif %}
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>Leituras de KM pendentes no mês</span>
+      <a href="{% url 'km:lista' %}" class="text-sm font-normal underline">registrar →</a>
+    </h2>
+    {% if leituras_pendentes %}
+    <ul class="flex flex-wrap gap-2 text-sm">
+      {% for veiculo in leituras_pendentes %}
+      <li class="rounded bg-yellow-100 px-2 py-1 font-medium text-yellow-900">{{ veiculo.placa }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-green-700">✓ Todas as leituras do mês registradas.</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

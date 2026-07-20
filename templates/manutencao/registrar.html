@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block titulo %}Registrar manutenção — {{ veiculo.placa }}{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-6 text-2xl font-bold">Registrar manutenção — {{ veiculo }}</h1>
+
+<form method="post" class="max-w-lg space-y-4 rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  {% for field in form %}
+  <div>
+    <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+    {{ field }}
+    {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+    {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+  </div>
+  {% endfor %}
+  <div class="flex gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Salvar</button>
+    <a href="{% url 'manutencao:preventivas' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input, form select, form textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+  }
+</style>
+{% endblock %}
