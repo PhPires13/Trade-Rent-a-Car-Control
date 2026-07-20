@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Alocações — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Alocações</h1>
+  <div class="flex items-center gap-3 text-sm">
+    {% if mostrar == "ativas" %}
+      <a href="?mostrar=todas" class="underline">ver encerradas</a>
+    {% else %}
+      <a href="?mostrar=ativas" class="underline">só ativas</a>
+    {% endif %}
+    <a href="{% url 'alocacoes:nova' %}"
+       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">
+      + Nova alocação
+    </a>
+  </div>
+</div>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Início</th>
+        <th class="px-3 py-2">Valor/semana</th>
+        <th class="px-3 py-2">Vencimento</th>
+        <th class="px-3 py-2">Situação</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for alocacao in alocacoes %}
+      <tr>
+        <td class="px-3 py-2 font-medium">
+          <a href="{% url 'alocacoes:timeline' alocacao.veiculo.pk %}"
+             class="underline decoration-marca-amarelo decoration-2">{{ alocacao.veiculo.placa }}</a>
+          <span class="text-gray-500">{{ alocacao.veiculo.marca_modelo }}</span>
+        </td>
+        <td class="px-3 py-2">{{ alocacao.cliente.nome }}</td>
+        <td class="px-3 py-2">{{ alocacao.data_inicio|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">
+          R$ {{ alocacao.valor_semanal|intcomma }}
+          {% if alocacao.troca_ativa and alocacao.troca_ativa.valor_semanal_ajustado %}
+            <span class="text-xs text-yellow-700">(troca: R$ {{ alocacao.troca_ativa.valor_semanal_ajustado|intcomma }})</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2">{{ alocacao.get_dia_vencimento_display }}</td>
+        <td class="px-3 py-2">
+          {% if alocacao.status == "encerrada" %}
+            <span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Encerrada {{ alocacao.data_termino|date:"d/m/y" }}</span>
+          {% elif alocacao.troca_ativa %}
+            <span class="rounded bg-yellow-100 px-2 py-0.5 font-medium text-yellow-800">
+              Com substituto {{ alocacao.troca_ativa.veiculo_substituto.placa }}
+            </span>
+          {% else %}
+            <span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Ativa</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2 text-right text-xs">
+          {% if alocacao.status == "ativa" %}
+            {% if alocacao.troca_ativa %}
+              <a href="{% url 'alocacoes:troca_devolver' alocacao.troca_ativa.pk %}" class="mr-2 underline">Devolver substituto</a>
+            {% else %}
+              <a href="{% url 'alocacoes:troca_nova' alocacao.pk %}" class="mr-2 underline">Troca temporária</a>
+            {% endif %}
+            <a href="{% url 'alocacoes:encerrar' alocacao.pk %}" class="text-red-700 underline">Encerrar</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="px-3 py-4 text-gray-500">Nenhuma alocação {% if mostrar == "ativas" %}ativa{% endif %}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

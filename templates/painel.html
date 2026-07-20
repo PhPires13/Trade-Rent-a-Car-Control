@@ -21,7 +21,28 @@
     <div class="text-3xl font-black">{{ total_clientes_ativos }}</div>
     <div class="text-sm text-gray-500">Clientes ativos</div>
   </div>
+  <a href="{% url 'alocacoes:lista' %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-3xl font-black">{{ alocacoes_ativas }}</div>
+    <div class="text-sm text-gray-500">Alocações ativas</div>
+  </a>
 </div>
+
+{% if trocas_em_andamento %}
+<div class="mb-8 rounded-lg bg-white p-5 shadow">
+  <h2 class="mb-3 font-semibold">Trocas temporárias em andamento</h2>
+  <ul class="space-y-1 text-sm">
+    {% for troca in trocas_em_andamento %}
+    <li>
+      <span class="font-semibold">{{ troca.alocacao.cliente.nome }}</span>
+      está com o substituto <span class="font-semibold">{{ troca.veiculo_substituto.placa }}</span>
+      desde {{ troca.data_retirada|date:"d/m/Y" }}
+      {% if troca.motivo %}<span class="text-gray-500">({{ troca.motivo }})</span>{% endif %}
+      — <a href="{% url 'alocacoes:troca_devolver' troca.pk %}" class="underline">devolver</a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 
 <div class="grid gap-6 lg:grid-cols-2">
   <div class="rounded-lg bg-white p-5 shadow">

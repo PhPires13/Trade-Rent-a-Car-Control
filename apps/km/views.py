@@ -22,12 +22,16 @@ def _mes_da_query(request):
 
 def lista_mensal(request):
     """Registro mensal de KM — pendências e leituras do mês (docs.md §4.8)."""
+    from apps.alocacoes.services import cliente_vigente
+
     mes = _mes_da_query(request)
-    registros = (
+    registros = list(
         RegistroKm.objects.filter(mes_referencia=mes)
         .select_related("veiculo")
         .order_by("veiculo__placa")
     )
+    for registro in registros:
+        registro.cliente = cliente_vigente(registro.veiculo, registro.data_leitura)
     pendentes = veiculos_com_leitura_pendente(mes)
     return render(
         request,

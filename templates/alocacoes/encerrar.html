@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Encerrar alocação — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-2 text-2xl font-bold">Encerrar alocação</h1>
+<p class="mb-6 text-sm text-gray-600">
+  {{ alocacao.veiculo }} com <strong>{{ alocacao.cliente.nome }}</strong>
+  desde {{ alocacao.data_inicio|date:"d/m/Y" }} — entrega com {{ alocacao.km_entrega|intcomma }} km.
+</p>
+
+<form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  <div>
+    <label class="mb-1 block text-sm font-medium" for="data_termino">Data da devolução</label>
+    <input type="date" name="data_termino" id="data_termino" value="{{ hoje|date:'Y-m-d' }}" required>
+  </div>
+  <div>
+    <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM na devolução</label>
+    <input type="number" name="km_devolucao" id="km_devolucao" min="{{ alocacao.km_entrega }}" required>
+  </div>
+  <p class="text-xs text-gray-500">O veículo volta a ficar disponível. O acerto de caução será feito no módulo financeiro (etapa 4).</p>
+  <div class="flex gap-3">
+    <button class="rounded bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700">Encerrar</button>
+    <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }
+</style>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Devolver substituto — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-2 text-2xl font-bold">Devolver substituto</h1>
+<p class="mb-6 text-sm text-gray-600">
+  <strong>{{ troca.alocacao.cliente.nome }}</strong> está com o
+  {{ troca.veiculo_substituto }} desde {{ troca.data_retirada|date:"d/m/Y" }}
+  (retirada com {{ troca.km_retirada|intcomma }} km).
+</p>
+
+<form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  <div>
+    <label class="mb-1 block text-sm font-medium" for="data_devolucao">Data da devolução</label>
+    <input type="date" name="data_devolucao" id="data_devolucao" value="{{ hoje|date:'Y-m-d' }}" required>
+  </div>
+  <div>
+    <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM na devolução</label>
+    <input type="number" name="km_devolucao" id="km_devolucao" min="{{ troca.km_retirada }}" required>
+  </div>
+  <div class="flex gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Devolver</button>
+    <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }
+</style>
+{% endblock %}

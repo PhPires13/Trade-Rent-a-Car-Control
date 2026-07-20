@@ -28,13 +28,17 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 
 **Nota:** o vínculo do KM/manutenção com o cliente da alocação entra na etapa 3 (alocações).
 
-## 🔜 Próximas
+### Etapa 3 — Alocações (19/07/2026)
+- [x] **Alocação** (`/alocacoes/`): veículo disponível + cliente ativo, valor semanal, dia de vencimento (padrão: dia da semana da entrega), caução acordada (opcional), KM de entrega, limite de km (ilimitado/limitado com franquia e taxa)
+- [x] **Regras**: uma alocação ativa por veículo (constraint no banco), status do veículo automático (Alocado ↔ Disponível), aviso de CNH vencida ao alocar, bloqueio de KM de devolução menor que o de entrega
+- [x] **Encerramento** com KM de devolução (acerto de caução fica para a etapa 4)
+- [x] **Trocas temporárias**: substituto disponível, valor semanal ajustado opcional (categoria diferente), uma troca ativa por alocação, devolução obrigatória antes de encerrar; substituto muda de status automaticamente
+- [x] **Cliente vigente por data** (`cliente_vigente`): resolve quem estava com o carro considerando trocas — base para multas/sinistros (etapa 5); coluna Cliente na tela de KM mensal
+- [x] **Linha do tempo por veículo**: alocações, devoluções, trocas, oficina e manutenções em ordem cronológica — substitui o diário em texto das planilhas
+- [x] **Painel**: card de alocações ativas + seção de trocas em andamento
+- [x] 40 testes passando; telas verificadas no navegador
 
-### Etapa 3 — Alocações
-- Vincular KM mensal e manutenções ao cliente da alocação vigente
-- Alocação (valor semanal, dia de vencimento, caução opcional, KM de entrega/devolução)
-- Trocas temporárias (carro substituto com ajuste de valor)
-- Linha do tempo por veículo
+## 🔜 Próximas
 
 ### Etapa 4 — Financeiro
 - Cobranças semanais automáticas + recebimentos com travas de lançamento

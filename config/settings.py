@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "simple_history",
     "apps.frota",
     "apps.pessoas",
+    "apps.alocacoes",
     "apps.km",
     "apps.manutencao",
 ]

@@ -68,6 +68,7 @@
     <thead class="bg-gray-50 text-left">
       <tr>
         <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Cliente</th>
         <th class="px-3 py-2">Data</th>
         <th class="px-3 py-2">KM</th>
         <th class="px-3 py-2">KM ant.</th>
@@ -84,6 +85,7 @@
           <a href="{% url 'km:historico' registro.veiculo.pk %}" class="underline decoration-marca-amarelo decoration-2">
             {{ registro.veiculo.placa }}</a>
         </td>
+        <td class="px-3 py-2 text-gray-600">{{ registro.cliente.nome|default:"—" }}</td>
         <td class="px-3 py-2">{{ registro.data_leitura|date:"d/m/Y" }}</td>
         <td class="px-3 py-2">{{ registro.km|intcomma }}</td>
         <td class="px-3 py-2">{{ registro.km_anterior|intcomma|default:"—" }}</td>
@@ -93,7 +95,7 @@
         <td class="px-3 py-2">{{ registro.media_mes|floatformat:0|default:"—" }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="8" class="px-3 py-4 text-gray-500">Nenhuma leitura registrada neste mês.</td></tr>
+      <tr><td colspan="9" class="px-3 py-4 text-gray-500">Nenhuma leitura registrada neste mês.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -2,6 +2,7 @@ from datetime import date
 
 from django.shortcuts import render
 
+from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.frota.models import Veiculo
 from apps.km.models import veiculos_com_leitura_pendente
 from apps.manutencao.services import preventivas_em_alerta
@@ -20,6 +21,10 @@ def painel(request):
             if valor != Veiculo.Status.VENDIDO
         },
         "total_clientes_ativos": Cliente.objects.filter(status=Cliente.Status.ATIVO).count(),
+        "alocacoes_ativas": Alocacao.objects.filter(status=Alocacao.Status.ATIVA).count(),
+        "trocas_em_andamento": TrocaTemporaria.objects.filter(
+            data_devolucao__isnull=True
+        ).select_related("alocacao__cliente", "veiculo_substituto"),
         "leituras_pendentes": veiculos_com_leitura_pendente(date.today()),
         "alertas_preventivas": alertas_preventivas,
         "total_itens_em_alerta": sum(len(itens) for _, itens in alertas_preventivas),
