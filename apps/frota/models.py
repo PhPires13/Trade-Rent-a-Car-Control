@@ -2,6 +2,30 @@ from django.db import models
 from simple_history.models import HistoricalRecords
 
 
+class Fornecedor(models.Model):
+    """Oficina/prestador de serviço (docs.md §4.1)."""
+
+    nome = models.CharField("nome/razão social", max_length=120)
+    cnpj = models.CharField("CNPJ", max_length=18, blank=True)
+    contato = models.CharField("contato", max_length=80, blank=True)
+    tipo_servico = models.CharField(
+        "tipo de serviço",
+        max_length=120,
+        blank=True,
+        help_text="mecânica, funilaria, bateria, rastreador...",
+    )
+    observacoes = models.TextField("observações", blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "fornecedor"
+        ordering = ["nome"]
+
+    def __str__(self):
+        return self.nome
+
+
 class Categoria(models.Model):
     """Categoria de veículo — define a faixa de valor semanal (docs.md §4.1)."""
 

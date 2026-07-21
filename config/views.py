@@ -7,7 +7,10 @@ from apps.financeiro import reports
 from apps.frota.models import Veiculo
 from apps.km.models import veiculos_com_leitura_pendente
 from apps.manutencao.services import preventivas_em_alerta
+from apps.multas.services import multas_com_fici_a_vencer
 from apps.pessoas.models import Cliente
+from apps.sinistros.models import Sinistro
+from apps.sinistros.services import sinistros_com_auxilio_a_solicitar
 
 
 def painel(request):
@@ -31,5 +34,10 @@ def painel(request):
         "leituras_pendentes": veiculos_com_leitura_pendente(date.today()),
         "alertas_preventivas": alertas_preventivas,
         "total_itens_em_alerta": sum(len(itens) for _, itens in alertas_preventivas),
+        "fici_a_vencer": multas_com_fici_a_vencer(),
+        "auxilios_a_solicitar": sinistros_com_auxilio_a_solicitar(),
+        "sinistros_abertos": Sinistro.objects.filter(
+            status__in=[Sinistro.Status.ABERTO, Sinistro.Status.REGULARIZACAO]
+        ).count(),
     }
     return render(request, "painel.html", contexto)

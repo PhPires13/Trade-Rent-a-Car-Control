@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Multas — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Multas e autuações</h1>
+  <div class="flex gap-3 text-sm">
+    <a href="{% url 'multas:emitir_nd' %}" class="rounded bg-marca-preto px-3 py-1.5 text-white hover:bg-gray-800">Emitir ND</a>
+    <a href="{% url 'multas:nova' %}" class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Nova multa</a>
+  </div>
+</div>
+
+<form method="get" class="mb-4 flex gap-2 text-sm">
+  <a href="?" class="rounded border px-3 py-1 {% if not filtro %}bg-marca-preto text-white{% endif %}">Todas</a>
+  <a href="?filtro=fici" class="rounded border px-3 py-1 {% if filtro == 'fici' %}bg-marca-preto text-white{% endif %}">FICI pendente</a>
+  <a href="?filtro=a_cobrar" class="rounded border px-3 py-1 {% if filtro == 'a_cobrar' %}bg-marca-preto text-white{% endif %}">A cobrar</a>
+</form>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Data</th>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Infração</th>
+        <th class="px-3 py-2">Órgão</th>
+        <th class="px-3 py-2 text-right">Valor</th>
+        <th class="px-3 py-2">FICI</th>
+        <th class="px-3 py-2">Repasse</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for m in multas %}
+      <tr {% if m.eh_nic %}class="bg-purple-50"{% endif %}>
+        <td class="px-3 py-2">{{ m.data|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2 font-medium">{{ m.veiculo.placa }}</td>
+        <td class="px-3 py-2">{{ m.cliente_alocacao.nome|default:"—" }}</td>
+        <td class="px-3 py-2 text-gray-600">
+          {% if m.eh_nic %}<span class="font-semibold text-purple-700">[NIC]</span> {% endif %}
+          {{ m.descricao|default:m.codigo }}
+        </td>
+        <td class="px-3 py-2">{{ m.orgao.nome|default:"—" }}</td>
+        <td class="px-3 py-2 text-right">{% if m.valor %}R$ {{ m.valor|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+        <td class="px-3 py-2">
+          {% if m.fici_status == "pendente" %}
+            <span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Pendente{% if m.fici_prazo %} até {{ m.fici_prazo|date:"d/m" }}{% endif %}</span>
+          {% elif m.fici_status == "indicado" %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Indicado</span>
+          {% else %}<span class="rounded bg-red-100 px-2 py-0.5 text-red-700">Prazo perdido</span>{% endif %}
+        </td>
+        <td class="px-3 py-2">{{ m.get_repasse_display }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="px-3 py-4 text-gray-500">Nenhuma multa registrada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

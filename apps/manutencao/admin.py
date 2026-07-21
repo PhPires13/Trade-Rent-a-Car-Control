@@ -18,6 +18,6 @@ class IntervaloPersonalizadoAdmin(SimpleHistoryAdmin):
 
 @admin.register(Manutencao)
 class ManutencaoAdmin(SimpleHistoryAdmin):
-    list_display = ["veiculo", "item", "tipo", "data", "km"]
-    list_filter = ["tipo", "item"]
+    list_display = ["veiculo", "item", "tipo", "data", "km", "custo_real", "responsavel"]
+    list_filter = ["tipo", "item", "origem_custo", "responsavel", "status_repasse"]
     search_fields = ["veiculo__placa", "descricao"]

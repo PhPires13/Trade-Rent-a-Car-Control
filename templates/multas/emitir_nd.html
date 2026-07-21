@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Emitir nota de débito — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-6 text-2xl font-bold">Emitir nota de débito</h1>
+
+<form method="get" class="mb-6">
+  <label class="mb-1 block text-sm font-medium" for="cliente">Cliente</label>
+  <select name="cliente" id="cliente" onchange="this.form.submit()"
+          class="rounded border border-gray-300 px-3 py-2">
+    <option value="">— selecione —</option>
+    {% for c in clientes %}
+      <option value="{{ c.pk }}" {% if cliente and c.pk == cliente.pk %}selected{% endif %}>{{ c.nome }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+{% if cliente %}
+{% if multas %}
+<form method="post" class="rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  <input type="hidden" name="cliente" value="{{ cliente.pk }}">
+  <p class="mb-3 text-sm text-gray-600">Multas de {{ cliente.nome }} marcadas como "a cobrar":</p>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-left">
+      <tr><th class="px-3 py-2"></th><th class="px-3 py-2">Data</th><th class="px-3 py-2">Veículo</th>
+      <th class="px-3 py-2">Infração</th><th class="px-3 py-2 text-right">Valor</th></tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for m in multas %}
+      <tr>
+        <td class="px-3 py-2"><input type="checkbox" name="multa" value="{{ m.id }}" checked></td>
+        <td class="px-3 py-2">{{ m.data|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">{{ m.veiculo.placa }}</td>
+        <td class="px-3 py-2 text-gray-600">{{ m.descricao|default:m.codigo }}</td>
+        <td class="px-3 py-2 text-right">R$ {{ m.valor|floatformat:2|intcomma }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="mt-5 flex gap-3">
+    <button type="submit" name="confirmar" value="1"
+            class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">
+      Emitir ND e gerar cobrança
+    </button>
+  </div>
+</form>
+{% else %}
+<p class="rounded bg-green-50 px-4 py-3 text-sm text-green-800">
+  {{ cliente.nome }} não tem multas "a cobrar".
+</p>
+{% endif %}
+{% endif %}
+{% endblock %}

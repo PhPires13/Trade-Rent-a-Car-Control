@@ -52,12 +52,21 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 
 **Nota:** o acerto automático de caução no encerramento da alocação e o abatimento de débito direto da caução ficaram como melhoria simples para a etapa 5/6 (a caução já existe e é movimentável).
 
-## 🔜 Próximas
+### Etapa 5 — Multas e Sinistros (19/07/2026)
+- [x] **Órgãos autuadores** (cadastro): portal, login e **senha mascarada** na interface (widget PasswordInput no admin), procedimento e documentos exigidos
+- [x] **Fornecedores/oficinas** (cadastro)
+- [x] **Multas** (`/multas/`): código, AIT, processamento, órgão, valor, pontos, resultado; **cliente da alocação preenchido automaticamente** pela data (via `cliente_vigente`, considerando trocas)
+- [x] **FICI** com prazo + **alerta no painel** de indicações a vencer (evita multa NIC); **multa NIC** vinculável à multa original
+- [x] **Emitir ND**: agrupa as multas "a cobrar" de um cliente, gera a cobrança no financeiro e marca as multas como "Incluída em ND"
+- [x] **Sinistros** (`/sinistros/`): tipo (colisão/roubo/outro), envolvido, responsabilidade, evento Auto Truck + franquia; **motorista preenchido automaticamente**
+- [x] **Auxílio motorista profissional**: detecção automática de colisão parada > 7 dias (via manutenção com data de entrada), registro e acompanhamento (a solicitar/solicitado/recebido)
+- [x] **Manutenção completa**: fornecedor, entrada/saída (**dias parado**), origem do custo, **custo real × valor cobrado** (com resultado), responsável e status de repasse
+- [x] Painel: alertas de FICI a vencer, auxílios a solicitar e sinistros abertos
+- [x] 86 testes; multas, ND e sinistros verificados no navegador — corrigido formato do valor na mensagem de ND
 
-### Etapa 5 — Multas e Sinistros
-- Multas com FICI/NIC, órgãos autuadores (credenciais protegidas)
-- Sinistros/eventos Auto Truck + auxílio motorista profissional (>7 dias)
-- Manutenções completas (custo real × cobrado, dias parado)
+**Nota:** credenciais dos órgãos são mascaradas na UI mas gravadas em texto no banco; criptografia em repouso (django-fernet) fica como endurecimento futuro. O repasse de manutenção/sinistro→cobrança (fluxo A_COBRAR) usa a mesma emissão de ND das multas quando aplicável.
+
+## 🔜 Próximas
 
 ### Etapa 6 — Desmobilização
 - Ficha financeira por veículo (% do investimento recuperado)

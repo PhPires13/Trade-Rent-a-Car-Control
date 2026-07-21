@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Auxílios motorista — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Auxílio motorista profissional</h1>
+  <a href="{% url 'sinistros:lista' %}" class="text-sm underline">← Sinistros</a>
+</div>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Sinistro</th>
+        <th class="px-3 py-2">Dias parado</th>
+        <th class="px-3 py-2 text-right">Valor</th>
+        <th class="px-3 py-2">Status</th>
+        <th class="px-3 py-2">Recebido em</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for a in auxilios %}
+      <tr>
+        <td class="px-3 py-2 font-medium">{{ a.sinistro.veiculo.placa }}</td>
+        <td class="px-3 py-2">{{ a.sinistro.data|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">{{ a.dias_parado|default:"—" }}</td>
+        <td class="px-3 py-2 text-right">{% if a.valor %}R$ {{ a.valor|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+        <td class="px-3 py-2">
+          {% if a.status == "a_solicitar" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">A solicitar</span>
+          {% elif a.status == "solicitado" %}<span class="rounded bg-blue-100 px-2 py-0.5 text-blue-700">Solicitado</span>
+          {% else %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Recebido</span>{% endif %}
+        </td>
+        <td class="px-3 py-2">{{ a.data_recebimento|date:"d/m/Y"|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-3 py-4 text-gray-500">Nenhum auxílio registrado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -12,5 +12,7 @@ urlpatterns = [
     path("financeiro/", include("apps.financeiro.urls")),
     path("km/", include("apps.km.urls")),
     path("manutencao/", include("apps.manutencao.urls")),
+    path("multas/", include("apps.multas.urls")),
+    path("sinistros/", include("apps.sinistros.urls")),
     path("admin/", admin.site.urls),
 ]

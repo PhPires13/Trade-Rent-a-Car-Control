@@ -99,5 +99,42 @@
     <p class="text-sm text-green-700">✓ Todas as leituras do mês registradas.</p>
     {% endif %}
   </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>Prazos de FICI a vencer</span>
+      <a href="{% url 'multas:lista' %}?filtro=fici" class="text-sm font-normal underline">ver multas →</a>
+    </h2>
+    {% if fici_a_vencer %}
+    <ul class="space-y-2 text-sm">
+      {% for m in fici_a_vencer %}
+      <li class="rounded border-l-4 border-yellow-400 bg-yellow-50 px-3 py-2">
+        <span class="font-semibold">{{ m.veiculo.placa }}</span> — {{ m.descricao|default:m.codigo }}
+        <span class="text-red-700">indicar até {{ m.fici_prazo|date:"d/m/Y" }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-green-700">✓ Nenhum prazo de FICI próximo.</p>
+    {% endif %}
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>Auxílio motorista a solicitar</span>
+      <a href="{% url 'sinistros:lista' %}" class="text-sm font-normal underline">ver sinistros →</a>
+    </h2>
+    {% if auxilios_a_solicitar %}
+    <ul class="space-y-2 text-sm">
+      {% for sinistro, dias in auxilios_a_solicitar %}
+      <li class="rounded border-l-4 border-marca-amarelo bg-yellow-50 px-3 py-2">
+        <span class="font-semibold">{{ sinistro.veiculo.placa }}</span> — colisão parada há {{ dias }} dias
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-green-700">✓ Nenhum auxílio pendente.</p>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}
