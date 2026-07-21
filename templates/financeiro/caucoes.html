@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Cauções — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-2 text-2xl font-bold">Cauções em aberto</h1>
+<p class="mb-6 text-sm text-gray-500">
+  A caução é opcional. Reforços, descontos e devoluções em
+  <a href="{% url 'admin:index' %}" class="underline">Cadastros</a>.
+</p>
+
+<div class="space-y-4">
+  {% for caucao in caucoes %}
+  <div class="rounded-lg bg-white p-4 shadow">
+    <div class="mb-2 flex items-center justify-between">
+      <span class="font-semibold">{{ caucao.cliente.nome }}</span>
+      <span class="text-lg font-black text-marca-preto">saldo R$ {{ caucao.saldo|floatformat:2|intcomma }}</span>
+    </div>
+    <table class="w-full text-sm">
+      <thead class="text-left text-gray-500">
+        <tr><th class="py-1">Data</th><th class="py-1">Tipo</th><th class="py-1">Origem</th><th class="py-1 text-right">Valor</th></tr>
+      </thead>
+      <tbody>
+        {% for mov in caucao.movimentacoes.all %}
+        <tr class="border-t border-gray-100">
+          <td class="py-1">{{ mov.data|date:"d/m/Y" }}</td>
+          <td class="py-1">{{ mov.get_tipo_display }}</td>
+          <td class="py-1 text-gray-500">{{ mov.origem }}</td>
+          <td class="py-1 text-right {% if mov.tipo == 'reforco' %}text-green-700{% else %}text-red-600{% endif %}">
+            {% if mov.tipo == 'reforco' %}+{% else %}−{% endif %}R$ {{ mov.valor|floatformat:2|intcomma }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% empty %}
+  <p class="text-gray-500">Nenhuma caução retida.</p>
+  {% endfor %}
+</div>
+{% endblock %}

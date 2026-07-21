@@ -25,7 +25,22 @@
     <div class="text-3xl font-black">{{ alocacoes_ativas }}</div>
     <div class="text-sm text-gray-500">Alocações ativas</div>
   </a>
+  <a href="{% url 'financeiro:cobrancas' %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black">R$ {{ total_a_receber|floatformat:2|intcomma }}</div>
+    <div class="text-sm text-gray-500">A receber (em aberto)</div>
+  </a>
 </div>
+
+{% if inadimplentes %}
+<div class="mb-8 rounded-lg border-l-4 border-red-500 bg-white p-5 shadow">
+  <h2 class="mb-2 font-semibold text-red-700">Clientes inadimplentes ({{ inadimplentes|length }})</h2>
+  <ul class="flex flex-wrap gap-2 text-sm">
+    {% for cliente in inadimplentes %}
+    <li class="rounded bg-red-100 px-2 py-1 font-medium text-red-800">{{ cliente.nome }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 
 {% if trocas_em_andamento %}
 <div class="mb-8 rounded-lg bg-white p-5 shadow">

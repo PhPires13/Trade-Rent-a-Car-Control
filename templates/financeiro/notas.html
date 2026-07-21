@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Notas de débito — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-2 text-2xl font-bold">Notas de débito</h1>
+<p class="mb-6 text-sm text-gray-500">
+  Numeração automática. Multas serão incluídas automaticamente na etapa 5. Emissão/edição em
+  <a href="{% url 'admin:index' %}" class="underline">Cadastros</a>.
+</p>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">ND</th>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Emissão</th>
+        <th class="px-3 py-2 text-right">Total</th>
+        <th class="px-3 py-2">Status</th>
+        <th class="px-3 py-2">Itens</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for nota in notas %}
+      <tr>
+        <td class="px-3 py-2 font-medium">ND {{ nota.numero|stringformat:"03d" }}</td>
+        <td class="px-3 py-2">{{ nota.cliente.nome }}</td>
+        <td class="px-3 py-2">{{ nota.data_emissao|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2 text-right">R$ {{ nota.total|floatformat:2|intcomma }}</td>
+        <td class="px-3 py-2">{{ nota.get_status_display }}</td>
+        <td class="px-3 py-2 text-gray-600">
+          {% for item in nota.itens.all %}{{ item.descricao }} (R$ {{ item.valor|floatformat:2 }}){% if not forloop.last %}; {% endif %}{% endfor %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-3 py-4 text-gray-500">Nenhuma nota de débito emitida.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

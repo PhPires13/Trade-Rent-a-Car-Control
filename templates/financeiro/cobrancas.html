@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Cobranças — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Cobranças em aberto</h1>
+  <a href="{% url 'financeiro:baixa' %}"
+     class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">
+    Receber pagamento
+  </a>
+</div>
+
+<form method="get" class="mb-4">
+  <select name="status" onchange="this.form.submit()" class="rounded border border-gray-300 px-3 py-1.5 text-sm">
+    <option value="">Todos os status</option>
+    <option value="pendente" {% if filtro_status == "pendente" %}selected{% endif %}>Pendente</option>
+    <option value="parcial" {% if filtro_status == "parcial" %}selected{% endif %}>Parcial</option>
+    <option value="atrasado" {% if filtro_status == "atrasado" %}selected{% endif %}>Atrasado</option>
+    <option value="judicial" {% if filtro_status == "judicial" %}selected{% endif %}>Cobrança judicial</option>
+  </select>
+</form>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Origem</th>
+        <th class="px-3 py-2">Referência</th>
+        <th class="px-3 py-2">Vencimento</th>
+        <th class="px-3 py-2 text-right">Devido</th>
+        <th class="px-3 py-2 text-right">Saldo</th>
+        <th class="px-3 py-2">Status</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for c in cobrancas %}
+      <tr>
+        <td class="px-3 py-2 font-medium">{{ c.cliente.nome }}</td>
+        <td class="px-3 py-2">{{ c.get_origem_display }}</td>
+        <td class="px-3 py-2 text-gray-600">{{ c.descricao }}</td>
+        <td class="px-3 py-2 {% if c.vencimento < hoje %}text-red-600{% endif %}">{{ c.vencimento|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2 text-right">R$ {{ c.valor|floatformat:2|intcomma }}</td>
+        <td class="px-3 py-2 text-right font-semibold">R$ {{ c.saldo|floatformat:2|intcomma }}</td>
+        <td class="px-3 py-2">
+          {% if c.status == "atrasado" %}<span class="rounded bg-red-100 px-2 py-0.5 text-red-700">Atrasado</span>
+          {% elif c.status == "parcial" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Parcial</span>
+          {% elif c.status == "judicial" %}<span class="rounded bg-purple-100 px-2 py-0.5 text-purple-700">Judicial</span>
+          {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Pendente</span>{% endif %}
+        </td>
+        <td class="px-3 py-2 text-right text-xs">
+          {% if c.vencimento < hoje and c.status != "judicial" %}
+            <a href="{% url 'financeiro:encargo' c.pk %}" class="mr-2 underline">Encargo</a>
+          {% endif %}
+          {% if c.status != "judicial" %}
+            <form method="post" action="{% url 'financeiro:judicial' c.pk %}" class="inline"
+                  onsubmit="return confirm('Marcar esta cobrança para cobrança judicial?');">
+              {% csrf_token %}<button class="text-purple-700 underline">Judicial</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="px-3 py-4 text-gray-500">Nenhuma cobrança em aberto.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

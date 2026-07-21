@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Base do DAS — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Base de cálculo do DAS</h1>
+  <form method="get" class="flex items-center gap-2">
+    <input type="month" name="mes" value="{{ referencia|date:'Y-m' }}"
+           class="rounded border border-gray-300 px-2 py-1 text-sm">
+    <button class="rounded bg-marca-preto px-3 py-1 text-sm text-white hover:bg-gray-800">Ver mês</button>
+    <a href="{% url 'financeiro:das_csv' %}?mes={{ referencia|date:'Y-m' }}"
+       class="rounded bg-marca-amarelo px-3 py-1 text-sm font-semibold text-marca-preto hover:brightness-95">
+      Exportar CSV
+    </a>
+  </form>
+</div>
+
+<p class="mb-4 text-sm text-gray-500">
+  O DAS incide somente sobre a receita de locação (aluguel). Os demais pagamentos entram como
+  nota de débito e ficam fora da base. Valores recebidos em {{ referencia|date:"m/Y" }}.
+</p>
+
+<div class="max-w-lg overflow-hidden rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <tbody class="divide-y divide-gray-100">
+      <tr>
+        <td class="px-4 py-3">Receita de locação (aluguel)</td>
+        <td class="px-4 py-3 text-right font-semibold">R$ {{ dados.receita_locacao|floatformat:2|intcomma }}</td>
+        <td class="px-4 py-3 text-xs text-green-700">entra no DAS</td>
+      </tr>
+      <tr>
+        <td class="px-4 py-3">Pagamentos diversos (ND)</td>
+        <td class="px-4 py-3 text-right">R$ {{ dados.pagamentos_diversos|floatformat:2|intcomma }}</td>
+        <td class="px-4 py-3 text-xs text-gray-500">fora do DAS</td>
+      </tr>
+    </tbody>
+    <tfoot class="bg-marca-preto text-white">
+      <tr>
+        <td class="px-4 py-3 font-bold">Base de cálculo do DAS</td>
+        <td class="px-4 py-3 text-right text-lg font-black text-marca-amarelo">R$ {{ dados.base_das|floatformat:2|intcomma }}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endblock %}

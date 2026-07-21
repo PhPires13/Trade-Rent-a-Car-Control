@@ -38,13 +38,21 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Painel**: card de alocações ativas + seção de trocas em andamento
 - [x] 40 testes passando; telas verificadas no navegador
 
-## 🔜 Próximas
+### Etapa 4 — Financeiro (19/07/2026)
+- [x] **Cobranças** (`/financeiro/cobrancas/`): origens (aluguel, ND, manutenção, sinistro, excedente km, encargo), status Pendente/Parcial/Pago/Atrasado/Judicial, saldo calculado
+- [x] **Geração automática de aluguel semanal** no dia de vencimento do cliente (idempotente), com valor ajustado por troca temporária
+- [x] **Baixa de recebimento** (`/financeiro/baixa/`): distribuição automática (mais antiga→nova) ou manual, **totais em tempo real** e **travas** (nenhuma parcela acima do saldo; total ≤ recebido; sobra vira crédito) — botão só habilita quando válido
+- [x] **Rotina diária** (`manage.py rotina_diaria`, cron): gera cobranças e marca atraso/inadimplência (1 dia); cliente volta a ativo ao quitar
+- [x] **Encargos por atraso** sugeridos (5% até 4 dias, 10% acima), ajustáveis ou zeráveis
+- [x] **Notas de débito** com numeração automática e itens; **caução** opcional com extrato (reforço/desconto/devolução) e trava de saldo
+- [x] **Classificação fiscal**: só aluguel entra na base do DAS; relatório mensal (`/financeiro/das/`) + **exportação CSV** para a contabilidade
+- [x] **Cobrança judicial**: status para dívidas de ex-clientes
+- [x] Painel: total a receber + inadimplentes
+- [x] 66 testes; tela de baixa verificada no navegador (distribuição, travas e botão) — corrigido bug de vírgula decimal (pt-BR) que quebrava o JS
 
-### Etapa 4 — Financeiro
-- Cobranças semanais automáticas + recebimentos com travas de lançamento
-- Encargos por atraso (5%/10%, ajustável) e inadimplência (1 dia)
-- Notas de débito (numeração automática) e caução
-- Classificação fiscal (base do DAS) e cobrança judicial
+**Nota:** o acerto automático de caução no encerramento da alocação e o abatimento de débito direto da caução ficaram como melhoria simples para a etapa 5/6 (a caução já existe e é movimentável).
+
+## 🔜 Próximas
 
 ### Etapa 5 — Multas e Sinistros
 - Multas com FICI/NIC, órgãos autuadores (credenciais protegidas)
