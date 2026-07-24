@@ -238,11 +238,19 @@ class NotaDebito(models.Model):
 
 
 class ItemNotaDebito(models.Model):
-    """Item de uma ND (multa, avaria, excedente...). FK de multa entra na etapa 5."""
+    """Item de uma ND — multa vinculada, avaria, excedente ou descrição livre."""
 
     nota_debito = models.ForeignKey(NotaDebito, on_delete=models.CASCADE, related_name="itens")
     descricao = models.CharField("descrição", max_length=200)
     valor = models.DecimalField("valor (R$)", max_digits=10, decimal_places=2)
+    multa = models.ForeignKey(
+        "multas.Multa",
+        verbose_name="multa",
+        on_delete=models.PROTECT,
+        related_name="itens_nd",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = "item da nota de débito"

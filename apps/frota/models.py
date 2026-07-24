@@ -21,6 +21,31 @@ class Categoria(models.Model):
         return self.nome
 
 
+class Fornecedor(models.Model):
+    """Oficina/prestador de serviço (docs.md §4.1). Ex.: By Car, Pedrinho Baterias."""
+
+    nome = models.CharField("nome / razão social", max_length=100, unique=True)
+    cnpj = models.CharField("CNPJ", max_length=18, blank=True)
+    contato = models.CharField("contato (telefone/e-mail)", max_length=100, blank=True)
+    tipo_servico = models.CharField(
+        "tipo de serviço",
+        max_length=100,
+        blank=True,
+        help_text="Ex.: mecânica, funilaria, bateria, rastreador",
+    )
+    observacoes = models.TextField("observações", blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "fornecedor"
+        verbose_name_plural = "fornecedores"
+        ordering = ["nome"]
+
+    def __str__(self):
+        return self.nome
+
+
 class Veiculo(models.Model):
     """Veículo da frota (docs.md §4.1)."""
 

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Multas — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Multas e autuações</h1>
+  <div class="flex gap-3 text-sm">
+    <a href="{% url 'multas:orgaos' %}" class="py-1.5 underline">Órgãos</a>
+    <a href="{% url 'multas:gerar_nd' %}" class="py-1.5 underline">Gerar ND de multas</a>
+    <a href="{% url 'multas:nova' %}"
+       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Nova multa</a>
+  </div>
+</div>
+
+<form method="get" class="mb-4 flex flex-wrap gap-2 text-sm">
+  <input type="text" name="veiculo" value="{{ filtro_veiculo }}" placeholder="placa"
+         class="rounded border border-gray-300 px-2 py-1">
+  <select name="resultado" class="rounded border border-gray-300 px-2 py-1">
+    <option value="">Todas as situações</option>
+    {% for valor, rotulo in resultados %}
+    <option value="{{ valor }}" {% if filtro_resultado == valor %}selected{% endif %}>{{ rotulo }}</option>
+    {% endfor %}
+  </select>
+  <button class="rounded bg-marca-preto px-3 py-1 text-white">Filtrar</button>
+</form>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Data</th>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Infração</th>
+        <th class="px-3 py-2">Valor</th>
+        <th class="px-3 py-2">FICI</th>
+        <th class="px-3 py-2">Repasse</th>
+        <th class="px-3 py-2">Pgto</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for multa in multas %}
+      <tr>
+        <td class="px-3 py-2">{{ multa.data_infracao|date:"d/m/y" }}</td>
+        <td class="px-3 py-2 font-medium">{{ multa.veiculo.placa }}</td>
+        <td class="px-3 py-2">{{ multa.cliente.nome|default:"—" }}</td>
+        <td class="px-3 py-2">
+          {{ multa.descricao|truncatechars:40 }}
+          <span class="text-xs text-gray-400">{{ multa.codigo }} {{ multa.ait }}</span>
+          {% if multa.multa_origem_nic %}<span class="rounded bg-purple-100 px-1 text-xs text-purple-800">NIC</span>{% endif %}
+        </td>
+        <td class="px-3 py-2">{% if multa.valor %}R$ {{ multa.valor|intcomma }}{% else %}—{% endif %}</td>
+        <td class="px-3 py-2">
+          {% if multa.fici_status == "pendente" %}
+            <span class="rounded {% if multa.fici_prazo and multa.fici_prazo < hoje %}bg-red-100 text-red-700 font-semibold{% else %}bg-yellow-100 text-yellow-800{% endif %} px-2 py-0.5">
+              Pendente{% if multa.fici_prazo %} até {{ multa.fici_prazo|date:"d/m" }}{% endif %}
+            </span>
+          {% elif multa.fici_status == "indicado" %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Indicado</span>
+          {% elif multa.fici_status == "prazo_perdido" %}<span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">Prazo perdido</span>
+          {% else %}<span class="text-gray-400">—</span>{% endif %}
+        </td>
+        <td class="px-3 py-2 text-xs">{{ multa.repasse }}</td>
+        <td class="px-3 py-2">
+          {% if multa.pagamento == "pago" %}<span class="text-green-700">Pago {{ multa.pago_por }}</span>
+          {% else %}<span class="text-gray-500">Pendente</span>{% endif %}
+        </td>
+        <td class="px-3 py-2 text-right text-xs">
+          {% if multa.fici_status == "pendente" %}
+          <form method="post" action="{% url 'multas:indicar_fici' multa.pk %}" class="inline">
+            {% csrf_token %}<button class="mr-1 text-green-700 underline">indicar FICI</button>
+          </form>
+          <form method="post" action="{% url 'multas:registrar_nic' multa.pk %}" class="inline">
+            {% csrf_token %}<button class="mr-1 text-red-700 underline" title="Registra multa NIC contra a empresa">NIC</button>
+          </form>
+          {% endif %}
+          {% if multa.pagamento == "pendente" and multa.valor %}
+          <form method="post" action="{% url 'multas:marcar_paga' multa.pk %}" class="inline">
+            {% csrf_token %}<button class="underline">paga</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9" class="px-3 py-4 text-gray-500">Nenhuma multa registrada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

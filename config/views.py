@@ -8,7 +8,9 @@ from apps.financeiro.models import ZERO, Cobranca
 from apps.frota.models import Veiculo
 from apps.km.models import veiculos_com_leitura_pendente
 from apps.manutencao.services import preventivas_em_alerta
+from apps.multas.services import alertas_fici
 from apps.pessoas.models import Cliente
+from apps.sinistros.models import Sinistro
 
 
 def painel(request):
@@ -43,6 +45,14 @@ def painel(request):
             "semana_recebido": sum((c.total_quitado for c in da_semana), ZERO),
             "atrasado_total": sum((c.saldo for c in atrasadas), ZERO),
             "inadimplentes": Cliente.objects.filter(status=Cliente.Status.INADIMPLENTE),
+            "hoje": hoje,
+            "fici_em_alerta": alertas_fici(hoje),
+            "sinistros_abertos": Sinistro.objects.exclude(
+                status=Sinistro.Status.CONCLUIDO
+            ).select_related("veiculo"),
         }
     )
+    contexto["auxilios_disponiveis"] = [
+        s for s in contexto["sinistros_abertos"] if s.auxilio_disponivel
+    ]
     return render(request, "painel.html", contexto)

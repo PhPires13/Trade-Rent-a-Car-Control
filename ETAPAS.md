@@ -52,12 +52,19 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 
 **Pendente do usuário (deploy):** configurar o cron do Railway para rodar `python manage.py rotina_diaria` 1×/dia.
 
-## 🔜 Próximas
+### Etapa 5 — Multas e Sinistros (19/07/2026)
+- [x] **Órgãos autuadores**: cadastro com portal, procedimento/documentos e **credenciais criptografadas no banco** (Fernet derivado da SECRET_KEY), ocultas na tela com botão "revelar"
+- [x] **Multas**: cliente da alocação preenchido automaticamente por quem estava com o carro na data (considera trocas temporárias), condutor identificado, resultado (advertência/penalidade/dívida ativa...), pagamento (com "pago por"), responsável (cliente/condutor/empresa/**vendedor anterior**)
+- [x] **FICI**: prazo limite com alerta no painel (≤7 dias ou vencido), ação "indicar FICI" e **multa NIC** vinculada à original contra a empresa quando o prazo é perdido
+- [x] **Repasse via ND**: tela "Gerar ND de multas" seleciona as multas "a cobrar" do cliente e emite ND numerada; recebimento da ND marca as multas como "Recebido"
+- [x] **Sinistros**: tipo (colisão/roubo), envolvido, responsabilidade ("culpa 3º"), evento Auto Truck com franquia/cota (zero = franquia gratuita), status
+- [x] **Auxílio motorista profissional**: dias parado calculados das manutenções vinculadas; colisão parada **>7 dias** dispara alerta no painel e na tela; fluxo solicitar → receber (decisão nº 10)
+- [x] **Manutenção completa**: oficina (cadastro de Fornecedores), entrada/saída (dias parado), origem do custo (evento da proteção × particular), **custo real × valor cobrado** (com diferença), responsável e botão "Gerar repasse" que cria a cobrança do cliente
+- [x] 75 testes passando; telas verificadas no navegador
 
-### Etapa 5 — Multas e Sinistros
-- Multas com FICI/NIC, órgãos autuadores (credenciais protegidas)
-- Sinistros/eventos Auto Truck + auxílio motorista profissional (>7 dias)
-- Manutenções completas (custo real × cobrado, dias parado)
+**Nota:** o banco de dev tinha tabelas de um experimento anterior (manutenção/multas/sinistros/financeiro) — foram recriadas do zero pelas migrações; nenhum dado real foi perdido.
+
+## 🔜 Próximas
 
 ### Etapa 6 — Desmobilização
 - Ficha financeira por veículo (% do investimento recuperado)

@@ -70,15 +70,22 @@ class IntervaloPersonalizado(models.Model):
 class Manutencao(models.Model):
     """Manutenção realizada num veículo (docs.md §4.5).
 
-    Nesta etapa registra a execução (zera o ciclo da preventiva);
-    os campos financeiros (custo real × cobrado, oficina, dias parado)
-    entram na etapa 5.
+    Registra a execução (zera o ciclo da preventiva) e o lado financeiro:
+    custo real × valor cobrado do cliente, dias parado e vínculo com sinistro.
     """
 
     class Tipo(models.TextChoices):
         PREVENTIVA = "preventiva", "Preventiva"
         CORRETIVA = "corretiva", "Corretiva"
         ESPORADICA = "esporadica", "Esporádica"
+
+    class OrigemCusto(models.TextChoices):
+        PROTECAO = "protecao", "Evento da proteção (Auto Truck)"
+        PARTICULAR = "particular", "Particular (por fora)"
+
+    class Responsavel(models.TextChoices):
+        EMPRESA = "empresa", "Empresa"
+        CLIENTE = "cliente", "Cliente"
 
     veiculo = models.ForeignKey(
         Veiculo, verbose_name="veículo", on_delete=models.PROTECT, related_name="manutencoes"
@@ -99,6 +106,71 @@ class Manutencao(models.Model):
         "descrição do reparo",
         help_text="Descreva o serviço feito — pesa na avaliação de desmobilização (§4.9)",
     )
+    oficina = models.ForeignKey(
+        "frota.Fornecedor",
+        verbose_name="oficina/fornecedor",
+        on_delete=models.PROTECT,
+        related_name="manutencoes",
+        null=True,
+        blank=True,
+    )
+    data_entrada = models.DateField(
+        "data de entrada na oficina",
+        null=True,
+        blank=True,
+        help_text="Preencher para acompanhar os dias parado (auxílio motorista >7 dias)",
+    )
+    data_saida = models.DateField("data de saída", null=True, blank=True)
+    origem_custo = models.CharField(
+        "origem do custo",
+        max_length=12,
+        choices=OrigemCusto.choices,
+        default=OrigemCusto.PARTICULAR,
+    )
+    custo_real = models.DecimalField(
+        "custo real (R$)",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Pago à oficina/associação; zero se coberto por franquia gratuita",
+    )
+    valor_cobrado_cliente = models.DecimalField(
+        "valor cobrado do cliente (R$)",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Pode ser diferente do custo real (maior ou menor)",
+    )
+    responsavel = models.CharField(
+        "responsável pelo custo",
+        max_length=10,
+        choices=Responsavel.choices,
+        default=Responsavel.EMPRESA,
+    )
+    pagamento_custo = models.CharField(
+        "pagamento à oficina",
+        max_length=10,
+        choices=[("pendente", "Pendente"), ("pago", "Pago")],
+        default="pendente",
+    )
+    sinistro = models.ForeignKey(
+        "sinistros.Sinistro",
+        verbose_name="sinistro",
+        on_delete=models.PROTECT,
+        related_name="manutencoes",
+        null=True,
+        blank=True,
+    )
+    cobranca_repasse = models.OneToOneField(
+        "financeiro.Cobranca",
+        verbose_name="cobrança de repasse",
+        on_delete=models.PROTECT,
+        related_name="manutencao_repassada",
+        null=True,
+        blank=True,
+    )
     observacoes = models.TextField("observações", blank=True)
 
     history = HistoricalRecords()
@@ -117,3 +189,19 @@ class Manutencao(models.Model):
         if self.km and self.km > self.veiculo.km_atual:
             self.veiculo.km_atual = self.km
             self.veiculo.save(update_fields=["km_atual"])
+
+    @property
+    def dias_parado(self):
+        if not self.data_entrada:
+            return 0
+        from datetime import date
+
+        fim = self.data_saida or date.today()
+        return (fim - self.data_entrada).days
+
+    @property
+    def diferenca(self):
+        """Valor cobrado − custo real: quanto a empresa ganhou ou absorveu (docs.md §4.5)."""
+        if self.valor_cobrado_cliente is None or self.custo_real is None:
+            return None
+        return self.valor_cobrado_cliente - self.custo_real

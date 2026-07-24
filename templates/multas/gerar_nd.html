@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Gerar ND de multas — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-2 text-2xl font-bold">Gerar nota de débito de multas</h1>
+<p class="mb-6 text-sm text-gray-500">Seleciona as multas "a cobrar" do cliente e emite uma ND numerada (a cobrança única entra no financeiro).</p>
+
+<form method="get" class="mb-6 flex items-center gap-2 text-sm">
+  <label class="font-medium">Cliente:</label>
+  <select name="cliente" class="rounded border border-gray-300 px-2 py-1">
+    <option value="">— escolha —</option>
+    {% for c in clientes %}
+    <option value="{{ c.pk }}" {% if cliente and cliente.pk == c.pk %}selected{% endif %}>{{ c.nome }}</option>
+    {% endfor %}
+  </select>
+  <button class="rounded bg-marca-preto px-3 py-1 text-white">Carregar multas</button>
+</form>
+
+{% if cliente %}
+<form method="post" class="rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  <input type="hidden" name="cliente" value="{{ cliente.pk }}">
+  <table class="mb-4 w-full text-sm">
+    <thead class="bg-gray-50 text-left">
+      <tr><th class="px-3 py-2"></th><th class="px-3 py-2">Data</th><th class="px-3 py-2">Veículo</th><th class="px-3 py-2">Infração</th><th class="px-3 py-2">Valor</th></tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for multa in multas %}
+      <tr>
+        <td class="px-3 py-2"><input type="checkbox" name="multa" value="{{ multa.pk }}" checked></td>
+        <td class="px-3 py-2">{{ multa.data_infracao|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">{{ multa.veiculo.placa }}</td>
+        <td class="px-3 py-2">{{ multa.descricao }}</td>
+        <td class="px-3 py-2">R$ {{ multa.valor|intcomma }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-3 py-4 text-gray-500">Nenhuma multa "a cobrar" para este cliente.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if multas %}
+  <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Emitir ND</button>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}

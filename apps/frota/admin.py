@@ -1,7 +1,13 @@
 from django.contrib import admin
 from simple_history.admin import SimpleHistoryAdmin
 
-from .models import Categoria, Veiculo
+from .models import Categoria, Fornecedor, Veiculo
+
+
+@admin.register(Fornecedor)
+class FornecedorAdmin(SimpleHistoryAdmin):
+    list_display = ["nome", "tipo_servico", "contato"]
+    search_fields = ["nome"]
 
 
 @admin.register(Categoria)

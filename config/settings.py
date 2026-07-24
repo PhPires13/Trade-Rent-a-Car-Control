@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     "apps.financeiro",
     "apps.km",
     "apps.manutencao",
+    "apps.multas",
+    "apps.sinistros",
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block titulo %}Novo sinistro — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-6 text-2xl font-bold">Novo sinistro</h1>
+
+<form method="post" class="max-w-2xl space-y-4 rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  <div class="grid gap-4 sm:grid-cols-2">
+    {% for field in form %}
+    <div {% if field.name == "descricao" or field.name == "observacoes" %}class="sm:col-span-2"{% endif %}>
+      <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+      {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  <p class="text-xs text-gray-500">O tipo de reparo feito depois deve ser descrito na manutenção vinculada — pesa na desmobilização (§4.9).</p>
+  <div class="flex gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar</button>
+    <a href="{% url 'sinistros:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input[type="text"], form input[type="date"], form input[type="number"], form select, form textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+  }
+</style>
+{% endblock %}

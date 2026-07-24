@@ -64,6 +64,41 @@
 </div>
 {% endif %}
 
+{% if fici_em_alerta or auxilios_disponiveis %}
+<div class="mb-8 grid gap-6 lg:grid-cols-2">
+  {% if fici_em_alerta %}
+  <div class="rounded-lg border-l-4 border-red-500 bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>⚠ Prazos de FICI (evita multa NIC)</span>
+      <a href="{% url 'multas:lista' %}" class="text-sm font-normal underline">ver multas →</a>
+    </h2>
+    <ul class="space-y-1 text-sm">
+      {% for multa in fici_em_alerta %}
+      <li>
+        <span class="font-semibold">{{ multa.veiculo.placa }}</span> — {{ multa.descricao|truncatechars:35 }}
+        {% if multa.fici_prazo %}<span class="{% if multa.fici_prazo < hoje %}font-semibold text-red-700{% else %}text-yellow-800{% endif %}">prazo {{ multa.fici_prazo|date:"d/m" }}</span>{% endif %}
+        {% if multa.cliente %}<span class="text-gray-500">({{ multa.cliente.nome }})</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if auxilios_disponiveis %}
+  <div class="rounded-lg border-l-4 border-marca-amarelo bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>Auxílio motorista a solicitar (parado &gt;7 dias)</span>
+      <a href="{% url 'sinistros:lista' %}" class="text-sm font-normal underline">ver sinistros →</a>
+    </h2>
+    <ul class="space-y-1 text-sm">
+      {% for sinistro in auxilios_disponiveis %}
+      <li><span class="font-semibold">{{ sinistro.veiculo.placa }}</span> — colisão de {{ sinistro.data|date:"d/m" }}, {{ sinistro.dias_parado }} dias parado</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="grid gap-6 lg:grid-cols-2">
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 flex items-center justify-between font-semibold">

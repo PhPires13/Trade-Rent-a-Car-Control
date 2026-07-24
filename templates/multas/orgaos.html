@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block titulo %}Órgãos autuadores — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Órgãos autuadores</h1>
+  <a href="{% url 'admin:multas_orgaoautuador_add' %}" class="text-sm underline">+ cadastrar no admin</a>
+</div>
+<p class="mb-4 text-sm text-gray-500">Credenciais ficam criptografadas no banco e ocultas — clique para revelar na hora de usar o portal.</p>
+
+<div class="grid gap-4 lg:grid-cols-2">
+  {% for orgao in orgaos %}
+  <div class="rounded-lg bg-white p-5 shadow" x-data="{ mostrar: false }">
+    <div class="mb-2 flex items-center justify-between">
+      <h2 class="font-bold">{{ orgao.nome }} <span class="text-xs font-normal text-gray-500">{{ orgao.get_esfera_display }}</span></h2>
+      {% if orgao.portal %}<a href="{{ orgao.portal }}" target="_blank" rel="noopener" class="text-sm underline">abrir portal ↗</a>{% endif %}
+    </div>
+    <dl class="space-y-1 text-sm">
+      {% if orgao.login or orgao.senha %}
+      <div class="flex items-center gap-2">
+        <dt class="text-gray-500">Credenciais:</dt>
+        <dd x-show="!mostrar"><button class="text-xs underline" x-on:click="mostrar = true">revelar</button></dd>
+        <dd x-show="mostrar" x-cloak class="font-mono text-xs">
+          {{ orgao.login }} / {{ orgao.senha }}
+          <button class="ml-1 text-xs underline" x-on:click="mostrar = false">ocultar</button>
+        </dd>
+      </div>
+      {% endif %}
+      {% if orgao.telefone %}<div><dt class="inline text-gray-500">Telefone:</dt> <dd class="inline">{{ orgao.telefone }}</dd></div>{% endif %}
+      {% if orgao.email %}<div><dt class="inline text-gray-500">E-mail:</dt> <dd class="inline">{{ orgao.email }}</dd></div>{% endif %}
+      {% if orgao.procedimento %}<div class="pt-1 text-gray-600"><dt class="font-medium text-gray-500">Procedimento:</dt> <dd class="whitespace-pre-line">{{ orgao.procedimento }}</dd></div>{% endif %}
+      {% if orgao.endereco %}<div class="text-gray-600"><dt class="inline text-gray-500">Endereço:</dt> <dd class="inline">{{ orgao.endereco }}</dd></div>{% endif %}
+    </dl>
+  </div>
+  {% empty %}
+  <p class="text-gray-500">Nenhum órgão cadastrado — use "+ cadastrar no admin".</p>
+  {% endfor %}
+</div>
+{% endblock %}

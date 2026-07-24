@@ -10,6 +10,7 @@ dependencies = [
     "gunicorn>=23.0",
     "django-simple-history>=3.10",
     "psycopg[binary]>=3.2",
+    "cryptography>=43",
 ]
 
 [dependency-groups]
