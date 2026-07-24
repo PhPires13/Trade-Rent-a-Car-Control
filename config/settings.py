@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "apps.manutencao",
     "apps.multas",
     "apps.sinistros",
+    "apps.relatorios",
 ]
 
 MIDDLEWARE = [

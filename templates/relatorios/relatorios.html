@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Relatórios — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Relatórios — {{ mes|stringformat:"02d" }}/{{ ano }}</h1>
+  <form method="get" class="flex items-center gap-2 text-sm">
+    <input type="month" name="mes" value="{{ mes_str }}" class="rounded border border-gray-300 px-2 py-1">
+    <button class="rounded bg-marca-preto px-3 py-1 text-white">Ver mês</button>
+  </form>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-2">
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-1 flex items-center justify-between font-semibold">
+      <span>Receitas do mês</span>
+      <span class="flex gap-2 text-xs font-normal">
+        <a href="?mes={{ mes_str }}&exportar=receitas&formato=xlsx" class="rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto">⬇ Excel</a>
+        <a href="?mes={{ mes_str }}&exportar=receitas&formato=csv" class="rounded bg-gray-200 px-2 py-1">CSV</a>
+      </span>
+    </h2>
+    <p class="mb-3 text-xs text-gray-500">Regime de caixa. Só a receita de locação entra na base do DAS.</p>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        <tr class="bg-yellow-50 font-semibold"><td class="px-2 py-1.5">Locação (fatura) — base do DAS</td><td class="px-2 py-1.5 text-right">R$ {{ receitas.locacao|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Pagamentos diversos (ND)</td><td class="px-2 py-1.5 text-right">R$ {{ receitas.total_diversos|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Caução recebida</td><td class="px-2 py-1.5 text-right">R$ {{ receitas.caucao_recebida|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Auxílio motorista recebido</td><td class="px-2 py-1.5 text-right">R$ {{ receitas.total_auxilios|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Venda de veículos</td><td class="px-2 py-1.5 text-right">R$ {{ receitas.total_vendas|intcomma }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-1 flex items-center justify-between font-semibold">
+      <span>Despesas do mês</span>
+      <span class="flex gap-2 text-xs font-normal">
+        <a href="?mes={{ mes_str }}&exportar=despesas&formato=xlsx" class="rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto">⬇ Excel</a>
+        <a href="?mes={{ mes_str }}&exportar=despesas&formato=csv" class="rounded bg-gray-200 px-2 py-1">CSV</a>
+      </span>
+    </h2>
+    <p class="mb-3 text-xs text-gray-500">Manutenções, franquias de eventos, mensalidades da proteção e custos de venda.</p>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        <tr><td class="px-2 py-1.5">Manutenções (custo real) — {{ despesas.manutencoes|length }} serviço{{ despesas.manutencoes|length|pluralize }}</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_manutencao|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Franquias de eventos</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_franquias|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Proteção Auto Truck ({{ despesas.frota_protegida|length }} veículo{{ despesas.frota_protegida|length|pluralize }})</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_protecao|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Custos de venda</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_custos_venda|intcomma }}</td></tr>
+        <tr class="bg-gray-50 font-black"><td class="px-2 py-1.5">Total</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_geral|intcomma }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>Recebíveis em aberto</span>
+      <span class="flex gap-2 text-xs font-normal">
+        <a href="?mes={{ mes_str }}&exportar=recebiveis&formato=xlsx" class="rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto">⬇ Excel</a>
+        <a href="?mes={{ mes_str }}&exportar=recebiveis&formato=csv" class="rounded bg-gray-200 px-2 py-1">CSV</a>
+      </span>
+    </h2>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        {% for registro in recebiveis %}
+        <tr>
+          <td class="px-2 py-1.5">
+            <a href="{% url 'financeiro:extrato_cliente' registro.cliente.pk %}" class="underline">{{ registro.cliente.nome }}</a>
+            <span class="text-xs text-gray-400">({{ registro.cobrancas|length }} cobrança{{ registro.cobrancas|length|pluralize }})</span>
+            {% if registro.judicial > 0 %}<span class="rounded bg-purple-100 px-1 text-xs text-purple-800">judicial R$ {{ registro.judicial|intcomma }}</span>{% endif %}
+          </td>
+          <td class="px-2 py-1.5 text-right font-semibold">R$ {{ registro.total|intcomma }}</td>
+        </tr>
+        {% empty %}
+        <tr><td class="px-2 py-3 text-green-700">✓ Nenhum valor em aberto.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if caucoes %}
+    <h3 class="mb-1 mt-4 text-sm font-semibold">Cauções retidas</h3>
+    <ul class="text-sm text-gray-600">
+      {% for caucao in caucoes %}
+      <li class="flex justify-between px-2 py-1"><span>{{ caucao.alocacao.cliente.nome }}</span><span>R$ {{ caucao.saldo|intcomma }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 flex items-center justify-between font-semibold">
+      <span>Resumo da frota</span>
+      <span class="flex gap-2 text-xs font-normal">
+        <a href="?mes={{ mes_str }}&exportar=frota&formato=xlsx" class="rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto">⬇ Excel</a>
+        <a href="{% url 'frota:ranking' %}" class="rounded bg-gray-200 px-2 py-1">ver ranking</a>
+      </span>
+    </h2>
+    <table class="w-full text-sm">
+      <thead class="text-left text-xs text-gray-500"><tr><th class="px-2 py-1">Veículo</th><th class="px-2 py-1 text-right">Resultado</th><th class="px-2 py-1 text-right">% recup.</th><th class="px-2 py-1"></th></tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for f in fichas %}
+        <tr>
+          <td class="px-2 py-1.5"><a href="{% url 'frota:ficha' f.veiculo.pk %}" class="underline">{{ f.veiculo.placa }}</a></td>
+          <td class="px-2 py-1.5 text-right">R$ {{ f.resultado_operacional|intcomma }}</td>
+          <td class="px-2 py-1.5 text-right">{% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}</td>
+          <td class="px-2 py-1.5">{% include "frota/_nivel.html" %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

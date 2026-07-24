@@ -37,6 +37,7 @@
         <a href="{% url 'multas:lista' %}" class="hover:text-marca-amarelo">Multas</a>
         <a href="{% url 'sinistros:lista' %}" class="hover:text-marca-amarelo">Sinistros</a>
         <a href="{% url 'frota:ranking' %}" class="hover:text-marca-amarelo">Desmobilização</a>
+        <a href="{% url 'relatorios:relatorios' %}" class="hover:text-marca-amarelo">Relatórios</a>
         <a href="{% url 'admin:index' %}" class="hover:text-marca-amarelo">Cadastros</a>
         <form method="post" action="{% url 'logout' %}" class="inline">
           {% csrf_token %}

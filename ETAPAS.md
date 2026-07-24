@@ -72,8 +72,19 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Painel**: seção "Candidatos à desmobilização" (🟠/🔴) com motivos
 - [x] 85 testes passando; telas verificadas no navegador
 
-## 🔜 Próximas
+### Etapa 7 — Painel consolidado e relatórios (24/07/2026)
+- [x] **Painel consolidado** (docs.md §5 completo): taxa de ocupação da frota, **vigências e documentos a vencer em 30 dias** (rastreador, garantia da bateria, CNHs de clientes ativos — vencidos em destaque), NDs em aberto, além de tudo que já existia (financeiro, FICI, auxílios, candidatos à desmobilização, preventivas, KM pendentes, trocas)
+- [x] **Central de relatórios** (`/relatorios/`) com seletor de mês:
+  - **Receitas do mês** nas 3 classes fiscais (locação/base do DAS, diversos, caução) + auxílios e vendas (outros créditos)
+  - **Despesas do mês** (pedido da Luciana): manutenções detalhadas, franquias de eventos, mensalidades da proteção, custos de venda
+  - **Recebíveis em aberto** por cliente (com destaque judicial) e cauções retidas
+  - **Resumo da frota** (resultado, % recuperado e recomendação por veículo)
+- [x] **Exportação Excel (openpyxl) e CSV** em todos os relatórios, para envio à contabilidade (decisão nº 18) — PDF fica para depois se necessário
+- [x] 93 testes passando; painel e relatórios verificados no navegador
 
-### Etapa 7 — Painel e relatórios
-- Painel consolidado com todos os alertas
-- Relatórios + exportação para contabilidade (Excel/CSV/PDF)
+## 🎉 MVP completo
+
+As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:
+1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY`, `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`; cron diário `python manage.py rotina_diaria`.
+2. **Carga inicial**: cadastrar frota/clientes reais (ou preparar os "outros dados organizados" — decisão nº 9).
+3. **Fase 2 do roadmap** (docs.md §7): anexos, notificações WhatsApp/e-mail, emissão de fatura/ND, importação de planilhas.

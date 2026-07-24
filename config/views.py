@@ -55,8 +55,22 @@ def painel(request):
     contexto["auxilios_disponiveis"] = [
         s for s in contexto["sinistros_abertos"] if s.auxilio_disponivel
     ]
+    from apps.frota.alertas import vigencias_a_vencer
     from apps.frota.desmobilizacao import ranking_da_frota
 
     fichas, _ = ranking_da_frota(hoje)
     contexto["candidatos_venda"] = [f for f in fichas if f.nivel in ("preparar", "vender")]
+    contexto["vigencias"] = vigencias_a_vencer(hoje)
+    frota_locacao = veiculos.filter(uso=Veiculo.Uso.LOCACAO)
+    alugados = frota_locacao.filter(status=Veiculo.Status.ALOCADO).count()
+    total_locacao = frota_locacao.count()
+    contexto["ocupacao"] = round(100 * alugados / total_locacao) if total_locacao else None
+    contexto["nds_abertas"] = Cobranca.objects.filter(
+        origem=Cobranca.Origem.NOTA_DEBITO,
+        status__in=[
+            Cobranca.Status.PENDENTE,
+            Cobranca.Status.PARCIAL,
+            Cobranca.Status.ATRASADO,
+        ],
+    ).count()
     return render(request, "painel.html", contexto)

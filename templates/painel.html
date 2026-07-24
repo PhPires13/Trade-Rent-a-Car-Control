@@ -9,7 +9,9 @@
 <div class="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
   <div class="rounded-lg bg-marca-preto p-4 text-white shadow">
     <div class="text-3xl font-black text-marca-amarelo">{{ total_veiculos }}</div>
-    <div class="text-sm text-gray-300">Veículos na frota</div>
+    <div class="text-sm text-gray-300">
+      Veículos na frota{% if ocupacao is not None %} · <span class="font-semibold text-marca-amarelo">{{ ocupacao }}%</span> ocupação{% endif %}
+    </div>
   </div>
   {% for status, qtde in veiculos_por_status.items %}
   <div class="rounded-lg bg-white p-4 shadow">
@@ -43,9 +45,24 @@
       {% if inadimplentes %}
         <span class="text-xs">({% for c in inadimplentes %}<a class="underline" href="{% url 'financeiro:extrato_cliente' c.pk %}">{{ c.nome }}</a>{% if not forloop.last %}, {% endif %}{% endfor %})</span>
       {% endif %}
+      {% if nds_abertas %}· <a href="{% url 'financeiro:nds' %}" class="underline">{{ nds_abertas }} ND{{ nds_abertas|pluralize }} em aberto</a>{% endif %}
     </div>
   </div>
 </div>
+
+{% if vigencias %}
+<div class="mb-8 rounded-lg bg-white p-5 shadow">
+  <h2 class="mb-3 font-semibold">Vigências e documentos a vencer (30 dias)</h2>
+  <ul class="grid gap-1 text-sm sm:grid-cols-2">
+    {% for alerta in vigencias %}
+    <li>
+      <span class="{% if alerta.vencido %}font-semibold text-red-700{% else %}text-yellow-800{% endif %}">{{ alerta.data|date:"d/m/Y" }}</span>
+      — {{ alerta.descricao }}{% if alerta.vencido %} <span class="text-xs font-semibold text-red-700">(vencido)</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 
 {% if trocas_em_andamento %}
 <div class="mb-8 rounded-lg bg-white p-5 shadow">
