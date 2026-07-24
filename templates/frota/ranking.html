@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Desmobilização — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-2 text-2xl font-bold">Desmobilização — ranking da frota</h1>
+<p class="mb-6 text-sm text-gray-500">
+  Comprar usado → alugar → vender ao recuperar ~70–80% do investimento, antes da manutenção pesada.
+  A recomendação mostra sempre <strong>quais critérios dispararam</strong>.
+  {% if media %}Média de custo de manutenção/km da frota (6m): R$ {{ media|floatformat:2 }}.{% endif %}
+</p>
+
+<div class="space-y-4">
+  {% for f in fichas %}
+  <div class="rounded-lg bg-white p-5 shadow">
+    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-3">
+        <a href="{% url 'frota:ficha' f.veiculo.pk %}" class="text-lg font-bold underline decoration-marca-amarelo decoration-2">
+          {{ f.veiculo.placa }}</a>
+        <span class="text-gray-500">{{ f.veiculo.marca_modelo }} · {{ f.veiculo.km_atual|intcomma }} km</span>
+        {% include "frota/_nivel.html" %}
+      </div>
+      <a href="{% url 'frota:vender' f.veiculo.pk %}" class="text-sm underline">registrar venda</a>
+    </div>
+    <div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+      <div><div class="text-gray-500">Investido</div><div class="font-semibold">R$ {{ f.investido|intcomma }}</div></div>
+      <div><div class="text-gray-500">Receita − despesas</div><div class="font-semibold">R$ {{ f.resultado_operacional|intcomma }}</div></div>
+      <div>
+        <div class="text-gray-500">% recuperado</div>
+        <div class="font-black {% if f.percentual_recuperado and f.percentual_recuperado >= 0.75 %}text-orange-600{% endif %}">
+          {% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}
+        </div>
+      </div>
+      <div><div class="text-gray-500">Custo manut./km (6m)</div><div>{% if f.custo_por_km_6m is not None %}R$ {{ f.custo_por_km_6m|floatformat:2 }}{% else %}—{% endif %}</div></div>
+      <div><div class="text-gray-500">Dias parado (6m)</div><div>{{ f.dias_parado_6m }}</div></div>
+    </div>
+    {% if f.motivos %}
+    <ul class="mt-3 space-y-0.5 border-t border-gray-100 pt-2 text-sm text-gray-600">
+      {% for motivo in f.motivos %}<li>• {{ motivo }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% empty %}
+  <p class="text-gray-500">Nenhum veículo de locação na frota.</p>
+  {% endfor %}
+</div>
+
+{% if fichas_vendidos %}
+<h2 class="mb-3 mt-10 text-xl font-bold">Frota vendida — resultado final</h2>
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Veículo</th><th class="px-3 py-2">Venda</th><th class="px-3 py-2">Valor</th>
+        <th class="px-3 py-2">Investido</th><th class="px-3 py-2">Resultado final</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for f in fichas_vendidos %}
+      <tr>
+        <td class="px-3 py-2 font-medium"><a href="{% url 'frota:ficha' f.veiculo.pk %}" class="underline">{{ f.veiculo.placa }}</a> {{ f.veiculo.marca_modelo }}</td>
+        <td class="px-3 py-2">{{ f.veiculo.data_venda|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">R$ {{ f.veiculo.valor_venda|intcomma }}</td>
+        <td class="px-3 py-2">R$ {{ f.investido|intcomma }}</td>
+        <td class="px-3 py-2 font-black {% if f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">
+          R$ {{ f.resultado_final|intcomma }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

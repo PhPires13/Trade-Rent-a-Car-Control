@@ -1,0 +1,4 @@
+{% if f.nivel == "vender" %}<span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">🔴 Vender</span>
+{% elif f.nivel == "preparar" %}<span class="rounded bg-orange-100 px-2 py-0.5 font-semibold text-orange-700">🟠 Preparar venda</span>
+{% elif f.nivel == "observar" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">🟡 Observar</span>
+{% else %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">🟢 Manter</span>{% endif %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Ficha — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-2 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Ficha financeira — {{ veiculo }}</h1>
+  <div class="flex gap-3 text-sm">
+    <a href="{% url 'alocacoes:timeline' veiculo.pk %}" class="py-1 underline">linha do tempo</a>
+    {% if veiculo.status != "vendido" %}
+    <a href="{% url 'frota:vender' veiculo.pk %}"
+       class="rounded bg-marca-amarelo px-3 py-1 font-semibold text-marca-preto hover:brightness-95">Registrar venda</a>
+    {% endif %}
+    <a href="{% url 'frota:ranking' %}" class="py-1 underline">← ranking</a>
+  </div>
+</div>
+<div class="mb-6">{% include "frota/_nivel.html" %}
+  {% if veiculo.valor_venda_estimado %}<span class="ml-2 text-sm text-gray-500">valor de mercado estimado: R$ {{ veiculo.valor_venda_estimado|intcomma }}</span>{% endif %}
+</div>
+
+<div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">R$ {{ f.investido|intcomma }}</div><div class="text-sm text-gray-500">Investido (compra + entrada)</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black text-green-700">R$ {{ f.receita_total|intcomma }}</div><div class="text-sm text-gray-500">Receita acumulada</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black text-red-700">R$ {{ f.despesa_total|intcomma }}</div><div class="text-sm text-gray-500">Despesas acumuladas</div></div>
+  <div class="rounded-lg bg-marca-preto p-4 text-white shadow">
+    <div class="text-2xl font-black text-marca-amarelo">
+      {% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}
+    </div>
+    <div class="text-sm text-gray-300">do investimento recuperado (alvo ~75%)</div>
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-2">
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 font-semibold">Composição</h2>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        <tr><td class="py-1.5">Aluguéis recebidos</td><td class="py-1.5 text-right text-green-700">+ R$ {{ f.receita_aluguel|intcomma }}</td></tr>
+        <tr><td class="py-1.5">Repasses recebidos (manutenção)</td><td class="py-1.5 text-right text-green-700">+ R$ {{ f.receita_repasses|intcomma }}</td></tr>
+        <tr><td class="py-1.5">Auxílio motorista recebido</td><td class="py-1.5 text-right text-green-700">+ R$ {{ f.receita_auxilios|intcomma }}</td></tr>
+        <tr><td class="py-1.5">Manutenções (custo real)</td><td class="py-1.5 text-right text-red-700">− R$ {{ f.despesa_manutencao|intcomma }}</td></tr>
+        <tr><td class="py-1.5">Franquias de eventos</td><td class="py-1.5 text-right text-red-700">− R$ {{ f.despesa_franquias|intcomma }}</td></tr>
+        <tr><td class="py-1.5">Multas absorvidas pela empresa</td><td class="py-1.5 text-right text-red-700">− R$ {{ f.despesa_multas_empresa|intcomma }}</td></tr>
+        <tr><td class="py-1.5">Proteção Auto Truck (estimada pela mensalidade)</td><td class="py-1.5 text-right text-red-700">− R$ {{ f.despesa_protecao_estimada|intcomma }}</td></tr>
+        <tr class="font-semibold"><td class="py-1.5">Resultado operacional</td><td class="py-1.5 text-right">R$ {{ f.resultado_operacional|intcomma }}</td></tr>
+        {% if f.resultado_final is not None %}
+        <tr class="bg-yellow-50 font-black"><td class="py-1.5">Resultado final (com a venda de R$ {{ veiculo.valor_venda|intcomma }})</td>
+          <td class="py-1.5 text-right {% if f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">R$ {{ f.resultado_final|intcomma }}</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 font-semibold">Indicadores (últimos 6 meses)</h2>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        <tr><td class="py-1.5">Custo de manutenção</td><td class="py-1.5 text-right">R$ {{ f.custo_manutencao_6m|intcomma }}</td></tr>
+        <tr><td class="py-1.5">KM rodados (registros mensais)</td><td class="py-1.5 text-right">{{ f.km_rodado_6m|intcomma }}</td></tr>
+        <tr><td class="py-1.5">Custo por km</td><td class="py-1.5 text-right">{% if f.custo_por_km_6m is not None %}R$ {{ f.custo_por_km_6m|floatformat:2 }}{% else %}—{% endif %}</td></tr>
+        <tr><td class="py-1.5">Dias parado em oficina</td><td class="py-1.5 text-right">{{ f.dias_parado_6m }}</td></tr>
+        <tr><td class="py-1.5">Manutenções esporádicas pesadas</td><td class="py-1.5 text-right">{{ f.esporadicas_6m }}</td></tr>
+        <tr><td class="py-1.5">Sinistros no histórico</td><td class="py-1.5 text-right">{{ veiculo.sinistros.count }}</td></tr>
+      </tbody>
+    </table>
+    {% if f.motivos %}
+    <h3 class="mb-1 mt-4 text-sm font-semibold text-red-700">Critérios que dispararam:</h3>
+    <ul class="space-y-0.5 text-sm text-gray-600">
+      {% for motivo in f.motivos %}<li>• {{ motivo }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="mt-4 text-sm text-green-700">✓ Nenhum critério de desmobilização disparado.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

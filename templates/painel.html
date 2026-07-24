@@ -64,6 +64,23 @@
 </div>
 {% endif %}
 
+{% if candidatos_venda %}
+<div class="mb-8 rounded-lg border-l-4 border-orange-500 bg-white p-5 shadow">
+  <h2 class="mb-3 flex items-center justify-between font-semibold">
+    <span>Candidatos à desmobilização</span>
+    <a href="{% url 'frota:ranking' %}" class="text-sm font-normal underline">ver ranking →</a>
+  </h2>
+  <ul class="space-y-1 text-sm">
+    {% for f in candidatos_venda %}
+    <li>
+      <a href="{% url 'frota:ficha' f.veiculo.pk %}" class="font-semibold underline">{{ f.veiculo.placa }}</a>
+      {% include "frota/_nivel.html" %} — {{ f.motivos|join:"; " }}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if fici_em_alerta or auxilios_disponiveis %}
 <div class="mb-8 grid gap-6 lg:grid-cols-2">
   {% if fici_em_alerta %}

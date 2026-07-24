@@ -87,6 +87,14 @@ class Veiculo(models.Model):
     valor_compra = models.DecimalField(
         "valor de compra (R$)", max_digits=10, decimal_places=2, null=True, blank=True
     )
+    custos_entrada = models.DecimalField(
+        "custos de entrada (R$)",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Documentação, transferência, emplacamento",
+    )
     km_compra = models.PositiveIntegerField("KM na compra", null=True, blank=True)
     km_atual = models.PositiveIntegerField("KM atual", default=0)
     valor_venda_estimado = models.DecimalField(
@@ -97,6 +105,24 @@ class Veiculo(models.Model):
         blank=True,
         help_text="FIPE/mercado, atualizado manualmente — usado na desmobilização",
     )
+    mensalidade_protecao = models.DecimalField(
+        'mensalidade da proteção "$ AT" (R$)',
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Mensalidade da Auto Truck (frota) — entra nas despesas do veículo",
+    )
+
+    data_venda = models.DateField("data da venda", null=True, blank=True)
+    valor_venda = models.DecimalField(
+        "valor da venda (R$)", max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    custos_venda = models.DecimalField(
+        "custos da venda (R$)", max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    comprador = models.CharField("comprador", max_length=100, blank=True)
+    km_venda = models.PositiveIntegerField("KM na venda", null=True, blank=True)
 
     chave_reserva = models.CharField(
         "chave reserva", max_length=10, choices=ChaveReserva.choices, default=ChaveReserva.DUVIDA

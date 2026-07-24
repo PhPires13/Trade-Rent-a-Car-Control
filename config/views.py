@@ -55,4 +55,8 @@ def painel(request):
     contexto["auxilios_disponiveis"] = [
         s for s in contexto["sinistros_abertos"] if s.auxilio_disponivel
     ]
+    from apps.frota.desmobilizacao import ranking_da_frota
+
+    fichas, _ = ranking_da_frota(hoje)
+    contexto["candidatos_venda"] = [f for f in fichas if f.nivel in ("preparar", "vender")]
     return render(request, "painel.html", contexto)

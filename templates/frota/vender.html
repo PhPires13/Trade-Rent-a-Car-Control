@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Vender — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-2 text-2xl font-bold">Registrar venda — {{ veiculo }}</h1>
+<p class="mb-6 text-sm text-gray-600">
+  KM atual: {{ veiculo.km_atual|intcomma }}
+  {% if veiculo.valor_venda_estimado %}· estimado: R$ {{ veiculo.valor_venda_estimado|intcomma }}{% endif %}
+  — o veículo precisa estar sem alocação ativa. O crédito da venda é "outro crédito" (fora da base do DAS).
+</p>
+
+<form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  <div>
+    <label class="mb-1 block text-sm font-medium">Data da venda</label>
+    <input type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" required>
+  </div>
+  <div>
+    <label class="mb-1 block text-sm font-medium">Valor da venda (R$)</label>
+    <input type="text" name="valor" required>
+  </div>
+  <div>
+    <label class="mb-1 block text-sm font-medium">Comprador</label>
+    <input type="text" name="comprador">
+  </div>
+  <div class="grid grid-cols-2 gap-3">
+    <div>
+      <label class="mb-1 block text-sm font-medium">Custos da venda (R$)</label>
+      <input type="text" name="custos" placeholder="comissão, transferência">
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-medium">KM na venda</label>
+      <input type="number" name="km" value="{{ veiculo.km_atual }}">
+    </div>
+  </div>
+  <div class="flex gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Vender</button>
+    <a href="{% url 'frota:ranking' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }
+</style>
+{% endblock %}

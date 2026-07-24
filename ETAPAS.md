@@ -64,11 +64,15 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 
 **Nota:** o banco de dev tinha tabelas de um experimento anterior (manutenção/multas/sinistros/financeiro) — foram recriadas do zero pelas migrações; nenhum dado real foi perdido.
 
-## 🔜 Próximas
+### Etapa 6 — Desmobilização (19/07/2026)
+- [x] **Compra e venda no veículo**: custos de entrada, mensalidade da proteção ("$ AT"), e venda (data, valor, comprador, custos, KM) — bloqueada com alocação ativa; status → Vendido com histórico preservado; crédito da venda fora da base do DAS
+- [x] **Ficha financeira por veículo** (`/frota/veiculo/N/ficha/`): investido (compra + entrada), receitas (aluguéis + repasses + auxílios recebidos), despesas (manutenções, franquias, multas absorvidas, proteção estimada pela mensalidade), resultado operacional, **% do investimento recuperado** e resultado final após a venda — tudo calculado dos lançamentos existentes, sem redigitação
+- [x] **Recomendação explicável** (decisão nº 19): critérios configuráveis — % recuperado ≥75% (janela ~70–80% dos donos), custo manutenção/km 50% acima da média da frota, >20 dias parado (6m), ≥2 esporádicas pesadas (6m) — geram nível 🟢 Manter / 🟡 Observar / 🟠 Preparar / 🔴 Vender **sempre listando os motivos**
+- [x] **Ranking da frota** (`/frota/desmobilizacao/`): piores primeiro, com indicadores e "registrar venda"; seção "Frota vendida" com resultado final por unidade
+- [x] **Painel**: seção "Candidatos à desmobilização" (🟠/🔴) com motivos
+- [x] 85 testes passando; telas verificadas no navegador
 
-### Etapa 6 — Desmobilização
-- Ficha financeira por veículo (% do investimento recuperado)
-- Indicadores e recomendação de venda, ranking da frota
+## 🔜 Próximas
 
 ### Etapa 7 — Painel e relatórios
 - Painel consolidado com todos os alertas
