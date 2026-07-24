@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Receber — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+{% include "financeiro/_abas.html" with aba="receber" %}
+
+<form method="get" class="mb-6 flex items-center gap-2 text-sm">
+  <label for="cliente" class="font-medium">Cliente:</label>
+  <select name="cliente" id="cliente" class="rounded border border-gray-300 px-2 py-1">
+    <option value="">— escolha —</option>
+    {% for c in clientes %}
+    <option value="{{ c.pk }}" {% if cliente and cliente.pk == c.pk %}selected{% endif %}>{{ c.nome }}</option>
+    {% endfor %}
+  </select>
+  <button class="rounded bg-marca-preto px-3 py-1 text-white">Carregar cobranças</button>
+</form>
+
+{% if cliente %}
+<div class="mb-4 text-sm text-gray-600">
+  Crédito disponível de {{ cliente.nome }}: <strong>R$ {{ credito|intcomma }}</strong>
+  · <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="underline">ver extrato</a>
+</div>
+
+<form method="post"
+      x-data='{ valor: 0, aplicado: 0,
+                recalc() { this.aplicado = Array.from(document.querySelectorAll(".aplicacao"))
+                  .reduce((s, el) => s + (parseFloat(el.value.replace(",", ".")) || 0), 0); } }'
+      class="rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  <input type="hidden" name="cliente" value="{{ cliente.pk }}">
+
+  <div class="mb-4 grid gap-4 sm:grid-cols-4">
+    <div>
+      <label class="mb-1 block text-sm font-medium">Valor recebido (R$)</label>
+      <input type="text" name="valor" required x-on:input="valor = parseFloat($event.target.value.replace(',', '.')) || 0"
+             class="w-full rounded border border-gray-300 px-2 py-1">
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-medium">Data</label>
+      <input type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" required
+             class="w-full rounded border border-gray-300 px-2 py-1">
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-medium">Forma</label>
+      <select name="forma" class="w-full rounded border border-gray-300 px-2 py-1">
+        {% for valor, rotulo in formas %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-medium">Sobra vira</label>
+      <select name="sobra_destino" class="w-full rounded border border-gray-300 px-2 py-1">
+        <option value="credito">Crédito do cliente</option>
+        <option value="caucao">Reforço de caução</option>
+      </select>
+    </div>
+  </div>
+
+  <table class="mb-4 w-full text-sm">
+    <thead class="bg-gray-50 text-left">
+      <tr>
+        <th class="px-3 py-2">Vencimento</th>
+        <th class="px-3 py-2">Cobrança</th>
+        <th class="px-3 py-2">Saldo devedor</th>
+        <th class="px-3 py-2">Aplicar (R$)</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for cobranca in cobrancas_abertas %}
+      <tr class="{% if cobranca.status == 'atrasado' %}bg-red-50{% endif %}">
+        <td class="px-3 py-2">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">{{ cobranca.descricao }}</td>
+        <td class="px-3 py-2 font-semibold">R$ {{ cobranca.saldo|intcomma }}</td>
+        <td class="px-3 py-2">
+          <input type="text" name="aplicar_{{ cobranca.pk }}" placeholder="0,00"
+                 class="aplicacao w-28 rounded border border-gray-300 px-2 py-1"
+                 x-on:input="recalc()">
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="px-3 py-4 text-gray-500">Nenhuma cobrança em aberto para este cliente.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="mb-4 flex gap-6 text-sm">
+    <div>Total alocado: <strong x-text="'R$ ' + aplicado.toFixed(2)"></strong></div>
+    <div>Valor recebido: <strong x-text="'R$ ' + valor.toFixed(2)"></strong></div>
+    <div>Saldo não alocado:
+      <strong x-text="'R$ ' + (valor - aplicado).toFixed(2)"
+              x-bind:class="valor - aplicado < 0 ? 'text-red-600' : 'text-green-700'"></strong>
+    </div>
+  </div>
+  <p class="mb-4 text-xs text-gray-500" x-show="aplicado > valor">
+    ⚠ O total alocado não pode passar do valor recebido — o sistema vai recusar o lançamento.
+  </p>
+
+  <div class="flex items-center gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95"
+            x-bind:disabled="aplicado > valor" x-bind:class="aplicado > valor ? 'opacity-50 cursor-not-allowed' : ''">
+      Confirmar recebimento
+    </button>
+    <input type="text" name="observacoes" placeholder="observações (opcional)"
+           class="flex-1 rounded border border-gray-300 px-2 py-1 text-sm">
+  </div>
+</form>
+{% endif %}
+{% endblock %}

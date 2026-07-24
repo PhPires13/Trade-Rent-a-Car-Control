@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Notas de débito — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+{% include "financeiro/_abas.html" with aba="nds" %}
+
+<div class="mb-4 text-right">
+  <a href="{% url 'financeiro:nd_nova' %}"
+     class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">+ Emitir ND</a>
+</div>
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Nº</th>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Emissão</th>
+        <th class="px-3 py-2">Itens</th>
+        <th class="px-3 py-2">Total</th>
+        <th class="px-3 py-2">Situação</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for nd in notas %}
+      <tr>
+        <td class="px-3 py-2 font-bold">ND {{ nd.numero|stringformat:"03d" }}</td>
+        <td class="px-3 py-2">{{ nd.cliente.nome }}</td>
+        <td class="px-3 py-2">{{ nd.data_emissao|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2 text-gray-600">
+          {% for item in nd.itens.all %}{{ item.descricao }}{% if not forloop.last %} · {% endif %}{% endfor %}
+        </td>
+        <td class="px-3 py-2 font-semibold">R$ {{ nd.total|intcomma }}</td>
+        <td class="px-3 py-2">
+          {% with c=nd.cobranca %}
+            {% if c.status == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Paga</span>
+            {% elif c.status == "parcial" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Parcial</span>
+            {% elif c.status == "atrasado" %}<span class="rounded bg-red-100 px-2 py-0.5 text-red-700">Atrasada</span>
+            {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Emitida</span>{% endif %}
+          {% endwith %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-3 py-4 text-gray-500">Nenhuma nota de débito emitida.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

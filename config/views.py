@@ -1,8 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
 
+from django.db.models import Sum
 from django.shortcuts import render
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
+from apps.financeiro.models import ZERO, Cobranca
 from apps.frota.models import Veiculo
 from apps.km.models import veiculos_com_leitura_pendente
 from apps.manutencao.services import preventivas_em_alerta
@@ -29,4 +31,18 @@ def painel(request):
         "alertas_preventivas": alertas_preventivas,
         "total_itens_em_alerta": sum(len(itens) for _, itens in alertas_preventivas),
     }
+    hoje = date.today()
+    semana = (hoje - timedelta(days=hoje.weekday()), hoje + timedelta(days=6 - hoje.weekday()))
+    da_semana = Cobranca.objects.filter(vencimento__range=semana).exclude(
+        status=Cobranca.Status.CANCELADA
+    )
+    atrasadas = Cobranca.objects.filter(status=Cobranca.Status.ATRASADO)
+    contexto.update(
+        {
+            "semana_total": da_semana.aggregate(t=Sum("valor"))["t"] or ZERO,
+            "semana_recebido": sum((c.total_quitado for c in da_semana), ZERO),
+            "atrasado_total": sum((c.saldo for c in atrasadas), ZERO),
+            "inadimplentes": Cliente.objects.filter(status=Cliente.Status.INADIMPLENTE),
+        }
+    )
     return render(request, "painel.html", contexto)

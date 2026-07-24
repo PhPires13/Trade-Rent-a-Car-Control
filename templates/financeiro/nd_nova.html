@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block titulo %}Emitir ND — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-4 text-2xl font-bold">Emitir nota de débito</h1>
+<p class="mb-6 text-sm text-gray-500">
+  A numeração é automática (sequência atual). Multas entrarão como itens automáticos na etapa 5 —
+  por enquanto os itens são descritos manualmente.
+</p>
+
+<form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
+      x-data='{ itens: [{d: "", v: ""}] }'>
+  {% csrf_token %}
+  <div>
+    <label class="mb-1 block text-sm font-medium">Cliente</label>
+    <select name="cliente" required>
+      <option value="">— escolha —</option>
+      {% for c in clientes %}<option value="{{ c.pk }}">{{ c.nome }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="grid gap-4 sm:grid-cols-2">
+    <div>
+      <label class="mb-1 block text-sm font-medium">Data de emissão</label>
+      <input type="date" name="data_emissao" value="{{ hoje|date:'Y-m-d' }}" required>
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-medium">Vencimento (opcional)</label>
+      <input type="date" name="vencimento">
+    </div>
+  </div>
+
+  <div>
+    <label class="mb-1 block text-sm font-medium">Itens</label>
+    <template x-for="(item, i) in itens" x-bind:key="i">
+      <div class="mb-2 flex gap-2">
+        <input type="text" name="item_descricao" placeholder="descrição (ex.: multa avanço de sinal 12/04)"
+               x-model="item.d" class="flex-1">
+        <input type="text" name="item_valor" placeholder="valor" x-model="item.v" class="w-28">
+        <button type="button" class="text-red-600" x-on:click="itens.splice(i, 1)" x-show="itens.length > 1">✕</button>
+      </div>
+    </template>
+    <button type="button" class="text-sm underline" x-on:click="itens.push({d: '', v: ''})">+ adicionar item</button>
+  </div>
+
+  <div>
+    <label class="mb-1 block text-sm font-medium">Observações</label>
+    <textarea name="observacoes" rows="2"></textarea>
+  </div>
+
+  <div class="flex gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Emitir</button>
+    <a href="{% url 'financeiro:nds' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input, form select, form textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+  }
+  form .w-28 { width: 7rem; }
+</style>
+{% endblock %}

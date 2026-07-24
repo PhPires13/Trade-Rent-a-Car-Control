@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "apps.frota",
     "apps.pessoas",
     "apps.alocacoes",
+    "apps.financeiro",
     "apps.km",
     "apps.manutencao",
 ]

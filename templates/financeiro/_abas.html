@@ -1,0 +1,12 @@
+<nav class="mb-6 flex flex-wrap gap-1 border-b border-gray-300 text-sm">
+  <a href="{% url 'financeiro:cobrancas' %}"
+     class="{% if aba == 'cobrancas' %}border-b-2 border-marca-amarelo font-semibold{% else %}text-gray-500 hover:text-gray-800{% endif %} px-3 py-2">Cobranças</a>
+  <a href="{% url 'financeiro:receber' %}"
+     class="{% if aba == 'receber' %}border-b-2 border-marca-amarelo font-semibold{% else %}text-gray-500 hover:text-gray-800{% endif %} px-3 py-2">Receber</a>
+  <a href="{% url 'financeiro:nds' %}"
+     class="{% if aba == 'nds' %}border-b-2 border-marca-amarelo font-semibold{% else %}text-gray-500 hover:text-gray-800{% endif %} px-3 py-2">Notas de débito</a>
+  <a href="{% url 'financeiro:caucoes' %}"
+     class="{% if aba == 'caucoes' %}border-b-2 border-marca-amarelo font-semibold{% else %}text-gray-500 hover:text-gray-800{% endif %} px-3 py-2">Cauções</a>
+  <a href="{% url 'financeiro:das' %}"
+     class="{% if aba == 'das' %}border-b-2 border-marca-amarelo font-semibold{% else %}text-gray-500 hover:text-gray-800{% endif %} px-3 py-2">Base do DAS</a>
+</nav>

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Caução — {{ caucao.alocacao.cliente.nome }}{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">{{ caucao }}</h1>
+  <a href="{% url 'financeiro:caucoes' %}" class="text-sm underline">← Cauções</a>
+</div>
+
+<div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">R$ {{ caucao.recebido|intcomma }}</div><div class="text-sm text-gray-500">Recebido</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">R$ {{ caucao.descontado|intcomma }}</div><div class="text-sm text-gray-500">Descontos</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">R$ {{ caucao.devolvido|intcomma }}</div><div class="text-sm text-gray-500">Devolvido</div></div>
+  <div class="rounded-lg bg-marca-preto p-4 text-white shadow"><div class="text-2xl font-black text-marca-amarelo">R$ {{ caucao.saldo|intcomma }}</div><div class="text-sm text-gray-300">Saldo ({{ caucao.status }})</div></div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-2">
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 font-semibold">Extrato</h2>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        {% for m in caucao.movimentacoes.all %}
+        <tr>
+          <td class="px-2 py-1.5">{{ m.data|date:"d/m/Y" }}</td>
+          <td class="px-2 py-1.5">{{ m.get_tipo_display }}{% if m.cobranca %} <span class="text-xs text-gray-500">({{ m.cobranca.descricao }})</span>{% endif %}</td>
+          <td class="px-2 py-1.5 text-right font-medium {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}text-red-700{% else %}text-green-700{% endif %}">
+            {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}−{% else %}+{% endif %} R$ {{ m.valor|intcomma }}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td class="px-2 py-3 text-gray-500">Nenhuma movimentação — registre o recebimento da caução ao lado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow" x-data="{ tipo: 'recebimento' }">
+    <h2 class="mb-3 font-semibold">Nova movimentação</h2>
+    <form method="post" class="space-y-3 text-sm">
+      {% csrf_token %}
+      <div>
+        <label class="mb-1 block font-medium">Tipo</label>
+        <select name="tipo" x-model="tipo">
+          <option value="recebimento">Recebimento (depósito da caução)</option>
+          <option value="reforco">Reforço</option>
+          <option value="desconto">Desconto (quita cobrança)</option>
+          <option value="devolucao">Devolução</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="mb-1 block font-medium">Valor (R$)</label>
+          <input type="text" name="valor" required>
+        </div>
+        <div>
+          <label class="mb-1 block font-medium">Data</label>
+          <input type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" required>
+        </div>
+      </div>
+      <div x-show="tipo === 'recebimento' || tipo === 'reforco'">
+        <label class="mb-1 block font-medium">Forma</label>
+        <select name="forma">
+          <option value="pix">Pix</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="transferencia">Transferência</option>
+        </select>
+      </div>
+      <div x-show="tipo === 'desconto'">
+        <label class="mb-1 block font-medium">Cobrança a quitar</label>
+        <select name="cobranca">
+          {% for cobranca in pendentes %}
+          <option value="{{ cobranca.pk }}">{{ cobranca.descricao }} — saldo R$ {{ cobranca.saldo|intcomma }}</option>
+          {% empty %}
+          <option value="">— nenhuma cobrança em aberto —</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="mb-1 block font-medium">Observações</label>
+        <input type="text" name="observacoes">
+      </div>
+      <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar</button>
+    </form>
+  </div>
+</div>
+
+<style>
+  form input, form select { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }
+</style>
+{% endblock %}

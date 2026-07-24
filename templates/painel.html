@@ -27,6 +27,26 @@
   </a>
 </div>
 
+<div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+  <a href="{% url 'financeiro:cobrancas' %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black">R$ {{ semana_recebido|floatformat:2 }} <span class="text-base font-normal text-gray-400">/ R$ {{ semana_total|floatformat:2 }}</span></div>
+    <div class="text-sm text-gray-500">Recebido / a receber na semana</div>
+  </a>
+  <a href="{% url 'financeiro:cobrancas' %}?status=atrasado" class="rounded-lg {% if atrasado_total %}bg-red-50 ring-1 ring-red-200{% else %}bg-white{% endif %} p-4 shadow">
+    <div class="text-2xl font-black {% if atrasado_total %}text-red-700{% endif %}">R$ {{ atrasado_total|floatformat:2 }}</div>
+    <div class="text-sm text-gray-500">Em atraso (saldo devedor)</div>
+  </a>
+  <div class="rounded-lg bg-white p-4 shadow">
+    <div class="text-2xl font-black">{{ inadimplentes|length }}</div>
+    <div class="text-sm text-gray-500">
+      Inadimplentes
+      {% if inadimplentes %}
+        <span class="text-xs">({% for c in inadimplentes %}<a class="underline" href="{% url 'financeiro:extrato_cliente' c.pk %}">{{ c.nome }}</a>{% if not forloop.last %}, {% endif %}{% endfor %})</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
 {% if trocas_em_andamento %}
 <div class="mb-8 rounded-lg bg-white p-5 shadow">
   <h2 class="mb-3 font-semibold">Trocas temporárias em andamento</h2>

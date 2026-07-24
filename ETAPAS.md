@@ -38,13 +38,21 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Painel**: card de alocações ativas + seção de trocas em andamento
 - [x] 40 testes passando; telas verificadas no navegador
 
-## 🔜 Próximas
+### Etapa 4 — Financeiro (19/07/2026)
+- [x] **Cobranças semanais automáticas**: comando `rotina_diaria` (cron) gera o aluguel de cada alocação no dia de vencimento do cliente, recuperando dias perdidos (idempotente); valor considera troca temporária vigente
+- [x] **Atrasos e inadimplência**: cobrança vira `Atrasado` e o cliente `Inadimplente` com 1 dia (decisão nº 14); pagamento reverte automaticamente
+- [x] **Encargos por atraso**: sugestão automática 5% (≤4 dias) / 10% (acima), sempre editável/zerável antes de aplicar (decisão nº 13); fora da base do DAS
+- [x] **Baixa de recebimento com travas**: distribuição entre cobranças com limite por saldo devedor e por valor recebido; totais em tempo real; sobra vira **crédito do cliente** ou reforço de caução; pagamento com crédito valida saldo
+- [x] **Notas de débito**: numeração automática em sequência, itens livres (multas viram itens na etapa 5), cobrança única gerada na emissão
+- [x] **Caução**: criada automaticamente na alocação com valor acordado; extrato (recebimento, reforço, desconto, devolução); desconto quita cobrança validando os dois saldos
+- [x] **Classificação fiscal / Base do DAS**: aluguel → locação (fatura, tributável); resto → pagamentos diversos (ND, fora da base); tela mensal com exportação CSV para a contabilidade (decisões nº 11 e 18)
+- [x] **Cobrança judicial**: status próprio para dívidas de ex-clientes (decisão nº 17)
+- [x] **Painel**: recebido/a receber na semana, total em atraso, inadimplentes
+- [x] 61 testes passando; fluxo completo verificado no navegador
 
-### Etapa 4 — Financeiro
-- Cobranças semanais automáticas + recebimentos com travas de lançamento
-- Encargos por atraso (5%/10%, ajustável) e inadimplência (1 dia)
-- Notas de débito (numeração automática) e caução
-- Classificação fiscal (base do DAS) e cobrança judicial
+**Pendente do usuário (deploy):** configurar o cron do Railway para rodar `python manage.py rotina_diaria` 1×/dia.
+
+## 🔜 Próximas
 
 ### Etapa 5 — Multas e Sinistros
 - Multas com FICI/NIC, órgãos autuadores (credenciais protegidas)

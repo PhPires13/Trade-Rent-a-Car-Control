@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Cauções — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+{% include "financeiro/_abas.html" with aba="caucoes" %}
+
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Acordada</th>
+        <th class="px-3 py-2">Recebida</th>
+        <th class="px-3 py-2">Descontos</th>
+        <th class="px-3 py-2">Devolvida</th>
+        <th class="px-3 py-2">Saldo</th>
+        <th class="px-3 py-2">Situação</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for caucao in caucoes %}
+      <tr>
+        <td class="px-3 py-2 font-medium">
+          <a href="{% url 'financeiro:caucao_detalhe' caucao.pk %}" class="underline decoration-marca-amarelo decoration-2">
+            {{ caucao.alocacao.cliente.nome }}</a>
+        </td>
+        <td class="px-3 py-2">{{ caucao.alocacao.veiculo.placa }}</td>
+        <td class="px-3 py-2">R$ {{ caucao.alocacao.caucao_valor|intcomma|default:"—" }}</td>
+        <td class="px-3 py-2">R$ {{ caucao.recebido|intcomma }}</td>
+        <td class="px-3 py-2">R$ {{ caucao.descontado|intcomma }}</td>
+        <td class="px-3 py-2">R$ {{ caucao.devolvido|intcomma }}</td>
+        <td class="px-3 py-2 font-semibold">R$ {{ caucao.saldo|intcomma }}</td>
+        <td class="px-3 py-2 text-gray-600">{{ caucao.status }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="px-3 py-4 text-gray-500">Nenhuma caução registrada (a caução é opcional).</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

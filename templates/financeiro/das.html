@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Base do DAS — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+{% include "financeiro/_abas.html" with aba="das" %}
+
+<div class="mb-4 flex items-center justify-between">
+  <form method="get" class="flex items-center gap-2 text-sm">
+    <input type="month" name="mes" value="{{ mes_str }}" class="rounded border border-gray-300 px-2 py-1">
+    <button class="rounded bg-marca-preto px-3 py-1 text-white">Ver mês</button>
+  </form>
+  <a href="?mes={{ mes_str }}&exportar=csv"
+     class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">
+    ⬇ Exportar CSV (contabilidade)
+  </a>
+</div>
+
+<p class="mb-4 text-sm text-gray-600">
+  Regime de caixa — valores recebidos em {{ mes|stringformat:"02d" }}/{{ ano }}.
+  <strong>O DAS incide somente sobre a receita de locação</strong> (fatura); pagamentos diversos têm nota de débito e ficam fora da base.
+</p>
+
+<div class="max-w-2xl overflow-hidden rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <tbody class="divide-y divide-gray-100">
+      <tr class="bg-yellow-50">
+        <td class="px-4 py-3 font-semibold">Receita de locação (fatura) — BASE DO DAS</td>
+        <td class="px-4 py-3 text-right text-lg font-black">R$ {{ resumo.locacao|intcomma }}</td>
+      </tr>
+      {% for rotulo, valor in resumo.diversos.items %}
+      <tr>
+        <td class="px-4 py-2 text-gray-600">Pagamentos diversos — {{ rotulo }} (ND, fora da base)</td>
+        <td class="px-4 py-2 text-right">R$ {{ valor|intcomma }}</td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <td class="px-4 py-2 text-gray-600">Total de pagamentos diversos</td>
+        <td class="px-4 py-2 text-right font-semibold">R$ {{ resumo.total_diversos|intcomma }}</td>
+      </tr>
+      <tr>
+        <td class="px-4 py-2 text-gray-600">Caução recebida no mês (fora da base)</td>
+        <td class="px-4 py-2 text-right">R$ {{ resumo.caucao_recebida|intcomma }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
