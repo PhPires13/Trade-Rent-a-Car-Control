@@ -28,17 +28,22 @@
         <span class="rounded bg-marca-amarelo px-2 py-1 text-lg font-black tracking-tight text-marca-preto">TRADE</span>
         <span class="text-sm italic text-gray-200">Rent a Car</span>
       </a>
-      <nav class="flex items-center gap-4 text-sm">
+      <nav class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <a href="{% url 'painel' %}" class="hover:text-marca-amarelo">Painel</a>
+        <a href="{% url 'frota:hub' %}" class="hover:text-marca-amarelo">Frota</a>
+        <a href="{% url 'pessoas:lista' %}" class="hover:text-marca-amarelo">Clientes</a>
         <a href="{% url 'alocacoes:lista' %}" class="hover:text-marca-amarelo">Alocações</a>
         <a href="{% url 'financeiro:cobrancas' %}" class="hover:text-marca-amarelo">Financeiro</a>
-        <a href="{% url 'km:lista' %}" class="hover:text-marca-amarelo">KM Mensal</a>
+        <a href="{% url 'km:lista' %}" class="hover:text-marca-amarelo">KM</a>
         <a href="{% url 'manutencao:preventivas' %}" class="hover:text-marca-amarelo">Preventivas</a>
         <a href="{% url 'multas:lista' %}" class="hover:text-marca-amarelo">Multas</a>
         <a href="{% url 'sinistros:lista' %}" class="hover:text-marca-amarelo">Sinistros</a>
-        <a href="{% url 'frota:ranking' %}" class="hover:text-marca-amarelo">Desmobilização</a>
         <a href="{% url 'relatorios:relatorios' %}" class="hover:text-marca-amarelo">Relatórios</a>
-        <a href="{% url 'admin:index' %}" class="hover:text-marca-amarelo">Cadastros</a>
+        <a href="{% url 'admin:index' %}" class="text-gray-400 hover:text-marca-amarelo" title="Retaguarda técnica">Admin</a>
+        <form method="get" action="{% url 'buscar' %}" class="inline">
+          <input type="search" name="q" value="{{ request.GET.q }}" placeholder="🔍 placa ou nome"
+                 class="w-36 rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-white placeholder-gray-400 focus:border-marca-amarelo focus:outline-none">
+        </form>
         <form method="post" action="{% url 'logout' %}" class="inline">
           {% csrf_token %}
           <button type="submit" class="text-gray-300 hover:text-marca-amarelo">Sair ({{ user.get_username }})</button>

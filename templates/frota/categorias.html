@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block titulo %}Categorias — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Categorias de veículo</h1>
+  <a href="{% url 'frota:hub' %}" class="text-sm text-gray-500 underline">← frota</a>
+</div>
+<p class="mb-4 text-sm text-gray-500">
+  O valor semanal de referência orienta o preço da locação — o valor final fica na alocação.
+</p>
+
+<div class="mb-6 overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Nome</th>
+        <th class="px-3 py-2">Valor semanal de referência (R$)</th>
+        <th class="px-3 py-2">Observações</th>
+        <th class="px-3 py-2">Veículos</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for categoria in categorias %}
+      <tr>
+        <td class="px-3 py-2">
+          <input name="nome" form="categoria-{{ categoria.pk }}" value="{{ categoria.nome }}" required
+                 class="w-full rounded border border-gray-300 px-2 py-1"></td>
+        <td class="px-3 py-2">
+          <input name="valor_semanal_referencia" form="categoria-{{ categoria.pk }}" type="number" step="0.01"
+                 value="{{ categoria.valor_semanal_referencia }}" required
+                 class="w-36 rounded border border-gray-300 px-2 py-1"></td>
+        <td class="px-3 py-2">
+          <input name="observacoes" form="categoria-{{ categoria.pk }}" value="{{ categoria.observacoes }}"
+                 class="w-full rounded border border-gray-300 px-2 py-1"></td>
+        <td class="px-3 py-2 text-center font-semibold">{{ categoria.total_veiculos }}</td>
+        <td class="px-3 py-2">
+          <form method="post" id="categoria-{{ categoria.pk }}">
+            {% csrf_token %}
+            <input type="hidden" name="categoria_id" value="{{ categoria.pk }}">
+            <button class="rounded bg-marca-preto px-3 py-1 text-xs font-semibold text-white hover:brightness-125">Salvar</button>
+          </form>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-3 py-4 text-gray-500">Nenhuma categoria cadastrada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="max-w-xl rounded-lg bg-white p-5 shadow">
+  <h2 class="mb-4 font-semibold">Nova categoria</h2>
+  <form method="post" class="space-y-3">
+    {% csrf_token %}
+    {% for field in form %}
+    <div>
+      <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+      {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+    </div>
+    {% endfor %}
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Criar categoria</button>
+  </form>
+</div>
+
+<style>
+  .max-w-xl form input, .max-w-xl form select, .max-w-xl form textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+  }
+</style>
+{% endblock %}

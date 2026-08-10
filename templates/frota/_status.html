@@ -1,0 +1,6 @@
+{% if veiculo.status == "disponivel" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Disponível</span>
+{% elif veiculo.status == "alocado" %}<span class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto">Alocado</span>
+{% elif veiculo.status == "em_manutencao" %}<span class="rounded bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">Em manutenção</span>
+{% elif veiculo.status == "inativo" %}<span class="rounded bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-600">Inativo</span>
+{% else %}<span class="rounded bg-gray-700 px-2 py-0.5 text-xs font-semibold text-white">Vendido</span>{% endif %}
+{% if veiculo.uso == "fora_locacao" %}<span class="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">Fora de locação</span>{% endif %}

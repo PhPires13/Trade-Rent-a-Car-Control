@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
-from django.db.models import Sum
-from django.shortcuts import render
+from django.db.models import Q, Sum
+from django.shortcuts import redirect, render
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import ZERO, Cobranca
@@ -11,6 +11,29 @@ from apps.manutencao.services import preventivas_em_alerta
 from apps.multas.services import alertas_fici
 from apps.pessoas.models import Cliente
 from apps.sinistros.models import Sinistro
+
+
+def buscar(request):
+    """Busca global por placa ou nome de cliente (barra do topo)."""
+    consulta = request.GET.get("q", "").strip()
+    veiculos, clientes = [], []
+    if consulta:
+        placa = consulta.upper().replace("-", "").replace(" ", "")
+        veiculos = list(
+            Veiculo.objects.filter(
+                Q(placa__icontains=placa) | Q(marca_modelo__icontains=consulta)
+            ).order_by("placa")[:20]
+        )
+        clientes = list(Cliente.objects.filter(nome__icontains=consulta).order_by("nome")[:20])
+        if len(veiculos) == 1 and not clientes:
+            return redirect("frota:detalhe", veiculos[0].pk)
+        if len(clientes) == 1 and not veiculos:
+            return redirect("pessoas:detalhe", clientes[0].pk)
+    return render(
+        request,
+        "buscar.html",
+        {"consulta": consulta, "veiculos": veiculos, "clientes": clientes},
+    )
 
 
 def painel(request):

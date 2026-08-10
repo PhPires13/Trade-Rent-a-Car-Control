@@ -46,6 +46,27 @@ class AlocacaoForm(forms.ModelForm):
         return None if valor in (None, "") else valor
 
 
+class AlocacaoEdicaoForm(forms.ModelForm):
+    """Edição do contrato em vigor (docs.md §4.2).
+
+    Veículo, cliente, datas e KM não entram: trocar de carro é troca temporária
+    ou encerramento + nova alocação.
+    """
+
+    class Meta:
+        model = Alocacao
+        fields = [
+            "valor_semanal",
+            "dia_vencimento",
+            "caucao_valor",
+            "limite_km",
+            "franquia_km_mensal",
+            "taxa_km_excedido",
+            "observacoes",
+        ]
+        widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
+
+
 class TrocaForm(forms.ModelForm):
     class Meta:
         model = TrocaTemporaria
@@ -78,7 +99,11 @@ def lista(request):
 
 
 def nova(request):
-    form = AlocacaoForm(request.POST or None, initial={"data_inicio": date.today()})
+    inicial = {"data_inicio": date.today()}
+    veiculo_id = request.GET.get("veiculo")
+    if veiculo_id:
+        inicial["veiculo"] = veiculo_id
+    form = AlocacaoForm(request.POST or None, initial=inicial)
     if request.method == "POST" and form.is_valid():
         alocacao = form.save(commit=False)
         if alocacao.dia_vencimento is None:
@@ -94,6 +119,24 @@ def nova(request):
         messages.success(request, f"Veículo {alocacao.veiculo.placa} alocado a {cliente.nome}.")
         return redirect("alocacoes:lista")
     return render(request, "alocacoes/nova.html", {"form": form})
+
+
+def editar(request, alocacao_id):
+    """Ajusta valores e condições de uma alocação sem mexer no vínculo carro↔cliente."""
+    alocacao = get_object_or_404(Alocacao, pk=alocacao_id)
+    if alocacao.status != Alocacao.Status.ATIVA:
+        # Contrato encerrado é registro histórico — não se altera (revisão etapa 8).
+        messages.error(request, "Alocação encerrada não pode ser editada.")
+        return redirect("alocacoes:lista")
+    form = AlocacaoEdicaoForm(request.POST or None, instance=alocacao)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(
+            request,
+            f"Alocação de {alocacao.veiculo.placa} → {alocacao.cliente.nome} atualizada.",
+        )
+        return redirect("alocacoes:lista")
+    return render(request, "alocacoes/editar.html", {"alocacao": alocacao, "form": form})
 
 
 def encerrar(request, alocacao_id):

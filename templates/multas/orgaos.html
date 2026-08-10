@@ -5,7 +5,10 @@
 {% block conteudo %}
 <div class="mb-6 flex items-center justify-between">
   <h1 class="text-2xl font-bold">Órgãos autuadores</h1>
-  <a href="{% url 'admin:multas_orgaoautuador_add' %}" class="text-sm underline">+ cadastrar no admin</a>
+  <a href="{% url 'multas:orgao_novo' %}"
+     class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">
+    + Novo órgão
+  </a>
 </div>
 <p class="mb-4 text-sm text-gray-500">Credenciais ficam criptografadas no banco e ocultas — clique para revelar na hora de usar o portal.</p>
 
@@ -14,7 +17,10 @@
   <div class="rounded-lg bg-white p-5 shadow" x-data="{ mostrar: false }">
     <div class="mb-2 flex items-center justify-between">
       <h2 class="font-bold">{{ orgao.nome }} <span class="text-xs font-normal text-gray-500">{{ orgao.get_esfera_display }}</span></h2>
-      {% if orgao.portal %}<a href="{{ orgao.portal }}" target="_blank" rel="noopener" class="text-sm underline">abrir portal ↗</a>{% endif %}
+      <div class="flex items-center gap-3 text-sm">
+        {% if orgao.portal %}<a href="{{ orgao.portal }}" target="_blank" rel="noopener" class="underline">abrir portal ↗</a>{% endif %}
+        <a href="{% url 'multas:orgao_editar' orgao.pk %}" class="underline">editar</a>
+      </div>
     </div>
     <dl class="space-y-1 text-sm">
       {% if orgao.login or orgao.senha %}
@@ -34,7 +40,7 @@
     </dl>
   </div>
   {% empty %}
-  <p class="text-gray-500">Nenhum órgão cadastrado — use "+ cadastrar no admin".</p>
+  <p class="text-gray-500">Nenhum órgão cadastrado — use "+ Novo órgão".</p>
   {% endfor %}
 </div>
 {% endblock %}

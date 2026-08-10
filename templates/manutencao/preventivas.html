@@ -7,7 +7,8 @@
 <h1 class="mb-2 text-2xl font-bold">Plano de manutenção preventiva</h1>
 <p class="mb-6 text-sm text-gray-500">
   Status por veículo e item do plano. Registrar uma manutenção do item zera o ciclo.
-  Intervalos padrão e personalizados são editados em <a href="{% url 'admin:index' %}" class="underline">Cadastros</a>.
+  <a href="{% url 'manutencao:plano' %}" class="underline">Editar plano de manutenção</a>
+  (itens, intervalos padrão e exceções por veículo).
 </p>
 
 {% for veiculo, itens in quadro %}

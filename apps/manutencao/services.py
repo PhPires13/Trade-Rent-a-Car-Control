@@ -94,3 +94,51 @@ def preventivas_em_alerta():
         if criticas:
             alertas.append((veiculo, criticas))
     return alertas
+
+
+def contagem_alertas_por_veiculo(veiculos):
+    """{veiculo_id: nº de preventivas vencidas/próximas} em 3 queries fixas.
+
+    Versão em lote de resumo_preventivas para listagens (o hub da frota);
+    segue a mesma regra do painel: só locação, fora vendidos e inativos.
+    """
+    from django.db.models import Max
+
+    elegiveis = [
+        v
+        for v in veiculos
+        if v.uso == Veiculo.Uso.LOCACAO
+        and v.status not in (Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO)
+    ]
+    if not elegiveis:
+        return {}
+    ids = [v.pk for v in elegiveis]
+    itens = list(ItemPreventiva.objects.filter(ativo=True, intervalo_km_padrao__isnull=False))
+    personalizados = {
+        (veiculo_id, item_id): intervalo
+        for veiculo_id, item_id, intervalo in IntervaloPersonalizado.objects.filter(
+            veiculo_id__in=ids
+        ).values_list("veiculo_id", "item_id", "intervalo_km")
+    }
+    ultimos_km = {
+        (linha["veiculo_id"], linha["item_id"]): linha["ultimo_km"]
+        for linha in Manutencao.objects.filter(
+            veiculo_id__in=ids, item__isnull=False, km__isnull=False
+        )
+        .values("veiculo_id", "item_id")
+        .annotate(ultimo_km=Max("km"))
+    }
+    contagens = {}
+    for veiculo in elegiveis:
+        alertas = 0
+        for item in itens:
+            ultimo = ultimos_km.get((veiculo.pk, item.pk))
+            if ultimo is None:
+                continue
+            intervalo = personalizados.get((veiculo.pk, item.pk)) or item.intervalo_km_padrao
+            faltam = ultimo + intervalo - veiculo.km_atual
+            if faltam <= MARGEM_ALERTA_KM:
+                alertas += 1
+        if alertas:
+            contagens[veiculo.pk] = alertas
+    return contagens

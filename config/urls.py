@@ -6,9 +6,11 @@ from config import views
 
 urlpatterns = [
     path("", views.painel, name="painel"),
+    path("buscar/", views.buscar, name="buscar"),
     path("entrar/", auth_views.LoginView.as_view(template_name="login.html"), name="login"),
     path("sair/", auth_views.LogoutView.as_view(), name="logout"),
     path("frota/", include("apps.frota.urls")),
+    path("clientes/", include("apps.pessoas.urls")),
     path("alocacoes/", include("apps.alocacoes.urls")),
     path("financeiro/", include("apps.financeiro.urls")),
     path("km/", include("apps.km.urls")),

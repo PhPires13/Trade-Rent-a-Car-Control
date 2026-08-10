@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}{{ veiculo.placa }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <div class="flex flex-wrap items-center gap-2">
+      <h1 class="text-2xl font-bold">{{ veiculo.placa }}</h1>
+      {% include "frota/_status.html" %}
+    </div>
+    <p class="mt-1 text-gray-600">
+      {{ veiculo.marca_modelo }}{% if veiculo.ano %} · {{ veiculo.ano }}{% endif %} · {{ veiculo.km_atual|intcomma }} km
+    </p>
+    <p class="mt-1 text-sm">
+      {% if motorista %}<span class="text-gray-500">Com:</span> <span class="font-semibold">{{ motorista }}</span>
+      {% if valor_semanal %}<span class="text-gray-500">— R$ {{ valor_semanal|intcomma }} / semana</span>{% endif %}
+      {% else %}<span class="text-gray-400">Sem motorista no momento</span>{% endif %}
+    </p>
+  </div>
+  <div class="flex flex-wrap items-center gap-3 text-sm">
+    <a href="{% url 'frota:veiculo_editar' veiculo.pk %}" class="underline">Editar</a>
+    <a href="{% url 'manutencao:registrar' veiculo.pk %}" class="underline">Registrar manutenção</a>
+    {% if veiculo.status == "disponivel" and veiculo.uso == "locacao" %}
+    <a href="{% url 'alocacoes:nova' %}" class="rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">Alocar</a>
+    {% endif %}
+    {% if veiculo.status != "vendido" %}
+    <a href="{% url 'frota:vender' veiculo.pk %}" class="rounded bg-marca-amarelo px-3 py-1.5 font-bold text-marca-preto hover:brightness-95">Vender</a>
+    {% endif %}
+    <a href="{% url 'frota:hub' %}" class="text-gray-500 underline">← frota</a>
+  </div>
+</div>
+
+<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  <a href="{% url 'alocacoes:timeline' veiculo.pk %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black">{{ total_alocacoes }}</div>
+    <div class="text-sm text-gray-500">Linha do tempo — alocações</div>
+  </a>
+  <a href="{% url 'km:historico' veiculo.pk %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black">{{ total_km }}</div>
+    <div class="text-sm text-gray-500">Registros de KM</div>
+  </a>
+  <a href="{% url 'manutencao:historico' veiculo.pk %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black">{{ total_manutencoes }}</div>
+    <div class="text-sm text-gray-500">Manutenções</div>
+  </a>
+  <a href="{% url 'multas:lista' %}?veiculo={{ veiculo.placa }}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black">{{ total_multas }}</div>
+    <div class="text-sm text-gray-500">Multas</div>
+  </a>
+  <a href="{% url 'sinistros:lista' %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black">{{ total_sinistros }}</div>
+    <div class="text-sm text-gray-500">Sinistros</div>
+  </a>
+  <a href="{% url 'frota:ficha' veiculo.pk %}" class="rounded-lg bg-marca-preto p-4 text-white shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-2xl font-black text-marca-amarelo">R$</div>
+    <div class="text-sm text-gray-300">Ficha financeira e desmobilização</div>
+  </a>
+</div>
+
+<div class="rounded-lg bg-white p-5 shadow">
+  <h2 class="mb-3 font-semibold">Dados cadastrais</h2>
+  <dl class="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Renavam</dt><dd>{{ veiculo.renavam|default:"—" }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Chassi</dt><dd>{{ veiculo.chassi|default:"—" }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Categoria</dt><dd>{{ veiculo.categoria.nome|default:"—" }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Uso</dt><dd>{{ veiculo.get_uso_display }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Data de aquisição</dt><dd>{{ veiculo.data_aquisicao|date:"d/m/Y"|default:"—" }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Valor de compra</dt><dd>{% if veiculo.valor_compra %}R$ {{ veiculo.valor_compra|intcomma }}{% else %}—{% endif %}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Custos de entrada</dt><dd>{% if veiculo.custos_entrada %}R$ {{ veiculo.custos_entrada|intcomma }}{% else %}—{% endif %}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">KM na compra</dt><dd>{% if veiculo.km_compra %}{{ veiculo.km_compra|intcomma }}{% else %}—{% endif %}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Valor estimado de venda</dt><dd>{% if veiculo.valor_venda_estimado %}R$ {{ veiculo.valor_venda_estimado|intcomma }}{% else %}—{% endif %}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Mensalidade proteção ($ AT)</dt><dd>{% if veiculo.mensalidade_protecao %}R$ {{ veiculo.mensalidade_protecao|intcomma }}{% else %}—{% endif %}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Chave reserva</dt><dd>{{ veiculo.get_chave_reserva_display }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Rastreador</dt>
+      <dd>{{ veiculo.rastreador_fornecedor|default:"—" }}{% if veiculo.rastreador_vigencia_fim %} · até {{ veiculo.rastreador_vigencia_fim|date:"d/m/Y" }}{% endif %}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Bateria — troca</dt><dd>{{ veiculo.bateria_data_troca|date:"d/m/Y"|default:"—" }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Bateria — fornecedor / garantia</dt>
+      <dd>{{ veiculo.bateria_fornecedor|default:"—" }}{% if veiculo.bateria_garantia_fim %} · até {{ veiculo.bateria_garantia_fim|date:"d/m/Y" }}{% endif %}</dd></div>
+    {% if veiculo.status == "vendido" %}
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Venda</dt><dd>{{ veiculo.data_venda|date:"d/m/Y"|default:"—" }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Valor da venda</dt><dd>{% if veiculo.valor_venda %}R$ {{ veiculo.valor_venda|intcomma }}{% else %}—{% endif %}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Comprador</dt><dd>{{ veiculo.comprador|default:"—" }}</dd></div>
+    {% endif %}
+  </dl>
+  {% if veiculo.observacoes %}
+  <div class="mt-4 border-t border-gray-100 pt-3 text-sm">
+    <p class="mb-1 text-gray-500">Observações</p>
+    <p class="whitespace-pre-line">{{ veiculo.observacoes }}</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

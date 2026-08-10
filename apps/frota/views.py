@@ -1,12 +1,306 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.db.models import Count
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
+from apps.alocacoes.models import Alocacao, TrocaTemporaria
+from apps.manutencao.services import contagem_alertas_por_veiculo
+from apps.multas.models import Multa
+
 from . import desmobilizacao
-from .models import Veiculo
+from .models import Categoria, Fornecedor, Veiculo
+
+
+def _quem_esta_com_o_carro(veiculo):
+    """Motorista atual do veículo — alocação ativa ou empréstimo como substituto."""
+    alocacao = (
+        veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).select_related("cliente").first()
+    )
+    if alocacao:
+        return {
+            "motorista": alocacao.cliente.nome,
+            "valor_semanal": alocacao.valor_semanal,
+            "alocacao": alocacao,
+        }
+    troca = (
+        veiculo.trocas_como_substituto.filter(data_devolucao__isnull=True)
+        .select_related("alocacao__cliente")
+        .first()
+    )
+    if troca:
+        return {
+            "motorista": f"{troca.alocacao.cliente.nome} (substituto)",
+            "valor_semanal": troca.valor_semanal_ajustado or troca.alocacao.valor_semanal,
+            "alocacao": troca.alocacao,
+        }
+    return {"motorista": None, "valor_semanal": None, "alocacao": None}
+
+
+def hub(request):
+    """Hub da frota — cards de veículos com filtros de status, uso e placa (docs.md §4.1).
+
+    As informações dos cards vêm em queries fixas (lote), não por veículo —
+    a frota cresce e esta é uma página de navegação principal.
+    """
+    status = request.GET.get("status", "")
+    uso = request.GET.get("uso", "")
+    placa = request.GET.get("placa", "").strip()
+
+    veiculos = Veiculo.objects.select_related("categoria").order_by("placa")
+    if status and status != "todos":
+        veiculos = veiculos.filter(status=status)
+    elif not status:
+        # Padrão: vendidos ficam escondidos até serem pedidos no filtro.
+        veiculos = veiculos.exclude(status=Veiculo.Status.VENDIDO)
+    if uso and uso != "todos":
+        veiculos = veiculos.filter(uso=uso)
+    if placa:
+        veiculos = veiculos.filter(placa__icontains=placa.upper().replace("-", "").replace(" ", ""))
+
+    veiculos = list(veiculos)
+    alocacoes_ativas = {
+        alocacao.veiculo_id: alocacao
+        for alocacao in Alocacao.objects.filter(status=Alocacao.Status.ATIVA).select_related(
+            "cliente"
+        )
+    }
+    trocas_ativas = {
+        troca.veiculo_substituto_id: troca
+        for troca in TrocaTemporaria.objects.filter(data_devolucao__isnull=True).select_related(
+            "alocacao__cliente"
+        )
+    }
+    fici_pendentes = dict(
+        Multa.objects.filter(fici_status=Multa.Fici.PENDENTE)
+        .values_list("veiculo_id")
+        .annotate(total=Count("id"))
+    )
+    preventivas = contagem_alertas_por_veiculo(veiculos)
+
+    cards = []
+    for veiculo in veiculos:
+        alocacao = alocacoes_ativas.get(veiculo.pk)
+        troca = trocas_ativas.get(veiculo.pk)
+        if alocacao:
+            motorista, valor = alocacao.cliente.nome, alocacao.valor_semanal
+        elif troca:
+            motorista = f"{troca.alocacao.cliente.nome} (substituto)"
+            valor = troca.valor_semanal_ajustado or troca.alocacao.valor_semanal
+        else:
+            motorista = valor = None
+        cards.append(
+            {
+                "veiculo": veiculo,
+                "motorista": motorista,
+                "valor_semanal": valor,
+                "preventivas_alerta": preventivas.get(veiculo.pk, 0),
+                "multas_fici_pendentes": fici_pendentes.get(veiculo.pk, 0),
+            }
+        )
+
+    return render(
+        request,
+        "frota/hub.html",
+        {
+            "cards": cards,
+            "status_escolhido": status,
+            "uso_escolhido": uso,
+            "placa_buscada": placa,
+            "opcoes_status": Veiculo.Status.choices,
+            "opcoes_uso": Veiculo.Uso.choices,
+        },
+    )
+
+
+def detalhe(request, veiculo_id):
+    """Página-hub de um veículo — cadastro, situação atual e atalhos (docs.md §4.1)."""
+    veiculo = get_object_or_404(Veiculo.objects.select_related("categoria"), pk=veiculo_id)
+    contexto = {
+        "veiculo": veiculo,
+        "total_alocacoes": veiculo.alocacoes.count(),
+        "total_km": veiculo.registros_km.count(),
+        "total_manutencoes": veiculo.manutencoes.count(),
+        "total_multas": veiculo.multas.count(),
+        "total_sinistros": veiculo.sinistros.count(),
+    }
+    contexto.update(_quem_esta_com_o_carro(veiculo))
+    return render(request, "frota/detalhe.html", contexto)
+
+
+class VeiculoForm(forms.ModelForm):
+    """Cadastro do veículo — os campos de venda são geridos pelo fluxo "Vender"."""
+
+    SECOES = (
+        (
+            "Identificação",
+            ["placa", "renavam", "chassi", "marca_modelo", "ano", "categoria", "uso"],
+        ),
+        (
+            "Aquisição",
+            [
+                "data_aquisicao",
+                "valor_compra",
+                "custos_entrada",
+                "km_compra",
+                "km_atual",
+                "valor_venda_estimado",
+            ],
+        ),
+        (
+            "Proteção e vigências",
+            [
+                "mensalidade_protecao",
+                "chave_reserva",
+                "rastreador_fornecedor",
+                "rastreador_vigencia_fim",
+                "bateria_data_troca",
+                "bateria_fornecedor",
+                "bateria_garantia_fim",
+            ],
+        ),
+        ("Outros", ["observacoes"]),
+    )
+
+    class Meta:
+        model = Veiculo
+        # "status" fica de fora: é gerido pelos fluxos (alocar/encerrar/manutenção/vender);
+        # editar aqui dessincronizaria a alocação ativa e a venda (revisão etapa 8).
+        fields = [
+            "placa",
+            "renavam",
+            "chassi",
+            "marca_modelo",
+            "ano",
+            "categoria",
+            "uso",
+            "data_aquisicao",
+            "valor_compra",
+            "custos_entrada",
+            "km_compra",
+            "km_atual",
+            "valor_venda_estimado",
+            "mensalidade_protecao",
+            "chave_reserva",
+            "rastreador_fornecedor",
+            "rastreador_vigencia_fim",
+            "bateria_data_troca",
+            "bateria_fornecedor",
+            "bateria_garantia_fim",
+            "observacoes",
+        ]
+        widgets = {
+            "data_aquisicao": forms.DateInput(attrs={"type": "date"}),
+            "rastreador_vigencia_fim": forms.DateInput(attrs={"type": "date"}),
+            "bateria_data_troca": forms.DateInput(attrs={"type": "date"}),
+            "bateria_garantia_fim": forms.DateInput(attrs={"type": "date"}),
+            "observacoes": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def clean_placa(self):
+        """Normaliza antes da checagem de duplicidade — o modelo grava sem hífen e em maiúsculas."""
+        return self.cleaned_data["placa"].upper().replace("-", "").replace(" ", "")
+
+    def clean_km_atual(self):
+        """O odômetro nunca anda para trás — todos os fluxos só aumentam o KM.
+
+        Reduzir aqui esconderia preventivas vencidas; correção real de odômetro
+        é exceção e fica no Admin.
+        """
+        km = self.cleaned_data["km_atual"]
+        if self.instance.pk and km < self.instance.km_atual:
+            raise ValidationError(
+                f"KM atual ({km}) menor que o registrado ({self.instance.km_atual}). "
+                "O odômetro não diminui — correções excepcionais são feitas no Admin."
+            )
+        return km
+
+    @property
+    def secoes(self):
+        return [(titulo, [self[nome] for nome in nomes]) for titulo, nomes in self.SECOES]
+
+
+def _formulario_veiculo(request, veiculo):
+    form = VeiculoForm(request.POST or None, instance=veiculo)
+    if request.method == "POST" and form.is_valid():
+        salvo = form.save()
+        messages.success(request, f"Veículo {salvo.placa} salvo.")
+        return redirect("frota:detalhe", salvo.pk)
+    return render(request, "frota/veiculo_form.html", {"form": form, "veiculo": veiculo})
+
+
+def veiculo_novo(request):
+    return _formulario_veiculo(request, None)
+
+
+def veiculo_editar(request, veiculo_id):
+    return _formulario_veiculo(request, get_object_or_404(Veiculo, pk=veiculo_id))
+
+
+class CategoriaForm(forms.ModelForm):
+    class Meta:
+        model = Categoria
+        fields = ["nome", "valor_semanal_referencia", "observacoes"]
+        widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
+
+
+class FornecedorForm(forms.ModelForm):
+    class Meta:
+        model = Fornecedor
+        fields = ["nome", "cnpj", "contato", "tipo_servico", "observacoes"]
+        widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
+
+
+def _cadastro_simples(request, form_classe, modelo, template, chave_id, contexto_extra):
+    """Cria e edita registros de apoio na mesma tela (categorias e fornecedores)."""
+    form = form_classe()
+    if request.method == "POST":
+        registro_id = (request.POST.get(chave_id) or "").strip() or None
+        if registro_id is not None and not registro_id.isdigit():
+            raise Http404("Registro inválido.")
+        instancia = get_object_or_404(modelo, pk=registro_id) if registro_id else None
+        form = form_classe(request.POST, instance=instancia)
+        if form.is_valid():
+            salvo = form.save()
+            messages.success(request, f"{salvo.nome} salvo.")
+            return redirect(request.path)
+        messages.error(
+            request,
+            "; ".join(f"{campo}: {erros[0]}" for campo, erros in form.errors.items()),
+        )
+    return render(request, template, {"form": form, **contexto_extra()})
+
+
+def categorias(request):
+    """Categorias de veículo e seu valor semanal de referência (docs.md §4.1)."""
+    return _cadastro_simples(
+        request,
+        CategoriaForm,
+        Categoria,
+        "frota/categorias.html",
+        "categoria_id",
+        lambda: {
+            "categorias": Categoria.objects.annotate(total_veiculos=Count("veiculos")).order_by(
+                "nome"
+            )
+        },
+    )
+
+
+def fornecedores(request):
+    """Oficinas e prestadores de serviço (docs.md §4.1)."""
+    return _cadastro_simples(
+        request,
+        FornecedorForm,
+        Fornecedor,
+        "frota/fornecedores.html",
+        "fornecedor_id",
+        lambda: {"fornecedores": Fornecedor.objects.order_by("nome")},
+    )
 
 
 def ranking(request):

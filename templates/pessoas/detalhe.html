@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}{{ cliente.nome }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">
+    {{ cliente.nome }}
+    {% if cliente.status == "ativo" %}
+      <span class="ml-2 rounded bg-green-100 px-2 py-0.5 text-sm font-semibold text-green-700">Ativo</span>
+    {% elif cliente.status == "inadimplente" %}
+      <span class="ml-2 rounded bg-red-100 px-2 py-0.5 text-sm font-semibold text-red-700">Inadimplente</span>
+    {% else %}
+      <span class="ml-2 rounded bg-gray-100 px-2 py-0.5 text-sm font-semibold text-gray-600">Inativo</span>
+    {% endif %}
+  </h1>
+  <div class="flex flex-wrap items-center gap-3 text-sm">
+    <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="underline">Extrato completo</a>
+    <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}" class="underline">Receber pagamento</a>
+    <a href="{% url 'pessoas:editar' cliente.pk %}"
+       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">Editar</a>
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-3">
+  <div class="rounded-lg bg-white p-5 shadow lg:col-span-2">
+    <h2 class="mb-3 font-semibold">Dados cadastrais</h2>
+    <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+      <div><dt class="text-gray-500">CPF/CNPJ</dt><dd>{{ cliente.cpf_cnpj }}</dd></div>
+      <div>
+        <dt class="text-gray-500">Telefone</dt>
+        <dd>
+          {% if telefone_digitos %}
+            <a href="https://wa.me/{{ telefone_digitos }}" target="_blank" rel="noopener"
+               class="text-green-700 underline">{{ cliente.telefone }}</a>
+          {% else %}—{% endif %}
+        </dd>
+      </div>
+      <div><dt class="text-gray-500">E-mail</dt><dd>{{ cliente.email|default:"—" }}</dd></div>
+      <div><dt class="text-gray-500">Endereço</dt><dd>{{ cliente.endereco|default:"—" }}</dd></div>
+      <div>
+        <dt class="text-gray-500">CNH</dt>
+        <dd>
+          {{ cliente.cnh_numero|default:"—" }}
+          {% if cliente.cnh_categoria %}<span class="text-gray-500">cat. {{ cliente.cnh_categoria }}</span>{% endif %}
+          {% if cliente.cnh_validade %}
+            <span class="{% if cnh_vencida %}font-semibold text-red-700{% elif cnh_a_vencer %}font-semibold text-yellow-700{% endif %}">
+              — válida até {{ cliente.cnh_validade|date:"d/m/Y" }}{% if cnh_vencida %} (vencida){% elif cnh_a_vencer %} (vence em breve){% endif %}
+            </span>
+          {% endif %}
+        </dd>
+      </div>
+      <div><dt class="text-gray-500">Dia de vencimento</dt><dd>{{ cliente.get_dia_vencimento_display|default:"—" }}</dd></div>
+      <div>
+        <dt class="text-gray-500">Caução acordada</dt>
+        <dd>{% if cliente.caucao_referencia %}R$ {{ cliente.caucao_referencia|intcomma }}{% else %}—{% endif %}</dd>
+      </div>
+      <div><dt class="text-gray-500">Observações</dt><dd>{{ cliente.observacoes|default:"—" }}</dd></div>
+    </dl>
+  </div>
+
+  <div class="space-y-3">
+    <div class="rounded-lg bg-white p-4 shadow">
+      <div class="text-sm text-gray-500">Saldo devedor</div>
+      <div class="text-2xl font-black {% if saldo_devedor > 0 %}text-red-700{% endif %}">R$ {{ saldo_devedor|intcomma }}</div>
+    </div>
+    <div class="rounded-lg bg-white p-4 shadow">
+      <div class="text-sm text-gray-500">Crédito disponível</div>
+      <div class="text-2xl font-black {% if credito > 0 %}text-green-700{% endif %}">R$ {{ credito|intcomma }}</div>
+    </div>
+    <div class="rounded-lg bg-white p-4 shadow">
+      <div class="text-sm text-gray-500">Caução retida</div>
+      <div class="text-2xl font-black">R$ {{ caucao|intcomma }}</div>
+    </div>
+  </div>
+</div>
+
+<h2 class="mb-3 mt-8 text-xl font-bold">Alocações</h2>
+{% if alocacao_ativa %}
+<div class="mb-4 rounded-lg border-l-4 border-marca-amarelo bg-white p-5 shadow">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <div>
+      <a href="{% url 'alocacoes:timeline' alocacao_ativa.veiculo.pk %}"
+         class="text-lg font-bold underline decoration-marca-amarelo decoration-2">{{ alocacao_ativa.veiculo.placa }}</a>
+      <span class="text-gray-500">{{ alocacao_ativa.veiculo.marca_modelo }}</span>
+    </div>
+    <div class="text-sm">
+      R$ {{ alocacao_ativa.valor_semanal|intcomma }}/semana ·
+      desde {{ alocacao_ativa.data_inicio|date:"d/m/Y" }} ·
+      vence {{ alocacao_ativa.get_dia_vencimento_display }}
+    </div>
+  </div>
+  {% if alocacao_ativa.troca_ativa %}
+  <p class="mt-2 rounded bg-yellow-50 px-3 py-1.5 text-sm text-yellow-800">
+    Está com o substituto {{ alocacao_ativa.troca_ativa.veiculo_substituto.placa }}
+    desde {{ alocacao_ativa.troca_ativa.data_retirada|date:"d/m/Y" }}
+    {% if alocacao_ativa.troca_ativa.motivo %}({{ alocacao_ativa.troca_ativa.motivo }}){% endif %}
+  </p>
+  {% endif %}
+</div>
+{% else %}
+<p class="mb-4 text-gray-500">Sem carro no momento.</p>
+{% endif %}
+
+{% if historico %}
+<div class="overflow-x-auto rounded-lg bg-white shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-marca-preto text-left text-white">
+      <tr>
+        <th class="px-3 py-2">Veículo</th>
+        <th class="px-3 py-2">Início</th>
+        <th class="px-3 py-2">Término</th>
+        <th class="px-3 py-2">Valor/semana</th>
+        <th class="px-3 py-2">Situação</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for alocacao in historico %}
+      <tr>
+        <td class="px-3 py-2 font-medium">
+          <a href="{% url 'alocacoes:timeline' alocacao.veiculo.pk %}" class="underline">{{ alocacao.veiculo.placa }}</a>
+          <span class="text-gray-500">{{ alocacao.veiculo.marca_modelo }}</span>
+        </td>
+        <td class="px-3 py-2">{{ alocacao.data_inicio|date:"d/m/Y" }}</td>
+        <td class="px-3 py-2">{{ alocacao.data_termino|date:"d/m/Y"|default:"—" }}</td>
+        <td class="px-3 py-2">R$ {{ alocacao.valor_semanal|intcomma }}</td>
+        <td class="px-3 py-2 text-gray-600">{{ alocacao.get_status_display }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="mt-8 grid gap-6 lg:grid-cols-2">
+  <div class="rounded-lg bg-white p-5 shadow">
+    <div class="mb-3 flex items-center justify-between">
+      <h2 class="font-semibold">Multas ({{ total_multas }})</h2>
+      <a href="{% url 'multas:lista' %}" class="text-sm underline">ver todas</a>
+    </div>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        {% for multa in ultimas_multas %}
+        <tr>
+          <td class="px-2 py-1.5">{{ multa.data_infracao|date:"d/m/y" }}</td>
+          <td class="px-2 py-1.5">{{ multa.veiculo.placa }}</td>
+          <td class="px-2 py-1.5">{{ multa.descricao|default:multa.codigo|truncatechars:30 }}</td>
+          <td class="px-2 py-1.5 text-right">{% if multa.valor %}R$ {{ multa.valor|intcomma }}{% else %}—{% endif %}</td>
+          <td class="px-2 py-1.5 text-xs text-gray-500">{{ multa.repasse }}</td>
+        </tr>
+        {% empty %}
+        <tr><td class="px-2 py-3 text-gray-500">Nenhuma multa.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-3 font-semibold">Condutores autorizados</h2>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        {% for condutor in condutores %}
+        <tr>
+          <td class="px-2 py-1.5 font-medium">{{ condutor.nome }}</td>
+          <td class="px-2 py-1.5 text-gray-600">{{ condutor.cpf|default:"—" }}</td>
+          <td class="px-2 py-1.5 text-gray-600">{{ condutor.contato|default:"—" }}</td>
+          <td class="px-2 py-1.5 text-right text-xs">
+            <a href="{% url 'pessoas:condutor_editar' condutor.pk %}" class="underline">editar</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td class="px-2 py-3 text-gray-500">Nenhum condutor autorizado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <form method="post" action="{% url 'pessoas:condutor_novo' cliente.pk %}"
+          class="mt-4 flex flex-wrap items-end gap-2 border-t border-gray-100 pt-3">
+      {% csrf_token %}
+      {% for field in form_condutor %}
+      <div>
+        <label class="mb-1 block text-xs text-gray-500" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+      </div>
+      {% endfor %}
+      <button class="rounded bg-marca-preto px-3 py-1.5 text-sm text-white">+ Adicionar</button>
+    </form>
+  </div>
+</div>
+
+<style>
+  form input, form select, form textarea {
+    border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.3rem 0.5rem; font-size: 0.875rem;
+  }
+</style>
+{% endblock %}

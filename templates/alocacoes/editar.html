@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block titulo %}Editar alocação — {{ alocacao.veiculo.placa }}{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-1 text-2xl font-bold">Editar alocação</h1>
+<p class="mb-6 text-sm text-gray-500">
+  {{ alocacao.veiculo.placa }} · {{ alocacao.veiculo.marca_modelo }} →
+  {{ alocacao.cliente.nome }} desde {{ alocacao.data_inicio|date:"d/m/Y" }}.
+  Trocar de carro é <a href="{% url 'alocacoes:troca_nova' alocacao.pk %}" class="underline">troca temporária</a>
+  ou <a href="{% url 'alocacoes:encerrar' alocacao.pk %}" class="underline">encerramento</a>.
+</p>
+
+<form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
+      x-data="{ limite: '{{ form.limite_km.value|default:'ilimitado' }}' }">
+  {% csrf_token %}
+  {% for erro in form.non_field_errors %}
+    <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{ erro }}</p>
+  {% endfor %}
+  {% for field in form %}
+  <div {% if field.name == "franquia_km_mensal" or field.name == "taxa_km_excedido" %}x-show="limite === 'limitado'"{% endif %}>
+    <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+    {% if field.name == "limite_km" %}
+      <select name="limite_km" id="{{ field.id_for_label }}" x-model="limite">
+        <option value="ilimitado">Ilimitado</option>
+        <option value="limitado">Limitado</option>
+      </select>
+    {% else %}
+      {{ field }}
+    {% endif %}
+    {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+    {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+  </div>
+  {% endfor %}
+  <div class="flex gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Salvar</button>
+    <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input, form select, form textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+  }
+</style>
+{% endblock %}

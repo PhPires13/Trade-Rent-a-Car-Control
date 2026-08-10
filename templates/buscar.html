@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Busca — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-6 text-2xl font-bold">Busca{% if consulta %}: "{{ consulta }}"{% endif %}</h1>
+
+{% if not consulta %}
+<p class="text-gray-500">Digite uma placa ou nome de cliente na barra do topo.</p>
+{% elif not veiculos and not clientes %}
+<p class="text-gray-500">Nada encontrado para "{{ consulta }}".</p>
+{% endif %}
+
+{% if veiculos %}
+<h2 class="mb-2 font-semibold">Veículos</h2>
+<ul class="mb-8 space-y-2">
+  {% for veiculo in veiculos %}
+  <li class="rounded-lg bg-white p-3 shadow">
+    <a href="{% url 'frota:detalhe' veiculo.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
+      {{ veiculo.placa }}</a>
+    <span class="text-gray-600">{{ veiculo.marca_modelo }} · {{ veiculo.get_status_display }} · {{ veiculo.km_atual|intcomma }} km</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if clientes %}
+<h2 class="mb-2 font-semibold">Clientes</h2>
+<ul class="space-y-2">
+  {% for cliente in clientes %}
+  <li class="rounded-lg bg-white p-3 shadow">
+    <a href="{% url 'pessoas:detalhe' cliente.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
+      {{ cliente.nome }}</a>
+    <span class="text-gray-600">{{ cliente.get_status_display }}{% if cliente.telefone %} · {{ cliente.telefone }}{% endif %}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

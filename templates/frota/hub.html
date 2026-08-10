@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Frota — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Frota</h1>
+  <div class="flex flex-wrap items-center gap-3 text-sm">
+    <a href="{% url 'frota:ranking' %}" class="underline">Ranking de desmobilização</a>
+    <a href="{% url 'frota:categorias' %}" class="underline">Categorias</a>
+    <a href="{% url 'frota:fornecedores' %}" class="underline">Fornecedores</a>
+    <a href="{% url 'frota:veiculo_novo' %}"
+       class="rounded bg-marca-amarelo px-3 py-1.5 font-bold text-marca-preto hover:brightness-95">+ Novo veículo</a>
+  </div>
+</div>
+
+<form method="get" class="mb-6 flex flex-wrap items-end gap-3 rounded-lg bg-white p-4 shadow">
+  <div>
+    <label class="mb-1 block text-xs font-medium text-gray-500" for="filtro-status">Status</label>
+    <select id="filtro-status" name="status" class="rounded border border-gray-300 px-2 py-1.5 text-sm">
+      <option value="" {% if not status_escolhido %}selected{% endif %}>Todos (menos vendidos)</option>
+      <option value="todos" {% if status_escolhido == "todos" %}selected{% endif %}>Todos, incluindo vendidos</option>
+      {% for valor, rotulo in opcoes_status %}
+      <option value="{{ valor }}" {% if status_escolhido == valor %}selected{% endif %}>{{ rotulo }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="mb-1 block text-xs font-medium text-gray-500" for="filtro-uso">Uso</label>
+    <select id="filtro-uso" name="uso" class="rounded border border-gray-300 px-2 py-1.5 text-sm">
+      <option value="" {% if not uso_escolhido %}selected{% endif %}>Todos</option>
+      {% for valor, rotulo in opcoes_uso %}
+      <option value="{{ valor }}" {% if uso_escolhido == valor %}selected{% endif %}>{{ rotulo }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="mb-1 block text-xs font-medium text-gray-500" for="filtro-placa">Placa</label>
+    <input id="filtro-placa" type="search" name="placa" value="{{ placa_buscada }}" placeholder="ex.: ABC1D23"
+           class="rounded border border-gray-300 px-2 py-1.5 text-sm uppercase">
+  </div>
+  <button class="rounded bg-marca-preto px-4 py-1.5 text-sm font-semibold text-white hover:brightness-125">Filtrar</button>
+  <a href="{% url 'frota:hub' %}" class="py-1.5 text-sm text-gray-500 underline">limpar</a>
+  <span class="ml-auto text-sm text-gray-500">{{ cards|length }} veículo{{ cards|length|pluralize }}</span>
+</form>
+
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  {% for card in cards %}
+  <div class="flex flex-col rounded-lg bg-white p-4 shadow">
+    <div class="mb-2 flex flex-wrap items-center gap-2">
+      <a href="{% url 'frota:detalhe' card.veiculo.pk %}"
+         class="text-lg font-black underline decoration-marca-amarelo decoration-2">{{ card.veiculo.placa }}</a>
+      {% include "frota/_status.html" with veiculo=card.veiculo %}
+    </div>
+    <p class="text-sm text-gray-600">
+      {{ card.veiculo.marca_modelo }}{% if card.veiculo.ano %} · {{ card.veiculo.ano }}{% endif %}
+      {% if card.veiculo.categoria %}<span class="text-gray-400">· {{ card.veiculo.categoria.nome }}</span>{% endif %}
+    </p>
+    <p class="mt-1 text-sm text-gray-500">{{ card.veiculo.km_atual|intcomma }} km</p>
+
+    <div class="mt-3 border-t border-gray-100 pt-2 text-sm">
+      {% if card.motorista %}
+      <div><span class="text-gray-500">Com:</span> <span class="font-semibold">{{ card.motorista }}</span></div>
+      {% if card.valor_semanal %}
+      <div class="text-gray-500">R$ {{ card.valor_semanal|intcomma }} / semana</div>
+      {% endif %}
+      {% else %}
+      <div class="text-gray-400">Sem motorista no momento</div>
+      {% endif %}
+    </div>
+
+    {% if card.preventivas_alerta or card.multas_fici_pendentes %}
+    <div class="mt-3 flex flex-wrap gap-2 text-xs">
+      {% if card.preventivas_alerta %}
+      <a href="{% url 'manutencao:preventivas' %}" class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">
+        {{ card.preventivas_alerta }} preventiva{{ card.preventivas_alerta|pluralize }} em alerta</a>
+      {% endif %}
+      {% if card.multas_fici_pendentes %}
+      <a href="{% url 'multas:lista' %}?veiculo={{ card.veiculo.placa }}" class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-900">
+        {{ card.multas_fici_pendentes }} FICI pendente{{ card.multas_fici_pendentes|pluralize }}</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% empty %}
+  <p class="text-gray-500">Nenhum veículo encontrado com esses filtros.</p>
+  {% endfor %}
+</div>
+{% endblock %}

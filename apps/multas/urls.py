@@ -12,4 +12,6 @@ urlpatterns = [
     path("<int:multa_id>/paga/", views.marcar_paga, name="marcar_paga"),
     path("gerar-nd/", views.gerar_nd, name="gerar_nd"),
     path("orgaos/", views.orgaos, name="orgaos"),
+    path("orgaos/novo/", views.orgao_novo, name="orgao_novo"),
+    path("orgaos/<int:orgao_id>/editar/", views.orgao_editar, name="orgao_editar"),
 ]

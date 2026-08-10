@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block titulo %}{% if veiculo %}Editar {{ veiculo.placa }}{% else %}Novo veículo{% endif %} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<h1 class="mb-6 text-2xl font-bold">
+  {% if veiculo %}Editar veículo — {{ veiculo.placa }}{% else %}Novo veículo{% endif %}
+</h1>
+
+<form method="post" class="space-y-6">
+  {% csrf_token %}
+  {% if form.non_field_errors %}
+  <div class="rounded border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-700">
+    {% for erro in form.non_field_errors %}<p>{{ erro }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% for titulo, campos in form.secoes %}
+  <div class="rounded-lg bg-white p-5 shadow">
+    <h2 class="mb-4 border-b border-gray-100 pb-2 font-semibold">{{ titulo }}</h2>
+    <div class="grid gap-4 sm:grid-cols-2">
+      {% for field in campos %}
+      <div {% if field.name == "observacoes" %}class="sm:col-span-2"{% endif %}>
+        <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+        {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <div class="flex gap-3">
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Salvar</button>
+    <a href="{% if veiculo %}{% url 'frota:detalhe' veiculo.pk %}{% else %}{% url 'frota:hub' %}{% endif %}"
+       class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  form input, form select, form textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+  }
+</style>
+{% endblock %}

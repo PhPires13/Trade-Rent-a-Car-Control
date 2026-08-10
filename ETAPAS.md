@@ -82,6 +82,17 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Exportação Excel (openpyxl) e CSV** em todos os relatórios, para envio à contabilidade (decisão nº 18) — PDF fica para depois se necessário
 - [x] 93 testes passando; painel e relatórios verificados no navegador
 
+### Etapa 8 — Hubs e cadastros amigáveis (07/08/2026)
+*Implementada com orquestração multi-agente (3 agentes Opus em paralelo) + revisão adversarial (Fable/Opus) que confirmou e corrigiu 15 achados antes do commit.*
+- [x] **Hub da Frota** (`/frota/`): cards de veículos com status colorido, categoria, motorista atual (inclusive substituto de troca), valor semanal e mini-alertas (preventivas, FICI); filtros por status/uso/placa; dados dos cards em **queries fixas** (não cresce com a frota — teste de teto de queries)
+- [x] **Página do veículo** (`/frota/veiculo/N/`): dados cadastrais completos + atalhos com contagens (linha do tempo, KM, manutenções, multas, sinistros, ficha financeira) + ações (editar, alocar, vender, registrar manutenção)
+- [x] **Hub de Clientes** (`/clientes/`): cards com carro atual, telefone com link **WhatsApp** (DDI tratado), saldo devedor/crédito/caução em lote, CNH com alerta; página do cliente com alocações, multas recentes e **condutores autorizados** com cadastro inline
+- [x] **Cadastros na plataforma** (saíram do Admin): veículo (novo/editar), cliente, condutor, categorias, fornecedores, **órgãos autuadores** (senha nunca volta no HTML; em branco mantém a atual; páginas com `never_cache`) e **plano de preventivas editável** (itens + intervalos personalizados, com validações)
+- [x] **Edição de alocação** (valor/vencimento/franquia — só ativas; encerradas são histórico) e pré-seleção de veículo ao alocar a partir do hub
+- [x] **Busca global** na barra do topo (placa ou nome; resultado único redireciona direto)
+- [x] **Blindagens da revisão**: `status` do veículo fora do formulário (gerido pelos fluxos — evitava dessincronia e 500), KM atual não diminui pela edição, status "Inadimplente" do cliente só automático, confirmação antes de remover intervalo, IDs adulterados viram 404
+- [x] 151 testes passando (+58); telas verificadas no navegador
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:
