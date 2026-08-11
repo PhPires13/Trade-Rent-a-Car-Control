@@ -33,7 +33,7 @@ def cobrancas(request):
             services.sugerir_encargo(cobranca, hoje)
             if cobranca.status == Cobranca.Status.ATRASADO
             and cobranca.origem != Cobranca.Origem.ENCARGO
-            and not cobranca.encargos.exists()
+            and not cobranca.encargos.exclude(status=Cobranca.Status.CANCELADA).exists()
             else None
         )
         linhas.append((cobranca, encargo))
@@ -68,6 +68,33 @@ def marcar_judicial(request, cobranca_id):
         cobranca.status = Cobranca.Status.JUDICIAL
         cobranca.save(update_fields=["status"])
         messages.success(request, f"'{cobranca.descricao}' marcada como cobrança judicial.")
+    return redirect("financeiro:cobrancas")
+
+
+#: Origens que o dono pode decidir não cobrar (flexibilidade das decisões nº 13 e da etapa 9).
+ORIGENS_CANCELAVEIS = [
+    Cobranca.Origem.EXCEDENTE_KM,
+    Cobranca.Origem.ENCARGO,
+    Cobranca.Origem.OUTRO,
+]
+
+
+def cancelar(request, cobranca_id):
+    """Cancela uma cobrança automática que o dono decidiu não cobrar (ex.: excedente de km)."""
+    cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
+    if request.method == "POST":
+        if cobranca.origem not in ORIGENS_CANCELAVEIS:
+            messages.error(
+                request, "Só cobranças de excedente, encargo ou avulsas podem ser canceladas."
+            )
+        elif cobranca.status == Cobranca.Status.JUDICIAL:
+            messages.error(request, "Cobrança em cobrança judicial não pode ser cancelada.")
+        elif cobranca.total_quitado > ZERO:
+            messages.error(request, "Cobrança com pagamento aplicado não pode ser cancelada.")
+        else:
+            cobranca.status = Cobranca.Status.CANCELADA
+            cobranca.save(update_fields=["status"])
+            messages.success(request, f"Cancelada (não será cobrada): {cobranca.descricao}.")
     return redirect("financeiro:cobrancas")
 
 

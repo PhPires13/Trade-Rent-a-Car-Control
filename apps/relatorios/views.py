@@ -29,6 +29,7 @@ def relatorios(request):
         "despesas": services.despesas_do_mes(ano, mes),
         "recebiveis": services.recebiveis_em_aberto(),
         "caucoes": services.caucoes_retidas(),
+        "serie_mensal": services.serie_mensal(ano, mes),
     }
     contexto["fichas"], contexto["media_frota"] = services.resumo_da_frota()
     return render(request, "relatorios/relatorios.html", contexto)

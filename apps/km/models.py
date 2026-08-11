@@ -24,6 +24,17 @@ class RegistroKm(models.Model):
     km = models.PositiveIntegerField("KM (odômetro)")
     km_anterior = models.PositiveIntegerField("KM anterior", null=True, blank=True)
     dias = models.PositiveIntegerField("dias desde a leitura anterior", null=True, blank=True)
+    cobranca_excedente = models.OneToOneField(
+        "financeiro.Cobranca",
+        verbose_name="cobrança de excedente de km",
+        # PROTECT: apagar a cobrança desfaria a idempotência e a rotina diária
+        # a recriaria — quem decidir não cobrar deve cancelá-la no Financeiro
+        on_delete=models.PROTECT,
+        related_name="registro_km_excedente",
+        null=True,
+        blank=True,
+        help_text="Gerada automaticamente quando a alocação limitada estoura a franquia",
+    )
     observacoes = models.TextField("observações", blank=True)
 
     history = HistoricalRecords()

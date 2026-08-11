@@ -93,6 +93,16 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Blindagens da revisão**: `status` do veículo fora do formulário (gerido pelos fluxos — evitava dessincronia e 500), KM atual não diminui pela edição, status "Inadimplente" do cliente só automático, confirmação antes de remover intervalo, IDs adulterados viram 404
 - [x] 151 testes passando (+58); telas verificadas no navegador
 
+### Etapa 9 — Fechamento funcional (11/08/2026)
+*Revisão adversarial multi-agente (Fable/Opus, 16 agentes) confirmou 11 achados — todos corrigidos com teste de regressão — e refutou 3.*
+- [x] **Cobrança automática de excedente de KM** (docs.md §4.8): ao registrar a leitura mensal de um veículo com alocação *Limitado*, o sistema calcula o excedente e gera a cobrança (origem "Excedente de km", prazo de 7 dias), avisando na tela; a rotina diária faz o catch-up (janela de 45 dias); badge do excedente na tela de KM
+- [x] **Cálculo justo do excedente** (blindagens da revisão): conta só o km do próprio cliente (base = km de entrega; primeira leitura de carro usado não cobra a vida inteira; km do motorista anterior fora), franquia rateada pelos dias com o carro, **troca temporária** cobre o km rodado no substituto, **acerto final** quando o contrato encerra no meio do período (até o km da devolução), e leitura digitada com atraso vence 7 dias após o lançamento — não nasce vencida nem derruba o cliente para inadimplente
+- [x] **"Não cobrar"** (pedido do dono): botão com confirmação na tela de cobranças cancela cobranças automáticas (excedente, encargo, avulsa) sem pagamento aplicado — some do saldo devedor sem apagar o registro; judicial não cancela; cancelar um encargo devolve a sugestão; apagar a cobrança pelo Admin é bloqueado (o caminho é cancelar)
+- [x] **Gráfico receita × despesa** dos últimos 6 meses na página de relatórios (Chart.js local; receitas sem caução; proteção Auto Truck recortada pela frota de cada mês, sem reescrever o passado)
+- [x] **Assets locais**: Tailwind, HTMX, Alpine e Chart.js vendorizados em `static/vendor/` — funciona sem CDN/internet externa (e `collectstatic` de produção validado)
+- [x] **Seed das categorias** confirmadas (decisão nº 15): Gol R$ 650 / Voyage R$ 750 via migração reversível
+- [x] 183 testes passando (+32); telas verificadas no navegador (registro com estouro, cancelamento, gráfico)
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:

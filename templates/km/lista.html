@@ -90,7 +90,15 @@
         <td class="px-3 py-2">{{ registro.km|intcomma }}</td>
         <td class="px-3 py-2">{{ registro.km_anterior|intcomma|default:"—" }}</td>
         <td class="px-3 py-2">{{ registro.dias|default:"—" }}</td>
-        <td class="px-3 py-2 font-semibold">{{ registro.km_utilizado|intcomma|default:"—" }}</td>
+        <td class="px-3 py-2 font-semibold">
+          {{ registro.km_utilizado|intcomma|default:"—" }}
+          {% if registro.cobranca_excedente and registro.cobranca_excedente.status != "cancelada" %}
+            <span class="ml-1 rounded bg-yellow-100 px-1.5 py-0.5 text-xs font-normal text-yellow-800"
+                  title="{{ registro.cobranca_excedente.descricao }}">
+              excedente R$ {{ registro.cobranca_excedente.valor|intcomma }}
+            </span>
+          {% endif %}
+        </td>
         <td class="px-3 py-2">{{ registro.media_dia|floatformat:0|default:"—" }}</td>
         <td class="px-3 py-2">{{ registro.media_mes|floatformat:0|default:"—" }}</td>
       </tr>

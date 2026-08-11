@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.frota.models import Veiculo
 
+from .excedente import gerar_cobranca_excedente
 from .models import RegistroKm, primeiro_dia_do_mes, veiculos_com_leitura_pendente
 
 
@@ -61,6 +62,13 @@ def registrar(request, veiculo_id):
         registro.full_clean()
         registro.save()
         messages.success(request, f"KM de {veiculo.placa} registrado: {registro.km} km.")
+        cobranca = gerar_cobranca_excedente(registro)
+        if cobranca:
+            messages.warning(
+                request,
+                f"Franquia estourada — cobrança de excedente de R$ {cobranca.valor} "
+                f"gerada para {cobranca.cliente.nome} (cancele no Financeiro se não for cobrar).",
+            )
     except ValidationError as erro:
         messages.error(request, f"{veiculo.placa}: {'; '.join(erro.messages)}")
     except (KeyError, ValueError):

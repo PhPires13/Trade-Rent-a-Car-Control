@@ -69,6 +69,15 @@
             <button class="text-xs text-purple-700 underline">judicial</button>
           </form>
           {% endif %}
+          {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.status != "judicial" %}
+            {% if cobranca.origem == "excedente_km" or cobranca.origem == "encargo" or cobranca.origem == "outro" %}
+            <form method="post" action="{% url 'financeiro:cancelar' cobranca.pk %}"
+                  onsubmit="return confirm('Cancelar esta cobrança? Ela não será cobrada do cliente.')">
+              {% csrf_token %}
+              <button class="text-xs text-gray-500 underline">não cobrar</button>
+            </form>
+            {% endif %}
+          {% endif %}
         </td>
       </tr>
       {% empty %}

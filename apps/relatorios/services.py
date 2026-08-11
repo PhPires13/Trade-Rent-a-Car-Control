@@ -1,5 +1,10 @@
 """Agregações dos relatórios mensais para a contabilidade (docs.md §5, decisão nº 18)."""
 
+from calendar import monthrange
+from datetime import date
+
+from django.db.models import Q
+
 from apps.financeiro.models import ZERO, Caucao, Cobranca
 from apps.financeiro.services import resumo_fiscal
 from apps.frota.desmobilizacao import ranking_da_frota
@@ -42,9 +47,16 @@ def despesas_do_mes(ano, mes):
         .order_by("data")
     )
     total_manutencao = sum((m.custo_real for m in manutencoes), ZERO)
-    frota_protegida = Veiculo.objects.filter(
-        uso=Veiculo.Uso.LOCACAO, mensalidade_protecao__isnull=False
-    ).exclude(status=Veiculo.Status.VENDIDO)
+    # frota protegida DO MÊS: comprado até o fim dele e não vendido antes dele —
+    # senão os meses passados mudariam a cada compra/venda de carro
+    inicio_mes = date(ano, mes, 1)
+    fim_mes = date(ano, mes, monthrange(ano, mes)[1])
+    frota_protegida = (
+        Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO, mensalidade_protecao__isnull=False)
+        .filter(Q(data_aquisicao__isnull=True) | Q(data_aquisicao__lte=fim_mes))
+        .exclude(data_venda__lt=inicio_mes)
+        .exclude(data_venda__isnull=True, status=Veiculo.Status.VENDIDO)
+    )
     total_protecao = sum((v.mensalidade_protecao for v in frota_protegida), ZERO)
     franquias = Sinistro.objects.filter(
         data_evento__year=ano, data_evento__month=mes, franquia_valor__isnull=False
@@ -64,6 +76,29 @@ def despesas_do_mes(ano, mes):
         "total_custos_venda": total_custos_venda,
         "total_geral": total_manutencao + total_protecao + total_franquias + total_custos_venda,
     }
+
+
+def serie_mensal(ano, mes, quantidade=6):
+    """Receita × despesa dos últimos meses (caução fica de fora — não é receita)."""
+    pontos = []
+    for _ in range(quantidade):
+        receitas = receitas_do_mes(ano, mes)
+        despesas = despesas_do_mes(ano, mes)
+        receita = (
+            receitas["locacao"]
+            + sum(receitas["diversos"].values(), ZERO)
+            + receitas["total_outros_creditos"]
+        )
+        pontos.append(
+            {
+                "rotulo": f"{mes:02d}/{ano}",
+                "receita": float(receita),
+                "despesa": float(despesas["total_geral"]),
+            }
+        )
+        ano, mes = (ano - 1, 12) if mes == 1 else (ano, mes - 1)
+    pontos.reverse()
+    return pontos
 
 
 def recebiveis_em_aberto():

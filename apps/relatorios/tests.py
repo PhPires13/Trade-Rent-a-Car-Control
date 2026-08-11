@@ -133,6 +133,54 @@ def test_tela_de_relatorios_renderiza(usuario_logado, veiculo, cliente):
     assert "Receitas do mês" in resposta.content.decode()
 
 
+def test_serie_mensal_seis_meses_em_ordem(veiculo, db):
+    Manutencao.objects.create(
+        veiculo=veiculo,
+        tipo="corretiva",
+        data=date(2026, 7, 10),
+        descricao="Freios",
+        custo_real=Decimal("400.00"),
+    )
+    serie = services.serie_mensal(2026, 7)
+    assert [p["rotulo"] for p in serie] == [
+        "02/2026",
+        "03/2026",
+        "04/2026",
+        "05/2026",
+        "06/2026",
+        "07/2026",
+    ]
+    assert serie[-1]["despesa"] == 704.0  # manutenção 400 + proteção 304
+    assert serie[-1]["receita"] == 0.0
+    # meses passados carregam a proteção do carro que JÁ existia (aquisição 2025)
+    assert serie[0]["despesa"] == 304.0
+
+
+def test_serie_mensal_nao_aplica_protecao_antes_da_aquisicao(db):
+    Veiculo.objects.create(
+        placa="RNB9J66",
+        marca_modelo="Voyage",
+        mensalidade_protecao=Decimal("304.00"),
+        data_aquisicao=date(2026, 6, 5),
+    )
+    serie = services.serie_mensal(2026, 7)
+    assert serie[0]["despesa"] == 0.0  # 02/2026: carro ainda não existia
+    assert serie[-1]["despesa"] == 304.0
+
+
+def test_serie_mensal_vira_o_ano(db):
+    serie = services.serie_mensal(2026, 2)
+    assert serie[0]["rotulo"] == "09/2025"
+    assert serie[-1]["rotulo"] == "02/2026"
+
+
+def test_grafico_receita_despesa_na_tela(usuario_logado, veiculo, cliente):
+    conteudo = usuario_logado.get("/relatorios/?mes=2026-07").content.decode()
+    assert "grafico-receita-despesa" in conteudo
+    assert "dados-serie-mensal" in conteudo
+    assert "vendor/chart.umd.js" in conteudo
+
+
 def test_exportacoes_xlsx_e_csv(usuario_logado, veiculo, db):
     Manutencao.objects.create(
         veiculo=veiculo,
