@@ -80,12 +80,14 @@
         <a href="?mes={{ mes_str }}&exportar=despesas&formato=csv" class="rounded bg-gray-200 px-2 py-1">CSV</a>
       </span>
     </h2>
-    <p class="mb-3 text-xs text-gray-500">Manutenções, franquias de eventos, mensalidades da proteção e custos de venda.</p>
+    <p class="mb-3 text-xs text-gray-500">Manutenções, franquias, mensalidades da proteção, multas absorvidas e custos de compra/venda.</p>
     <table class="w-full text-sm">
       <tbody class="divide-y divide-gray-100">
         <tr><td class="px-2 py-1.5">Manutenções (custo real) — {{ despesas.manutencoes|length }} serviço{{ despesas.manutencoes|length|pluralize }}</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_manutencao|intcomma }}</td></tr>
         <tr><td class="px-2 py-1.5">Franquias de eventos</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_franquias|intcomma }}</td></tr>
         <tr><td class="px-2 py-1.5">Proteção Auto Truck ({{ despesas.frota_protegida|length }} veículo{{ despesas.frota_protegida|length|pluralize }})</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_protecao|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Multas absorvidas pela empresa ({{ despesas.multas_empresa|length }})</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_multas_empresa|intcomma }}</td></tr>
+        <tr><td class="px-2 py-1.5">Custos de compra de veículos</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_custos_compra|intcomma }}</td></tr>
         <tr><td class="px-2 py-1.5">Custos de venda</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_custos_venda|intcomma }}</td></tr>
         <tr class="bg-gray-50 font-black"><td class="px-2 py-1.5">Total</td><td class="px-2 py-1.5 text-right">R$ {{ despesas.total_geral|intcomma }}</td></tr>
       </tbody>

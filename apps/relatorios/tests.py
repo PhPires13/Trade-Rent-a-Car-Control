@@ -120,13 +120,6 @@ def test_vigencias_a_vencer(veiculo, cliente, db):
     assert not any("RNB9J66" in d for d in descricoes)
 
 
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
-
-
 def test_tela_de_relatorios_renderiza(usuario_logado, veiculo, cliente):
     resposta = usuario_logado.get("/relatorios/?mes=2026-07")
     assert resposta.status_code == 200

@@ -10,11 +10,11 @@
     + Novo órgão
   </a>
 </div>
-<p class="mb-4 text-sm text-gray-500">Credenciais ficam criptografadas no banco e ocultas — clique para revelar na hora de usar o portal.</p>
+<p class="mb-4 text-sm text-gray-500">A senha de cada portal fica criptografada no banco e não é exibida em nenhuma tela — se precisar trocar, use "editar".</p>
 
 <div class="grid gap-4 lg:grid-cols-2">
   {% for orgao in orgaos %}
-  <div class="rounded-lg bg-white p-5 shadow" x-data="{ mostrar: false }">
+  <div class="rounded-lg bg-white p-5 shadow">
     <div class="mb-2 flex items-center justify-between">
       <h2 class="font-bold">{{ orgao.nome }} <span class="text-xs font-normal text-gray-500">{{ orgao.get_esfera_display }}</span></h2>
       <div class="flex items-center gap-3 text-sm">
@@ -23,14 +23,10 @@
       </div>
     </div>
     <dl class="space-y-1 text-sm">
-      {% if orgao.login or orgao.senha %}
+      {% if orgao.login %}
       <div class="flex items-center gap-2">
-        <dt class="text-gray-500">Credenciais:</dt>
-        <dd x-show="!mostrar"><button class="text-xs underline" x-on:click="mostrar = true">revelar</button></dd>
-        <dd x-show="mostrar" x-cloak class="font-mono text-xs">
-          {{ orgao.login }} / {{ orgao.senha }}
-          <button class="ml-1 text-xs underline" x-on:click="mostrar = false">ocultar</button>
-        </dd>
+        <dt class="text-gray-500">Usuário do portal:</dt>
+        <dd class="font-mono text-xs">{{ orgao.login }}</dd>
       </div>
       {% endif %}
       {% if orgao.telefone %}<div><dt class="inline text-gray-500">Telefone:</dt> <dd class="inline">{{ orgao.telefone }}</dd></div>{% endif %}

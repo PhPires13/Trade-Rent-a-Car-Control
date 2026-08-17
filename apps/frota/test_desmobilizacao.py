@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from django.core.exceptions import ValidationError
 
-from apps.alocacoes.models import Alocacao
+from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro import services as financeiro
 from apps.financeiro.models import Cobranca
 from apps.frota import desmobilizacao
@@ -120,9 +120,34 @@ def test_custo_km_acima_da_media_observar(veiculo, db):
     assert ficha.nivel == "observar"
 
 
+def test_ficha_conta_aluguel_quitado_pela_caucao(alocacao, veiculo, cliente):
+    hoje = date(2026, 7, 20)
+    caucao = financeiro.abrir_caucao(
+        alocacao, valor_recebido=Decimal("1000.00"), data=date(2026, 7, 1)
+    )
+    financeiro.gerar_cobrancas_semanais(hoje=hoje)
+    cobranca = Cobranca.objects.filter(origem="aluguel").first()
+    financeiro.descontar_da_caucao(caucao, cobranca, Decimal("650.00"), date(2026, 7, 5))
+    ficha = desmobilizacao.montar_ficha(veiculo, hoje=hoje)
+    assert ficha.receita_aluguel == Decimal("650.00")
+
+
 def test_venda_bloqueada_com_alocacao_ativa(alocacao, veiculo):
     with pytest.raises(ValidationError):
         desmobilizacao.registrar_venda(veiculo, date(2026, 8, 1), Decimal("35000"))
+
+
+def test_venda_bloqueada_para_substituto_emprestado(alocacao, db):
+    substituto = Veiculo.objects.create(placa="BBB2222", marca_modelo="Voyage", km_atual=40_000)
+    TrocaTemporaria.objects.create(
+        alocacao=alocacao,
+        veiculo_substituto=substituto,
+        data_retirada=date(2026, 7, 10),
+        km_retirada=40_000,
+    )
+    # substituto está na rua com o cliente, sem alocação própria — não pode ser vendido
+    with pytest.raises(ValidationError):
+        desmobilizacao.registrar_venda(substituto, date(2026, 8, 1), Decimal("35000"))
 
 
 def test_venda_e_resultado_final(alocacao, veiculo):
@@ -171,13 +196,6 @@ def test_ranking_ordena_piores_primeiro(veiculo, cliente, db):
     assert fichas[0].veiculo == veiculo
     assert fichas[0].nivel in ("preparar", "vender")
     assert fichas[-1].veiculo == bom
-
-
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
 
 
 def test_telas_de_desmobilizacao_renderizam(usuario_logado, veiculo):

@@ -9,13 +9,6 @@ from apps.pessoas.models import Cliente
 
 
 @pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
-
-
-@pytest.fixture
 def categoria(db):
     return Categoria.objects.create(nome="Econômico", valor_semanal_referencia=Decimal("650.00"))
 

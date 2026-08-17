@@ -5,7 +5,7 @@ from django.shortcuts import redirect, render
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import ZERO, Cobranca
-from apps.frota.models import Veiculo
+from apps.frota.models import Veiculo, normalizar_placa
 from apps.km.models import veiculos_com_leitura_pendente
 from apps.manutencao.services import preventivas_em_alerta
 from apps.multas.services import alertas_fici
@@ -18,7 +18,7 @@ def buscar(request):
     consulta = request.GET.get("q", "").strip()
     veiculos, clientes = [], []
     if consulta:
-        placa = consulta.upper().replace("-", "").replace(" ", "")
+        placa = normalizar_placa(consulta)
         veiculos = list(
             Veiculo.objects.filter(
                 Q(placa__icontains=placa) | Q(marca_modelo__icontains=consulta)
@@ -70,9 +70,11 @@ def painel(request):
             "inadimplentes": Cliente.objects.filter(status=Cliente.Status.INADIMPLENTE),
             "hoje": hoje,
             "fici_em_alerta": alertas_fici(hoje),
-            "sinistros_abertos": Sinistro.objects.exclude(
-                status=Sinistro.Status.CONCLUIDO
-            ).select_related("veiculo"),
+            # prefetch das manutenções: auxilio_disponivel lê dias_parado de cada
+            # sinistro logo abaixo, o que consultava uma vez por sinistro aberto
+            "sinistros_abertos": Sinistro.objects.exclude(status=Sinistro.Status.CONCLUIDO)
+            .select_related("veiculo")
+            .prefetch_related("manutencoes"),
         }
     )
     contexto["auxilios_disponiveis"] = [

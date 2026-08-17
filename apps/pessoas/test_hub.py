@@ -10,13 +10,6 @@ from apps.pessoas.models import Cliente, CondutorAutorizado
 
 
 @pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
-
-
-@pytest.fixture
 def cliente(db):
     return Cliente.objects.create(
         nome="Arlen Souza",

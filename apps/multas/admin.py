@@ -1,30 +1,15 @@
-from django import forms
 from django.contrib import admin
 from simple_history.admin import SimpleHistoryAdmin
 
+from .forms import OrgaoForm
 from .models import Multa, OrgaoAutuador
-
-
-class OrgaoForm(forms.ModelForm):
-    class Meta:
-        model = OrgaoAutuador
-        fields = [
-            "nome",
-            "esfera",
-            "portal",
-            "login",
-            "senha",
-            "email",
-            "telefone",
-            "procedimento",
-            "endereco",
-            "observacoes",
-        ]
-        widgets = {"senha": forms.PasswordInput(render_value=True)}
 
 
 @admin.register(OrgaoAutuador)
 class OrgaoAutuadorAdmin(SimpleHistoryAdmin):
+    # Mesmo form das telas: a senha não volta no HTML e campo em branco mantém a
+    # atual. O form antigo daqui usava PasswordInput(render_value=True) e devolvia
+    # a senha do portal em claro no fonte da página.
     form = OrgaoForm
     list_display = ["nome", "esfera", "portal", "telefone"]
 

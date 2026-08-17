@@ -13,7 +13,7 @@ from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
 
 from . import desmobilizacao
-from .models import Categoria, Fornecedor, Veiculo
+from .models import Categoria, Fornecedor, Veiculo, normalizar_placa
 
 
 def _quem_esta_com_o_carro(veiculo):
@@ -60,7 +60,7 @@ def hub(request):
     if uso and uso != "todos":
         veiculos = veiculos.filter(uso=uso)
     if placa:
-        veiculos = veiculos.filter(placa__icontains=placa.upper().replace("-", "").replace(" ", ""))
+        veiculos = veiculos.filter(placa__icontains=normalizar_placa(placa))
 
     veiculos = list(veiculos)
     alocacoes_ativas = {
@@ -203,7 +203,7 @@ class VeiculoForm(forms.ModelForm):
 
     def clean_placa(self):
         """Normaliza antes da checagem de duplicidade — o modelo grava sem hífen e em maiúsculas."""
-        return self.cleaned_data["placa"].upper().replace("-", "").replace(" ", "")
+        return normalizar_placa(self.cleaned_data["placa"])
 
     def clean_km_atual(self):
         """O odômetro nunca anda para trás — todos os fluxos só aumentam o KM.
@@ -307,7 +307,7 @@ def ranking(request):
     """Ranking de desmobilização — candidatos à venda primeiro (docs.md §4.9)."""
     fichas, media = desmobilizacao.ranking_da_frota()
     vendidos = Veiculo.objects.filter(status=Veiculo.Status.VENDIDO).order_by("-data_venda")
-    fichas_vendidos = [desmobilizacao.montar_ficha(v) for v in vendidos]
+    fichas_vendidos = desmobilizacao.montar_fichas_em_lote(vendidos)
     return render(
         request,
         "frota/ranking.html",
@@ -317,7 +317,9 @@ def ranking(request):
 
 def ficha(request, veiculo_id):
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
-    _, media = desmobilizacao.ranking_da_frota()
+    # Só a média da frota entra na comparação: montar o ranking inteiro para
+    # exibir um carro custava ~200 queries (revisão de performance).
+    media = desmobilizacao.media_custo_km_frota()
     ficha = desmobilizacao.avaliar(desmobilizacao.montar_ficha(veiculo), media)
     return render(request, "frota/ficha.html", {"f": ficha, "veiculo": veiculo})
 

@@ -8,13 +8,6 @@ from apps.manutencao.services import resumo_preventivas
 
 
 @pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
-
-
-@pytest.fixture
 def veiculo(db):
     return Veiculo.objects.create(placa="QXQ6C10", marca_modelo="Gol", km_atual=50_000)
 

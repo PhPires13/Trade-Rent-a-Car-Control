@@ -36,31 +36,40 @@ class StatusPreventiva:
         return self.OK
 
 
-def intervalo_do_item(veiculo, item, personalizados=None):
-    if personalizados is not None:
-        personalizado = personalizados.get(item.pk)
-    else:
-        registro = IntervaloPersonalizado.objects.filter(veiculo=veiculo, item=item).first()
-        personalizado = registro.intervalo_km if registro else None
-    return personalizado or item.intervalo_km_padrao
+def _itens_preventivos():
+    return list(ItemPreventiva.objects.filter(ativo=True, intervalo_km_padrao__isnull=False))
 
 
-def resumo_preventivas(veiculo):
-    """Status de cada item preventivo do plano para um veículo."""
-    itens = ItemPreventiva.objects.filter(ativo=True, intervalo_km_padrao__isnull=False)
-    personalizados = dict(
-        IntervaloPersonalizado.objects.filter(veiculo=veiculo).values_list(
-            "item_id", "intervalo_km"
-        )
-    )
+def _intervalos_personalizados(ids):
+    """{(veiculo_id, item_id): intervalo} numa query, para qualquer nº de veículos."""
+    return {
+        (veiculo_id, item_id): intervalo
+        for veiculo_id, item_id, intervalo in IntervaloPersonalizado.objects.filter(
+            veiculo_id__in=ids
+        ).values_list("veiculo_id", "item_id", "intervalo_km")
+    }
+
+
+def _ultimas_manutencoes(ids, itens):
+    """{(veiculo_id, item_id): Manutencao de maior km} numa query.
+
+    Ordena crescente e vai sobrescrevendo: sobra a de maior km de cada par —
+    a mesma que o `order_by("-km").first()` por item devolvia, agora em lote.
+    """
+    ultimas = {}
+    for manutencao in Manutencao.objects.filter(
+        veiculo_id__in=ids, item_id__in=[item.pk for item in itens], km__isnull=False
+    ).order_by("km", "pk"):
+        ultimas[(manutencao.veiculo_id, manutencao.item_id)] = manutencao
+    return ultimas
+
+
+def _status_do_veiculo(veiculo, itens, personalizados, ultimas):
+    """Regra dos intervalos — única fonte da aritmética das preventivas."""
     resultado = []
     for item in itens:
-        intervalo = personalizados.get(item.pk) or item.intervalo_km_padrao
-        ultima = (
-            Manutencao.objects.filter(veiculo=veiculo, item=item, km__isnull=False)
-            .order_by("-km")
-            .first()
-        )
+        intervalo = personalizados.get((veiculo.pk, item.pk)) or item.intervalo_km_padrao
+        ultima = ultimas.get((veiculo.pk, item.pk))
         if ultima:
             km_proximo = ultima.km + intervalo
             faltam = km_proximo - veiculo.km_atual
@@ -79,16 +88,47 @@ def resumo_preventivas(veiculo):
     return resultado
 
 
+def resumo_preventivas(veiculo):
+    """Status de cada item preventivo do plano para um veículo (tela de um carro)."""
+    itens = _itens_preventivos()
+    return _status_do_veiculo(
+        veiculo,
+        itens,
+        _intervalos_personalizados([veiculo.pk]),
+        _ultimas_manutencoes([veiculo.pk], itens),
+    )
+
+
+def resumos_por_veiculo(veiculos):
+    """{veiculo_id: [StatusPreventiva]} em 3 queries fixas, seja qual for a frota.
+
+    Versão em lote de resumo_preventivas para o painel e as listagens.
+    """
+    ids = [v.pk for v in veiculos]
+    if not ids:
+        return {}
+    itens = _itens_preventivos()
+    personalizados = _intervalos_personalizados(ids)
+    ultimas = _ultimas_manutencoes(ids, itens)
+    return {
+        veiculo.pk: _status_do_veiculo(veiculo, itens, personalizados, ultimas)
+        for veiculo in veiculos
+    }
+
+
 def preventivas_em_alerta():
     """(veiculo, [StatusPreventiva vencida/próxima]) para a frota de locação ativa."""
-    veiculos = Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO).exclude(
-        status__in=[Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO]
+    veiculos = list(
+        Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO).exclude(
+            status__in=[Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO]
+        )
     )
+    resumos = resumos_por_veiculo(veiculos)
     alertas = []
     for veiculo in veiculos:
         criticas = [
             p
-            for p in resumo_preventivas(veiculo)
+            for p in resumos[veiculo.pk]
             if p.status in (StatusPreventiva.VENCIDA, StatusPreventiva.PROXIMA)
         ]
         if criticas:
@@ -99,46 +139,20 @@ def preventivas_em_alerta():
 def contagem_alertas_por_veiculo(veiculos):
     """{veiculo_id: nº de preventivas vencidas/próximas} em 3 queries fixas.
 
-    Versão em lote de resumo_preventivas para listagens (o hub da frota);
+    Versão enxuta de resumos_por_veiculo para listagens (o hub da frota);
     segue a mesma regra do painel: só locação, fora vendidos e inativos.
     """
-    from django.db.models import Max
-
     elegiveis = [
         v
         for v in veiculos
         if v.uso == Veiculo.Uso.LOCACAO
         and v.status not in (Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO)
     ]
-    if not elegiveis:
-        return {}
-    ids = [v.pk for v in elegiveis]
-    itens = list(ItemPreventiva.objects.filter(ativo=True, intervalo_km_padrao__isnull=False))
-    personalizados = {
-        (veiculo_id, item_id): intervalo
-        for veiculo_id, item_id, intervalo in IntervaloPersonalizado.objects.filter(
-            veiculo_id__in=ids
-        ).values_list("veiculo_id", "item_id", "intervalo_km")
-    }
-    ultimos_km = {
-        (linha["veiculo_id"], linha["item_id"]): linha["ultimo_km"]
-        for linha in Manutencao.objects.filter(
-            veiculo_id__in=ids, item__isnull=False, km__isnull=False
-        )
-        .values("veiculo_id", "item_id")
-        .annotate(ultimo_km=Max("km"))
-    }
     contagens = {}
-    for veiculo in elegiveis:
-        alertas = 0
-        for item in itens:
-            ultimo = ultimos_km.get((veiculo.pk, item.pk))
-            if ultimo is None:
-                continue
-            intervalo = personalizados.get((veiculo.pk, item.pk)) or item.intervalo_km_padrao
-            faltam = ultimo + intervalo - veiculo.km_atual
-            if faltam <= MARGEM_ALERTA_KM:
-                alertas += 1
+    for veiculo_id, resumo in resumos_por_veiculo(elegiveis).items():
+        alertas = sum(
+            1 for p in resumo if p.status in (StatusPreventiva.VENCIDA, StatusPreventiva.PROXIMA)
+        )
         if alertas:
-            contagens[veiculo.pk] = alertas
+            contagens[veiculo_id] = alertas
     return contagens

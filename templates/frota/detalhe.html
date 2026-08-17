@@ -23,7 +23,7 @@
     <a href="{% url 'frota:veiculo_editar' veiculo.pk %}" class="underline">Editar</a>
     <a href="{% url 'manutencao:registrar' veiculo.pk %}" class="underline">Registrar manutenção</a>
     {% if veiculo.status == "disponivel" and veiculo.uso == "locacao" %}
-    <a href="{% url 'alocacoes:nova' %}" class="rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">Alocar</a>
+    <a href="{% url 'alocacoes:nova' %}?veiculo={{ veiculo.pk }}" class="rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">Alocar</a>
     {% endif %}
     {% if veiculo.status != "vendido" %}
     <a href="{% url 'frota:vender' veiculo.pk %}" class="rounded bg-marca-amarelo px-3 py-1.5 font-bold text-marca-preto hover:brightness-95">Vender</a>

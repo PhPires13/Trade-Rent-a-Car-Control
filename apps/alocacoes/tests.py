@@ -1,7 +1,9 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.alocacoes.services import cliente_vigente, linha_do_tempo
@@ -131,6 +133,62 @@ def test_nao_encerra_alocacao_com_troca_em_andamento(veiculo, substituto, client
         alocacao.encerrar(data_termino=date(2026, 7, 20), km_devolucao=52_000)
 
 
+def test_devolucao_preserva_status_vendido_do_substituto(veiculo, substituto, cliente):
+    alocacao = alocar(veiculo, cliente)
+    troca = trocar(alocacao, substituto)
+    # venda registrada por fora (ex.: Admin) enquanto emprestado — devolver não reabilita
+    substituto.status = Veiculo.Status.VENDIDO
+    substituto.save(update_fields=["status"])
+    troca.devolver(data_devolucao=date(2026, 7, 14), km_devolucao=41_200)
+    substituto.refresh_from_db()
+    assert substituto.status == Veiculo.Status.VENDIDO
+
+
+def test_constraint_impede_segunda_troca_aberta_na_alocacao(veiculo, substituto, cliente, db):
+    alocacao = alocar(veiculo, cliente)
+    trocar(alocacao, substituto)
+    terceiro = Veiculo.objects.create(placa="RNB9J66", marca_modelo="Voyage")
+    with pytest.raises(IntegrityError):  # direto no banco, sem full_clean (ex.: Admin/shell)
+        TrocaTemporaria.objects.create(
+            alocacao=alocacao,
+            veiculo_substituto=terceiro,
+            data_retirada=date(2026, 7, 12),
+            km_retirada=0,
+        )
+
+
+def test_constraint_impede_substituto_em_duas_trocas_abertas(veiculo, substituto, cliente, db):
+    alocacao = alocar(veiculo, cliente)
+    trocar(alocacao, substituto)
+    outro_carro = Veiculo.objects.create(placa="RNB9J66", marca_modelo="Voyage")
+    outro_cliente = Cliente.objects.create(nome="Lucas", cpf_cnpj="999.888.777-66")
+    outra_alocacao = alocar(outro_carro, outro_cliente)
+    with pytest.raises(IntegrityError):
+        TrocaTemporaria.objects.create(
+            alocacao=outra_alocacao,
+            veiculo_substituto=substituto,
+            data_retirada=date(2026, 7, 12),
+            km_retirada=0,
+        )
+
+
+def test_reabrir_troca_devolvida_exige_alocacao_ativa(veiculo, substituto, cliente):
+    alocacao = alocar(veiculo, cliente)
+    troca = trocar(alocacao, substituto)
+    troca.devolver(data_devolucao=date(2026, 7, 14), km_devolucao=41_200)
+    alocacao.encerrar(data_termino=date(2026, 7, 20), km_devolucao=52_000)
+    troca.data_devolucao = None  # edição via Admin tentando reabrir a troca
+    with pytest.raises(ValidationError):
+        troca.full_clean()
+
+
+def test_edicao_nao_encerra_alocacao_sem_data_termino(veiculo, cliente):
+    alocacao = alocar(veiculo, cliente)
+    alocacao.status = Alocacao.Status.ENCERRADA  # edição via Admin sem data/KM de devolução
+    with pytest.raises(ValidationError):
+        alocacao.full_clean()
+
+
 def test_cliente_vigente_considera_trocas(veiculo, substituto, cliente):
     alocacao = alocar(veiculo, cliente)
     troca = trocar(alocacao, substituto, retirada=date(2026, 7, 10))
@@ -169,11 +227,64 @@ def test_linha_do_tempo_reune_eventos(veiculo, substituto, cliente):
     assert "Fim da troca" in tipos_substituto
 
 
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
+def test_troca_ativa_aproveita_o_prefetch(django_assert_max_num_queries, db):
+    """Revisão de performance: .filter() na property refazia a consulta por linha."""
+    devolvidas = []
+    for indice in range(10):
+        carro = Veiculo.objects.create(
+            placa=f"TQ{indice:02d}A{indice:02d}", marca_modelo="Gol", km_atual=50_000
+        )
+        reserva = Veiculo.objects.create(
+            placa=f"RS{indice:02d}B{indice:02d}", marca_modelo="Voyage", km_atual=40_000
+        )
+        pessoa = Cliente.objects.create(
+            nome=f"Cliente {indice}", cpf_cnpj=f"111.222.333-{indice:02d}"
+        )
+        alocacao = alocar(carro, pessoa)
+        troca = trocar(alocacao, reserva, retirada=date(2026, 7, 10))
+        if indice % 2:  # metade devolvida: a property tem de devolver None nelas
+            troca.devolver(data_devolucao=date(2026, 7, 14), km_devolucao=41_200)
+            devolvidas.append(alocacao.pk)
+
+    with django_assert_max_num_queries(2):
+        alocacoes = list(Alocacao.objects.prefetch_related("trocas").order_by("pk"))
+        abertas = {a.pk: a.troca_ativa for a in alocacoes}
+
+    assert len(abertas) == 10
+    for alocacao_id, troca in abertas.items():
+        if alocacao_id in devolvidas:
+            assert troca is None
+        else:
+            assert troca is not None and troca.data_devolucao is None
+
+
+def test_troca_ativa_sem_prefetch_continua_funcionando(veiculo, substituto, cliente):
+    alocacao = alocar(veiculo, cliente)
+    troca = trocar(alocacao, substituto)
+    assert Alocacao.objects.get(pk=alocacao.pk).troca_ativa == troca
+    troca.devolver(data_devolucao=date(2026, 7, 14), km_devolucao=41_200)
+    assert Alocacao.objects.get(pk=alocacao.pk).troca_ativa is None
+
+
+def test_lista_de_alocacoes_com_queries_fixas(usuario_logado, django_assert_max_num_queries, db):
+    """A lista mostra a troca de cada linha — não pode voltar a consultar por linha."""
+    for indice in range(10):
+        carro = Veiculo.objects.create(
+            placa=f"TQ{indice:02d}A{indice:02d}", marca_modelo="Gol", km_atual=50_000
+        )
+        reserva = Veiculo.objects.create(
+            placa=f"RS{indice:02d}B{indice:02d}", marca_modelo="Voyage", km_atual=40_000
+        )
+        pessoa = Cliente.objects.create(
+            nome=f"Cliente {indice}", cpf_cnpj=f"111.222.333-{indice:02d}"
+        )
+        trocar(alocar(carro, pessoa), reserva, retirada=date(2026, 7, 10))
+    # eram 40 queries (3 por linha na property); o que sobra por linha é a placa
+    # do substituto, que o template busca pela FK da troca prefetchada
+    with django_assert_max_num_queries(15):
+        resposta = usuario_logado.get("/alocacoes/")
+    assert resposta.status_code == 200
+    assert "RS00B00" in resposta.content.decode()  # placa do substituto na linha
 
 
 def test_telas_de_alocacao_renderizam(usuario_logado, veiculo, substituto, cliente):
@@ -200,3 +311,34 @@ def test_criar_alocacao_pela_tela(usuario_logado, veiculo, cliente):
     )
     assert resposta.status_code == 302
     assert Alocacao.objects.filter(veiculo=veiculo, status="ativa").exists()
+
+
+def test_encerrar_com_caucao_retida_leva_ao_acerto(usuario_logado, veiculo, cliente):
+    from apps.financeiro import services as financeiro
+
+    alocacao = Alocacao.objects.create(
+        veiculo=veiculo,
+        cliente=cliente,
+        data_inicio=date(2026, 7, 1),
+        valor_semanal=Decimal("650.00"),
+        km_entrega=50_000,
+        caucao_valor=Decimal("1000.00"),
+    )
+    financeiro.abrir_caucao(alocacao, valor_recebido=Decimal("1000.00"), data=date(2026, 7, 1))
+    resposta = usuario_logado.post(
+        f"/alocacoes/{alocacao.pk}/encerrar/",
+        {"data_termino": "2026-07-20", "km_devolucao": "52000"},
+    )
+    assert resposta.status_code == 302
+    # encerrar dispara o acerto de caução (docs.md §4.2): vai direto para a tela da caução
+    assert resposta.url == f"/financeiro/caucoes/{alocacao.caucao.pk}/"
+
+
+def test_encerrar_sem_caucao_volta_para_lista(usuario_logado, veiculo, cliente):
+    alocacao = alocar(veiculo, cliente)
+    resposta = usuario_logado.post(
+        f"/alocacoes/{alocacao.pk}/encerrar/",
+        {"data_termino": "2026-07-20", "km_devolucao": "52000"},
+    )
+    assert resposta.status_code == 302
+    assert resposta.url == "/alocacoes/"

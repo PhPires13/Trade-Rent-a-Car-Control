@@ -26,7 +26,8 @@
 - **SQLite não vai para produção** — serviria tecnicamente para 2 usuários, mas exige volume persistente + backup manual (Litestream), impede inspecionar o banco remotamente e cria diferenças dev/prod nas migrações. Com o free tier do Neon, o Postgres gerenciado custa zero — não há economia que justifique. SQLite fica liberado apenas para desenvolvimento local nos primeiros dias, antes de subir o Postgres via Docker.
 - **Arquivos estáticos** servidos pelo próprio Django com WhiteNoise (sem CDN). Anexos (Fase 2): storage S3-compatível (Cloudflare R2, free tier).
 - **Backup**: dump diário automático do Postgres (backup nativo do Railway + `pg_dump` semanal baixado localmente — os dados da empresa não podem depender de um único provedor).
-- **Domínio/HTTPS**: subdomínio da plataforma no início; domínio próprio depois, HTTPS automático.
+- **Domínio/HTTPS**: subdomínio da plataforma no início; domínio próprio depois, HTTPS automático (HSTS de 30 dias já configurado no settings de produção).
+- **Variáveis de ambiente do serviço** (ver `.env.example`): `SECRET_KEY` é **obrigatória** com `DEBUG=False` — o app se recusa a subir sem ela; `CREDENCIAIS_KEY` (opcional) é a chave da criptografia das credenciais dos portais de multas — defina uma própria **antes** de cadastrar credenciais e nunca a troque depois (default = SECRET_KEY, mas aí rotacionar a SECRET_KEY exigiria recadastrar as senhas dos portais); `DATABASE_URL`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DEBUG=False`. Login tem bloqueio de força bruta (django-axes: 6 tentativas erradas por usuário → 15 min de espera, destrava sozinho).
 
 ## 3. Estrutura do projeto (apps Django ↔ módulos da spec)
 

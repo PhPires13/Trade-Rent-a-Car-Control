@@ -1,14 +1,7 @@
-import pytest
 from django.db import connection
+from django.test import override_settings
 
 from apps.multas.models import OrgaoAutuador
-
-
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
 
 
 def dados(**extras):
@@ -93,3 +86,64 @@ def test_lista_mostra_link_de_edicao(usuario_logado, db):
     conteudo = usuario_logado.get("/multas/orgaos/").content.decode()
     assert f"/multas/orgaos/{orgao.pk}/editar/" in conteudo
     assert "/multas/orgaos/novo/" in conteudo
+
+
+def test_lista_nunca_manda_a_senha_no_html(usuario_logado, db):
+    """A senha não pode ir no fonte da listagem — nem escondida por trás de um clique."""
+    OrgaoAutuador.objects.create(nome="PBH", login="trade-rent", senha="segredo-123")
+    resposta = usuario_logado.get("/multas/orgaos/")
+    conteudo = resposta.content.decode()
+    assert "segredo-123" not in conteudo
+    assert "trade-rent" in conteudo  # o usuário do portal continua visível
+    assert "no-store" in resposta.headers.get("Cache-Control", "")
+
+
+def test_admin_nao_expoe_a_senha_nem_guarda_no_historico(client, django_user_model, db):
+    """O /admin usa o mesmo form das telas: senha fora do HTML e fora do histórico."""
+    django_user_model.objects.create_superuser(username="chefe", password="senha-forte-123")
+    client.login(username="chefe", password="senha-forte-123")
+    orgao = OrgaoAutuador.objects.create(nome="PBH", login="trade-rent", senha="segredo-123")
+    orgao.senha = "segredo-456"
+    orgao.save()
+
+    conteudo = client.get(f"/admin/multas/orgaoautuador/{orgao.pk}/change/").content.decode()
+    assert "segredo-123" not in conteudo and "segredo-456" not in conteudo
+
+    # nenhuma versão histórica guarda credenciais
+    historico = orgao.history.all()
+    assert historico.count() == 2
+    for versao in historico:
+        assert not hasattr(versao, "senha") and not hasattr(versao, "login")
+        tela = client.get(_url_historico(orgao, versao))
+        assert tela.status_code == 200
+        assert "segredo" not in tela.content.decode()
+
+    # salvar pelo admin com a senha em branco mantém a atual
+    resposta = client.post(
+        f"/admin/multas/orgaoautuador/{orgao.pk}/change/",
+        dados(nome="PBH", senha="", telefone="(31) 3333-0000"),
+    )
+    assert resposta.status_code == 302
+    orgao.refresh_from_db()
+    assert orgao.senha == "segredo-456"
+
+
+def _url_historico(orgao, versao):
+    return f"/admin/multas/orgaoautuador/{orgao.pk}/history/{versao.history_id}/"
+
+
+def test_trocar_a_secret_key_nao_afeta_as_credenciais(db):
+    """A criptografia usa CREDENCIAIS_KEY — a SECRET_KEY pode ser rotacionada."""
+    orgao = OrgaoAutuador.objects.create(nome="DETRAN-MG", senha="segredo-123")
+    with override_settings(SECRET_KEY="outra-chave-completamente-diferente"):
+        assert OrgaoAutuador.objects.get(pk=orgao.pk).senha == "segredo-123"
+
+
+def test_credencial_ilegivel_volta_vazia_e_avisa_no_log(db, caplog):
+    """Chave errada não pode devolver o texto cifrado disfarçado de senha."""
+    orgao = OrgaoAutuador.objects.create(nome="BHTrans", senha="segredo-123")
+    with override_settings(CREDENCIAIS_KEY="chave-que-nao-foi-a-da-gravacao"):
+        recarregado = OrgaoAutuador.objects.get(pk=orgao.pk)
+        assert recarregado.senha == ""
+    assert "Credencial ilegível" in caplog.text
+    assert "multas.OrgaoAutuador.senha" in caplog.text

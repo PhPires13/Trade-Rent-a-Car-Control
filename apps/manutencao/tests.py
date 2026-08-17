@@ -129,11 +129,61 @@ def test_alertas_da_frota_ignoram_fora_de_locacao(veiculo, oleo, db):
     assert [v.placa for v, _ in alertas] == ["QXQ6C10"]
 
 
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
+def test_alertas_da_frota_em_lote(oleo, django_assert_max_num_queries, db):
+    """Revisão de performance: eram 6 queries por veículo (resumo_preventivas em laço).
+
+    O formato de retorno é o mesmo — o painel mostra os itens e o que falta.
+    """
+    pneus = ItemPreventiva.objects.get(nome="Pneus (2 unidades)")
+    for indice in range(12):
+        carro = Veiculo.objects.create(
+            placa=f"TQ{indice:02d}A{indice:02d}", marca_modelo="Gol", km_atual=100_000
+        )
+        Manutencao.objects.create(
+            veiculo=carro,
+            item=oleo,
+            tipo="preventiva",
+            data=date(2026, 1, 1),
+            km=89_000,  # próxima aos 99.000: vencida há 1.000 km
+            descricao="Troca de óleo",
+        )
+        Manutencao.objects.create(
+            veiculo=carro,
+            item=oleo,
+            tipo="preventiva",
+            data=date(2025, 1, 1),
+            km=70_000,  # execução antiga: a última (maior km) é que vale
+            descricao="Troca de óleo antiga",
+        )
+        Manutencao.objects.create(
+            veiculo=carro,
+            item=pneus,
+            tipo="preventiva",
+            data=date(2026, 2, 1),
+            km=95_000,  # próxima aos 125.000: em dia, fora do alerta
+            descricao="Pneus",
+        )
+    IntervaloPersonalizado.objects.create(
+        veiculo=Veiculo.objects.get(placa="TQ00A00"), item=oleo, intervalo_km=20_000
+    )
+
+    with django_assert_max_num_queries(4):
+        alertas = preventivas_em_alerta()
+
+    # o carro com intervalo de 20.000 km ainda está em dia (próxima aos 109.000)
+    assert [veiculo.placa for veiculo, _ in alertas] == [f"TQ{i:02d}A{i:02d}" for i in range(1, 12)]
+    veiculo, itens = alertas[0]
+    assert [p.item.nome for p in itens] == ["Troca de óleo e filtro"]
+    assert itens[0].status == StatusPreventiva.VENCIDA
+    assert itens[0].faltam_km == -1_000
+    assert itens[0].ultima.km == 89_000  # a última execução, não a antiga
+    # mesmos números da versão de um veículo só (tela de um carro)
+    esperado = [
+        (p.item.pk, p.faltam_km, p.km_proximo, p.ultima.pk)
+        for p in resumo_preventivas(veiculo)
+        if p.status in (StatusPreventiva.VENCIDA, StatusPreventiva.PROXIMA)
+    ]
+    assert [(p.item.pk, p.faltam_km, p.km_proximo, p.ultima.pk) for p in itens] == esperado
 
 
 def test_telas_de_manutencao_renderizam(usuario_logado, veiculo, oleo):

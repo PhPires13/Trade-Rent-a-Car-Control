@@ -92,6 +92,12 @@ class Alocacao(models.Model):
                 erros["veiculo"] = "Veículo fora de locação não pode ser alocado."
             if self.cliente_id and self.cliente.status == Cliente.Status.INATIVO:
                 erros["cliente"] = "Cliente inativo não pode receber veículo."
+        if self.status == self.Status.ENCERRADA:
+            # Vale também na edição (Admin): encerrar é pelo fluxo "Encerrar alocação".
+            if not self.data_termino:
+                erros["data_termino"] = "Alocação encerrada precisa da data de término."
+            if self.km_devolucao is None:
+                erros["km_devolucao"] = "Alocação encerrada precisa do KM de devolução."
         if self.limite_km == self.LimiteKm.LIMITADO and not self.franquia_km_mensal:
             erros["franquia_km_mensal"] = "Informe a franquia mensal para limite de km."
         if erros:
@@ -99,29 +105,50 @@ class Alocacao(models.Model):
 
     @transaction.atomic
     def encerrar(self, data_termino, km_devolucao):
-        """Encerra a alocação e libera o veículo (docs.md §4.2).
+        """Encerra a alocação, libera o veículo e cancela semanas não usadas (docs.md §4.2).
 
-        O acerto de caução entra na etapa 4.
+        A cobrança é pré-paga: a semana que começaria no dia do término (ou
+        depois) não é devida — se ainda não tem pagamento, é cancelada. O
+        acerto de caução é feito na tela da caução (docs.md §4.4).
         """
         if self.status != self.Status.ATIVA:
             raise ValidationError("Alocação já encerrada.")
         if self.trocas.filter(data_devolucao__isnull=True).exists():
             raise ValidationError("Devolva o carro substituto antes de encerrar a alocação.")
+        if data_termino < self.data_inicio:
+            raise ValidationError(
+                f"Data de término anterior ao início da alocação ({self.data_inicio:%d/%m/%Y})."
+            )
         if km_devolucao < self.km_entrega:
             raise ValidationError("KM de devolução menor que o KM de entrega.")
         self.data_termino = data_termino
         self.km_devolucao = km_devolucao
         self.status = self.Status.ENCERRADA
         self.save()
+        from apps.financeiro.models import Cobranca  # import local evita ciclo de import
+
+        nao_usadas = self.cobrancas.filter(
+            origem=Cobranca.Origem.ALUGUEL, vencimento__gte=data_termino
+        ).exclude(status__in=[Cobranca.Status.CANCELADA, Cobranca.Status.JUDICIAL])
+        for cobranca in nao_usadas:
+            if cobranca.total_quitado <= 0:
+                cobranca.status = Cobranca.Status.CANCELADA
+                cobranca.save(update_fields=["status"])
         veiculo = self.veiculo
-        veiculo.status = Veiculo.Status.DISPONIVEL
+        if veiculo.status == Veiculo.Status.ALOCADO:
+            veiculo.status = Veiculo.Status.DISPONIVEL
         if km_devolucao > veiculo.km_atual:
             veiculo.km_atual = km_devolucao
         veiculo.save(update_fields=["status", "km_atual"])
 
     @property
     def troca_ativa(self):
-        return self.trocas.filter(data_devolucao__isnull=True).first()
+        """Troca em aberto (no máximo uma, por constraint).
+
+        Filtra em Python: assim a listagem com prefetch_related("trocas") usa o
+        cache — um .filter() aqui refazia a consulta linha a linha.
+        """
+        return next((t for t in self.trocas.all() if t.data_devolucao is None), None)
 
 
 class TrocaTemporaria(models.Model):
@@ -159,6 +186,18 @@ class TrocaTemporaria(models.Model):
         verbose_name = "troca temporária"
         verbose_name_plural = "trocas temporárias"
         ordering = ["-data_retirada"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["alocacao"],
+                condition=models.Q(data_devolucao__isnull=True),
+                name="uma_troca_aberta_por_alocacao",
+            ),
+            models.UniqueConstraint(
+                fields=["veiculo_substituto"],
+                condition=models.Q(data_devolucao__isnull=True),
+                name="uma_troca_aberta_por_substituto",
+            ),
+        ]
 
     def __str__(self):
         return (
@@ -179,27 +218,27 @@ class TrocaTemporaria(models.Model):
 
     def clean(self):
         erros = {}
-        if self._state.adding:
-            if self.alocacao_id and self.alocacao.status != Alocacao.Status.ATIVA:
-                erros["alocacao"] = "A alocação precisa estar ativa."
-            if (
-                self.alocacao_id
-                and self.alocacao.trocas.filter(data_devolucao__isnull=True).exists()
-            ):
-                erros["alocacao"] = "Já existe uma troca em andamento nesta alocação."
-            if (
-                self.veiculo_substituto_id
-                and self.veiculo_substituto.status != Veiculo.Status.DISPONIVEL
-            ):
+        if self._state.adding and self.veiculo_substituto_id:
+            if self.veiculo_substituto.status != Veiculo.Status.DISPONIVEL:
                 erros["veiculo_substituto"] = (
                     f"Substituto {self.veiculo_substituto.placa} não está disponível."
                 )
+        # Valem também na edição (Admin) — reabrir a troca passa por aqui.
+        if self.alocacao_id and self.data_devolucao is None:
+            if self.alocacao.status != Alocacao.Status.ATIVA:
+                erros["alocacao"] = "A alocação precisa estar ativa."
             if (
-                self.veiculo_substituto_id
-                and self.alocacao_id
-                and self.veiculo_substituto_id == self.alocacao.veiculo_id
+                self.alocacao.trocas.filter(data_devolucao__isnull=True)
+                .exclude(pk=self.pk)
+                .exists()
             ):
-                erros["veiculo_substituto"] = "O substituto não pode ser o próprio carro."
+                erros["alocacao"] = "Já existe uma troca em andamento nesta alocação."
+        if (
+            self.veiculo_substituto_id
+            and self.alocacao_id
+            and self.veiculo_substituto_id == self.alocacao.veiculo_id
+        ):
+            erros["veiculo_substituto"] = "O substituto não pode ser o próprio carro."
         if erros:
             raise ValidationError(erros)
 
@@ -207,13 +246,19 @@ class TrocaTemporaria(models.Model):
     def devolver(self, data_devolucao, km_devolucao):
         if self.data_devolucao:
             raise ValidationError("Substituto já devolvido.")
+        if data_devolucao < self.data_retirada:
+            raise ValidationError(
+                f"Data de devolução anterior à retirada ({self.data_retirada:%d/%m/%Y})."
+            )
         if km_devolucao < self.km_retirada:
             raise ValidationError("KM de devolução menor que o KM de retirada.")
         self.data_devolucao = data_devolucao
         self.km_devolucao = km_devolucao
         self.save()
         substituto = self.veiculo_substituto
-        substituto.status = Veiculo.Status.DISPONIVEL
+        # Só libera quem está alocado — não sobrescreve Vendido/Em manutenção/Inativo.
+        if substituto.status == Veiculo.Status.ALOCADO:
+            substituto.status = Veiculo.Status.DISPONIVEL
         if km_devolucao > substituto.km_atual:
             substituto.km_atual = km_devolucao
         substituto.save(update_fields=["status", "km_atual"])

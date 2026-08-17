@@ -36,21 +36,51 @@ DIAS_PARA_INADIMPLENCIA = 1
 
 
 def _proximo_vencimento(alocacao):
-    """Primeira data >= início da locação que cai no dia de vencimento."""
-    data = alocacao.data_inicio
+    """Vencimento da próxima cobrança de aluguel a gerar.
+
+    Ancorado na última cobrança existente (inclusive cancelada), para que uma
+    mudança de dia_vencimento em contrato ativo valha só para frente — sem
+    regenerar semanas já cobradas nem semanas canceladas.
+    """
+    ultima = (
+        Cobranca.objects.filter(alocacao=alocacao, origem=Cobranca.Origem.ALUGUEL)
+        .order_by("-vencimento")
+        .first()
+    )
+    data = ultima.vencimento + timedelta(days=1) if ultima else alocacao.data_inicio
     while data.weekday() != alocacao.dia_vencimento:
         data += timedelta(days=1)
     return data
 
 
 def _valor_da_semana(alocacao, vencimento):
-    """Valor semanal vigente no vencimento — troca temporária pode ajustar (decisão nº 1)."""
-    troca = (
-        alocacao.trocas.filter(data_retirada__lte=vencimento, valor_semanal_ajustado__isnull=False)
-        .filter(Q(data_devolucao__isnull=True) | Q(data_devolucao__gte=vencimento))
-        .first()
+    """Valor da semana [vencimento, vencimento+6], rateado por dia (docs.md §4.2).
+
+    Troca temporária com valor ajustado vale pelos dias em que está em curso;
+    o restante da semana sai pelo valor da alocação (decisão nº 1).
+    """
+    fim_da_semana = vencimento + timedelta(days=6)
+    trocas = list(
+        alocacao.trocas.filter(
+            valor_semanal_ajustado__isnull=False, data_retirada__lte=fim_da_semana
+        ).filter(Q(data_devolucao__isnull=True) | Q(data_devolucao__gte=vencimento))
     )
-    return troca.valor_semanal_ajustado if troca else alocacao.valor_semanal
+    if not trocas:
+        return alocacao.valor_semanal
+    total = ZERO
+    for i in range(7):
+        dia = vencimento + timedelta(days=i)
+        vigente = next(
+            (
+                troca.valor_semanal_ajustado
+                for troca in trocas
+                if troca.data_retirada <= dia
+                and (troca.data_devolucao is None or troca.data_devolucao >= dia)
+            ),
+            alocacao.valor_semanal,
+        )
+        total += vigente
+    return (total / 7).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def gerar_cobrancas_semanais(hoje=None):
@@ -62,7 +92,11 @@ def gerar_cobrancas_semanais(hoje=None):
     ).select_related("cliente", "veiculo")
     for alocacao in alocacoes:
         vencimento = _proximo_vencimento(alocacao)
-        limite = min(hoje, alocacao.data_termino or hoje)
+        # Cobrança pré-paga: a semana só é devida se começa ANTES da devolução.
+        if alocacao.data_termino:
+            limite = min(hoje, alocacao.data_termino - timedelta(days=1))
+        else:
+            limite = hoje
         while vencimento <= limite:
             cobranca, criada = Cobranca.objects.get_or_create(
                 alocacao=alocacao,
@@ -81,26 +115,53 @@ def gerar_cobrancas_semanais(hoje=None):
     return criadas
 
 
+def _filtro_devedor(limite):
+    """Cobrança que torna o cliente devedor: atrasada há >= 1 dia ou judicial (nº 14 e 17)."""
+    return Q(status=Cobranca.Status.ATRASADO, vencimento__lte=limite) | Q(
+        status=Cobranca.Status.JUDICIAL
+    )
+
+
 def marcar_atrasos(hoje=None):
-    """Atualiza cobranças atrasadas e a inadimplência dos clientes (decisão nº 14)."""
+    """Atualiza cobranças atrasadas e a inadimplência dos clientes (decisões nº 14 e 17)."""
     hoje = hoje or date.today()
     limite = hoje - timedelta(days=DIAS_PARA_INADIMPLENCIA)
-    abertas = Cobranca.objects.filter(
-        status__in=[Cobranca.Status.PENDENTE, Cobranca.Status.PARCIAL, Cobranca.Status.ATRASADO]
-    )
+    abertas = Cobranca.objects.filter(status__in=Cobranca.STATUS_EM_ABERTO)
     for cobranca in abertas:
         cobranca.atualizar_status(hoje)
-    inadimplentes = set(
-        Cobranca.objects.filter(
-            status=Cobranca.Status.ATRASADO, vencimento__lte=limite
-        ).values_list("cliente_id", flat=True)
+    devedores = set(
+        Cobranca.objects.filter(_filtro_devedor(limite)).values_list("cliente_id", flat=True)
     )
-    Cliente.objects.filter(pk__in=inadimplentes).exclude(status=Cliente.Status.INATIVO).update(
+    Cliente.objects.filter(pk__in=devedores).exclude(status=Cliente.Status.INATIVO).update(
         status=Cliente.Status.INADIMPLENTE
     )
-    Cliente.objects.filter(status=Cliente.Status.INADIMPLENTE).exclude(pk__in=inadimplentes).update(
+    Cliente.objects.filter(status=Cliente.Status.INADIMPLENTE).exclude(pk__in=devedores).update(
         status=Cliente.Status.ATIVO
     )
+
+
+def atualizar_inadimplencia(cliente, hoje=None):
+    """Recalcula o status do cliente na hora do pagamento (decisões nº 14 e 17).
+
+    Quem quita as pendências volta a Ativo sem esperar a rotina do dia
+    seguinte; cobrança judicial mantém o devedor Inadimplente; Inativo
+    nunca é alterado.
+    """
+    hoje = hoje or date.today()
+    cliente.refresh_from_db(fields=["status"])  # o cron pode ter mudado após o objeto carregar
+    if cliente.status == Cliente.Status.INATIVO:
+        return
+    limite = hoje - timedelta(days=DIAS_PARA_INADIMPLENCIA)
+    devedor = cliente.cobrancas.filter(_filtro_devedor(limite)).exists()
+    if devedor:
+        novo = Cliente.Status.INADIMPLENTE
+    elif cliente.status == Cliente.Status.INADIMPLENTE:
+        novo = Cliente.Status.ATIVO
+    else:
+        return
+    if cliente.status != novo:
+        cliente.status = novo
+        cliente.save(update_fields=["status"])
 
 
 def sugerir_encargo(cobranca, hoje=None):
@@ -204,30 +265,17 @@ def registrar_recebimento(
                 recebimento=recebimento,
                 observacoes="Sobra de recebimento",
             )
+    atualizar_inadimplencia(cliente, hoje=data)
     return recebimento
 
 
 def _caucao_ativa(cliente):
+    """Caução da alocação ativa do cliente — contrato encerrado não recebe reforço."""
     return (
-        Caucao.objects.filter(alocacao__cliente=cliente).order_by("-alocacao__data_inicio").first()
+        Caucao.objects.filter(alocacao__cliente=cliente, alocacao__status=Alocacao.Status.ATIVA)
+        .order_by("-alocacao__data_inicio")
+        .first()
     )
-
-
-def distribuicao_automatica(cliente, valor):
-    """Sugestão: distribui o valor da cobrança mais antiga para a mais nova."""
-    valor = Decimal(valor)
-    sugestao = []
-    abertas = cliente.cobrancas.filter(
-        status__in=[Cobranca.Status.PENDENTE, Cobranca.Status.PARCIAL, Cobranca.Status.ATRASADO]
-    ).order_by("vencimento")
-    for cobranca in abertas:
-        if valor <= ZERO:
-            break
-        aplicar = min(valor, cobranca.saldo)
-        if aplicar > ZERO:
-            sugestao.append((cobranca, aplicar))
-            valor -= aplicar
-    return sugestao
 
 
 @transaction.atomic
@@ -289,25 +337,41 @@ def descontar_da_caucao(caucao, cobranca, valor, data, observacoes=""):
         observacoes=observacoes,
     )
     cobranca.atualizar_status()
+    atualizar_inadimplencia(cobranca.cliente, hoje=data)
     return movimentacao
 
 
 def resumo_fiscal(ano, mes):
     """Base de cálculo do DAS do mês (decisão nº 11): só a receita de locação.
 
-    Regime de caixa: soma as aplicações pela data do recebimento.
+    Regime de caixa: aplicações pela data do recebimento e descontos de
+    caução pela data da movimentação — abater da caução tem o mesmo efeito
+    de quitação (docs.md §4.3).
     """
+    locacao = ZERO
+    diversos = {}
+
+    def somar(cobranca, valor):
+        nonlocal locacao
+        if cobranca.classificacao_fiscal == "locacao":
+            locacao += valor
+        else:
+            rotulo = cobranca.get_origem_display()
+            diversos[rotulo] = diversos.get(rotulo, ZERO) + valor
+
     aplicacoes = AplicacaoRecebimento.objects.filter(
         recebimento__data__year=ano, recebimento__data__month=mes
     ).select_related("cobranca", "recebimento")
-    locacao = ZERO
-    diversos = {}
     for aplicacao in aplicacoes:
-        if aplicacao.cobranca.classificacao_fiscal == "locacao":
-            locacao += aplicacao.valor
-        else:
-            rotulo = aplicacao.cobranca.get_origem_display()
-            diversos[rotulo] = diversos.get(rotulo, ZERO) + aplicacao.valor
+        somar(aplicacao.cobranca, aplicacao.valor)
+    descontos = MovimentacaoCaucao.objects.filter(
+        tipo=MovimentacaoCaucao.Tipo.DESCONTO,
+        data__year=ano,
+        data__month=mes,
+        cobranca__isnull=False,
+    ).select_related("cobranca")
+    for movimentacao in descontos:
+        somar(movimentacao.cobranca, movimentacao.valor)
     caucao_recebida = (
         MovimentacaoCaucao.objects.filter(
             data__year=ano, data__month=mes, tipo__in=["recebimento", "reforco"]

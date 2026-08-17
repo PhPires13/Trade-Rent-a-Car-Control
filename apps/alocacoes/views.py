@@ -92,7 +92,9 @@ class TrocaForm(forms.ModelForm):
 
 def lista(request):
     mostrar = request.GET.get("mostrar", "ativas")
-    alocacoes = Alocacao.objects.select_related("veiculo", "cliente").prefetch_related("trocas")
+    alocacoes = Alocacao.objects.select_related("veiculo", "cliente").prefetch_related(
+        "trocas__veiculo_substituto"
+    )
     if mostrar == "ativas":
         alocacoes = alocacoes.filter(status=Alocacao.Status.ATIVA)
     return render(request, "alocacoes/lista.html", {"alocacoes": alocacoes, "mostrar": mostrar})
@@ -148,10 +150,17 @@ def encerrar(request, alocacao_id):
                 km_devolucao=int(request.POST["km_devolucao"]),
             )
             messages.success(
-                request,
-                f"Alocação encerrada — {alocacao.veiculo.placa} está disponível. "
-                "O acerto de caução entra na etapa financeira.",
+                request, f"Alocação encerrada — {alocacao.veiculo.placa} está disponível."
             )
+            # Encerrar dispara o acerto de caução quando há saldo retido (docs.md §4.2/§4.4).
+            caucao = getattr(alocacao, "caucao", None)
+            if caucao and caucao.saldo > 0:
+                messages.warning(
+                    request,
+                    f"Faça o acerto da caução: R$ {caucao.saldo} retidos "
+                    f"de {alocacao.cliente.nome}.",
+                )
+                return redirect("financeiro:caucao_detalhe", caucao.pk)
             return redirect("alocacoes:lista")
         except (ValidationError, KeyError, ValueError) as erro:
             mensagens = getattr(erro, "messages", ["Preencha a data e o KM corretamente."])

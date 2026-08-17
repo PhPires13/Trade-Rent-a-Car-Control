@@ -12,13 +12,6 @@ from apps.pessoas.models import Cliente
 from apps.pessoas.views import _telefone_whatsapp
 
 
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
-
-
 def test_whatsapp_nao_duplica_ddi():
     assert _telefone_whatsapp("(31) 98765-4321") == "5531987654321"
     assert _telefone_whatsapp("+55 (21) 98888-7777") == "5521988887777"  # já veio com DDI
@@ -64,3 +57,44 @@ def test_saldo_devedor_em_lote_bate_com_o_individual(usuario_logado, db):
     )
     resposta = usuario_logado.get("/clientes/")
     assert "1.100,00" in resposta.content.decode()  # 1300 − 200
+
+
+@pytest.fixture
+def cliente_com_carro_na_rua(db):
+    veiculo = Veiculo.objects.create(placa="QXQ6C10", marca_modelo="Gol")
+    cliente = Cliente.objects.create(nome="Arlen", cpf_cnpj="111.222.333-44")
+    alocacao = Alocacao.objects.create(
+        veiculo=veiculo,
+        cliente=cliente,
+        data_inicio=date(2026, 7, 1),
+        valor_semanal=Decimal("650.00"),
+        km_entrega=0,
+    )
+    return cliente, alocacao
+
+
+def test_nao_inativa_cliente_com_alocacao_ativa(usuario_logado, cliente_com_carro_na_rua):
+    """Inativo com carro na rua sumiria da lista e nunca viraria inadimplente."""
+    cliente, _ = cliente_com_carro_na_rua
+    resposta = usuario_logado.post(
+        f"/clientes/{cliente.pk}/editar/",
+        {"nome": cliente.nome, "cpf_cnpj": cliente.cpf_cnpj, "status": Cliente.Status.INATIVO},
+    )
+    assert resposta.status_code == 200  # volta com erro no campo status
+    assert "Encerre a alocação" in resposta.content.decode()
+    cliente.refresh_from_db()
+    assert cliente.status == Cliente.Status.ATIVO
+
+
+def test_inativa_normalmente_depois_de_encerrar_a_alocacao(
+    usuario_logado, cliente_com_carro_na_rua
+):
+    cliente, alocacao = cliente_com_carro_na_rua
+    alocacao.encerrar(date(2026, 7, 20), km_devolucao=1_500)
+    resposta = usuario_logado.post(
+        f"/clientes/{cliente.pk}/editar/",
+        {"nome": cliente.nome, "cpf_cnpj": cliente.cpf_cnpj, "status": Cliente.Status.INATIVO},
+    )
+    assert resposta.status_code == 302
+    cliente.refresh_from_db()
+    assert cliente.status == Cliente.Status.INATIVO

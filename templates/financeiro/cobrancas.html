@@ -22,6 +22,7 @@
     {% endfor %}
   </select>
   <button class="rounded bg-marca-preto px-3 py-1 text-white">Filtrar</button>
+  <span class="text-xs text-gray-500">Ordem: {{ ordem_rotulo }}</span>
 </form>
 
 <div class="overflow-x-auto rounded-lg bg-white shadow">
@@ -64,9 +65,16 @@
             <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto" title="Sugerido: 5% até 4 dias, 10% acima — ajuste ou zere">Aplicar</button>
           </form>
           {% elif cobranca.status == "atrasado" %}
-          <form method="post" action="{% url 'financeiro:marcar_judicial' cobranca.pk %}">
+          <form method="post" action="{% url 'financeiro:marcar_judicial' cobranca.pk %}"
+                onsubmit="return confirm('Marcar como cobrança judicial? O encargo automático para e o status só muda quando ela for quitada ou reaberta.')">
             {% csrf_token %}
             <button class="text-xs text-purple-700 underline">judicial</button>
+          </form>
+          {% elif cobranca.status == "judicial" %}
+          <form method="post" action="{% url 'financeiro:reabrir_judicial' cobranca.pk %}"
+                onsubmit="return confirm('Tirar esta cobrança da cobrança judicial e voltar para o fluxo normal?')">
+            {% csrf_token %}
+            <button class="text-xs text-purple-700 underline">reabrir</button>
           </form>
           {% endif %}
           {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.status != "judicial" %}
@@ -86,4 +94,21 @@
     </tbody>
   </table>
 </div>
+
+{% if pagina.paginator.num_pages > 1 %}
+<div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+  <span>Mostrando {{ pagina.start_index }}–{{ pagina.end_index }} de {{ pagina.paginator.count }} cobranças</span>
+  <span class="flex items-center gap-2">
+    {% if pagina.has_previous %}
+      <a href="?{{ filtros }}&pagina=1" class="underline">« Primeira</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.previous_page_number }}" class="underline">‹ Anterior</a>
+    {% endif %}
+    <span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
+    {% if pagina.has_next %}
+      <a href="?{{ filtros }}&pagina={{ pagina.next_page_number }}" class="underline">Próxima ›</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.paginator.num_pages }}" class="underline">Última »</a>
+    {% endif %}
+  </span>
+</div>
+{% endif %}
 {% endblock %}

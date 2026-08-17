@@ -103,9 +103,42 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Seed das categorias** confirmadas (decisão nº 15): Gol R$ 650 / Voyage R$ 750 via migração reversível
 - [x] 183 testes passando (+32); telas verificadas no navegador (registro com estouro, cancelamento, gráfico)
 
+### Etapa 10 — Auditoria geral do sistema (17/08/2026)
+*Auditoria multi-agente do sistema inteiro (38 agentes: 6 lentes — financeira, segurança, integridade de estado, robustez para leigos, refatoração e performance com medição real de queries — cada achado passando por refutador cético ou juiz pragmático). 20 bugs confirmados e 9 melhorias aprovadas, todos executados; 1 achado refutado.*
+
+**Dinheiro (o mais crítico)**
+- [x] Mudar o dia de vencimento de uma alocação ativa **duplicava todas as semanas já cobradas** — a geração agora se ancora na última cobrança emitida; mudança de dia vale só para frente
+- [x] Devolver o carro no dia do ciclo cobrava uma **semana inteira não usada** (a cobrança é pré-paga); encerrar a alocação cancela as semanas que ainda não começaram e não têm pagamento
+- [x] Aluguel quitado por **desconto de caução** ficava fora da base do DAS e da receita do veículo — imposto subdeclarado e ficha de desmobilização errada
+- [x] Cliente que paga **volta a Ativo na hora** (antes esperava a rotina do dia seguinte); cobrança judicial mantém o devedor como inadimplente
+- [x] Semana com **troca temporária** agora é rateada por dia (valor do substituto × dias, valor da alocação × resto)
+- [x] Encerrar alocação com caução retida leva direto ao acerto (a tela prometia e nunca acontecia); sobra de recebimento não reforça caução de contrato encerrado
+- [x] Apagar um recebimento no Admin deixava a cobrança "Paga" com saldo devedor para sempre — signals recalculam o status
+- [x] **Despesas do mês** passaram a incluir multas absorvidas pela empresa e custos de compra (decisão nº 21); o TOTAL do Excel/CSV fecha com as próprias linhas
+
+**Segurança (antes do deploy)**
+- [x] `SECRET_KEY` sem fallback inseguro: com `DEBUG=False` o app **se recusa a subir** sem a variável (a chave também deriva a criptografia das credenciais)
+- [x] Senha dos portais de multas **nunca mais volta no HTML** (tela, Admin) e saiu do histórico; `CREDENCIAIS_KEY` própria permite rotacionar a `SECRET_KEY` sem perder as senhas; credencial ilegível avisa em vez de falhar em silêncio
+- [x] **Bloqueio de força bruta** no login (6 tentativas por usuário → 15 min, destrava sozinho) e **HSTS** de 30 dias em produção
+- [x] Multa em Nota de Débito não pode mais virar advertência por trás da cobrança já emitida
+
+**Consistência e usuário leigo**
+- [x] Leitura de KM lançada fora de ordem (mês esquecido) **revalida e reencadeia** o mês seguinte, avisando quando havia excedente cobrado; registrar pendência de mês passado cai no mês certo e volta para o mês filtrado
+- [x] Venda bloqueada para carro emprestado como substituto; devolver troca não ressuscita carro vendido; constraint de "uma troca aberta por alocação/substituto" no banco
+- [x] Cliente com carro na rua não pode ser marcado inativo; datas incoerentes (término antes do início, devolução antes da retirada) bloqueadas
+- [x] Valor em dinheiro aceita o **jeito brasileiro** de digitar (`1.250,00`) — antes gravava 1000× menor em silêncio
+- [x] "Judicial" ganhou confirmação, **volta atrás** e passou a poder ser recebida; erro no recebimento **não apaga mais o que foi digitado** e diz qual campo falhou; ND não duplica em duplo clique
+- [x] **Paginação** em cobranças, multas e sinistros (antes as listas eram cortadas em silêncio) e botão **"distribuir automaticamente"** no recebimento
+
+**Performance (medida)** — painel 241→38 queries, alertas de preventivas 73→4, plano de preventivas 75→~6, ficha do veículo 148→15, ranking 133→10, lista de alocações 40→4, KM mensal 28→6, tela de cauções e cobranças com totais agregados. 13 testes de teto de queries garantem que nada volta a crescer com o histórico.
+
+**Refatoração** — fonte única para: conjuntos de status de cobrança, parse de dinheiro, período `?mes=`, normalização de placa, regra dos intervalos de preventiva e fichas da frota; `conftest.py` único no lugar da fixture copiada em 22 arquivos; código morto removido.
+
+- [x] **280 testes passando** (+97); `makemigrations --check` e `check --deploy` limpos; telas verificadas no navegador
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:
-1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY`, `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`; cron diário `python manage.py rotina_diaria`.
+1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY` (**obrigatória**), `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` e, de preferência, `CREDENCIAIS_KEY` antes de cadastrar credenciais de portais; cron diário `python manage.py rotina_diaria`.
 2. **Carga inicial**: cadastrar frota/clientes reais (ou preparar os "outros dados organizados" — decisão nº 9).
 3. **Fase 2 do roadmap** (docs.md §7): anexos, notificações WhatsApp/e-mail, emissão de fatura/ND, importação de planilhas.

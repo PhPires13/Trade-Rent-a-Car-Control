@@ -2,6 +2,15 @@ from django.db import models
 from simple_history.models import HistoricalRecords
 
 
+def normalizar_placa(texto):
+    """Placa sem hífen, sem espaço e em maiúsculas — como é gravada no banco.
+
+    Fonte única: o modelo grava assim, e busca/formulários precisam comparar
+    do mesmo jeito (senão "ABC-1D23" não acha o carro "ABC1D23").
+    """
+    return (texto or "").upper().replace("-", "").replace(" ", "")
+
+
 class Categoria(models.Model):
     """Categoria de veículo — define a faixa de valor semanal (docs.md §4.1)."""
 
@@ -148,5 +157,5 @@ class Veiculo(models.Model):
         return f"{self.marca_modelo} — {self.placa}"
 
     def save(self, *args, **kwargs):
-        self.placa = self.placa.upper().replace("-", "").replace(" ", "")
+        self.placa = normalizar_placa(self.placa)
         super().save(*args, **kwargs)

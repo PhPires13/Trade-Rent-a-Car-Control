@@ -2,11 +2,14 @@
 
 Variáveis de ambiente (arquivo .env em desenvolvimento):
 - SECRET_KEY, DEBUG, ALLOWED_HOSTS, DATABASE_URL, CSRF_TRUSTED_ORIGINS
+- CREDENCIAIS_KEY (opcional): chave das credenciais dos portais de multas
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -17,8 +20,33 @@ env = environ.Env(
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
-SECRET_KEY = env("SECRET_KEY", default="dev-only-insecure-key")
+CHAVE_DE_DESENVOLVIMENTO = "dev-only-insecure-key"
+
+
+def chave_secreta(valor, debug):
+    """SECRET_KEY obrigatória em produção; em desenvolvimento cai numa chave fixa.
+
+    Sem isso, um deploy que esquecesse a variável subiria com uma chave pública
+    do repositório — que também deriva a criptografia das credenciais dos
+    portais (apps/multas/fields.py).
+    """
+    if valor:
+        return valor
+    if not debug:
+        raise ImproperlyConfigured(
+            "SECRET_KEY não definida. Com DEBUG=False é obrigatório definir a variável "
+            'de ambiente SECRET_KEY (gere com: python -c "from django.core.management.'
+            'utils import get_random_secret_key; print(get_random_secret_key())").'
+        )
+    return CHAVE_DE_DESENVOLVIMENTO
+
+
 DEBUG = env("DEBUG")
+SECRET_KEY = chave_secreta(env("SECRET_KEY", default=""), DEBUG)
+# Chave das credenciais dos portais (apps/multas/fields.py). Separada da SECRET_KEY
+# para que rotacionar a SECRET_KEY não torne as senhas gravadas ilegíveis. Se não
+# for definida, usa a SECRET_KEY — e aí não pode mais ser trocada sem recadastro.
+CREDENCIAIS_KEY = env("CREDENCIAIS_KEY", default=SECRET_KEY)
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
 
@@ -31,6 +59,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.humanize",
     "simple_history",
+    "axes",
     "apps.frota",
     "apps.pessoas",
     "apps.alocacoes",
@@ -53,6 +82,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
+    "axes.middleware.AxesMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -85,6 +115,24 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# Bloqueio de força bruta no login (django-axes). Trava por usuário, não por IP:
+# atrás do proxy do Railway o IP ou colapsa num só (um bot travaria os donos) ou
+# vem do X-Forwarded-For, que é falsificável. O AxesStandaloneBackend vem primeiro.
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+AXES_LOCKOUT_PARAMETERS = ["username"]
+AXES_FAILURE_LIMIT = 6
+AXES_COOLOFF_TIME = timedelta(minutes=15)  # destrava sozinho, nunca bloqueio permanente
+AXES_RESET_ON_SUCCESS = True
+AXES_COOLOFF_MESSAGE = (
+    "Muitas tentativas de senha erradas. Por segurança, o acesso a esta conta ficou "
+    "bloqueado por 15 minutos — tente de novo mais tarde."
+)
+# W006 sugere travar também por IP; aqui é decisão contrária deliberada (ver acima).
+SILENCED_SYSTEM_CHECKS = ["axes.W006"]
+
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "painel"
 LOGOUT_REDIRECT_URL = "login"
@@ -109,3 +157,9 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    # HSTS: depois da primeira visita o navegador só usa https, sem o salto em
+    # http que um atacante na mesma rede Wi-Fi interceptaria. 30 dias, sem
+    # subdomínios e sem preload (preload é irreversível na prática).
+    SECURE_HSTS_SECONDS = 2592000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False

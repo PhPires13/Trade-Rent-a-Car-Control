@@ -9,7 +9,7 @@ from apps.frota.models import Veiculo
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
 from .repasse import gerar_repasse
-from .services import StatusPreventiva, resumo_preventivas
+from .services import StatusPreventiva, resumos_por_veiculo
 
 
 class ManutencaoForm(forms.ModelForm):
@@ -159,7 +159,9 @@ def preventivas(request):
         .exclude(status__in=[Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO])
         .order_by("placa")
     )
-    quadro = [(veiculo, resumo_preventivas(veiculo)) for veiculo in veiculos]
+    veiculos = list(veiculos)
+    resumos = resumos_por_veiculo(veiculos)  # 3 queries fixas, não 6 por veículo
+    quadro = [(veiculo, resumos[veiculo.pk]) for veiculo in veiculos]
     return render(
         request,
         "manutencao/preventivas.html",

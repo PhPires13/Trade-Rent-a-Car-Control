@@ -131,6 +131,35 @@ def test_gerar_nd_de_multas_e_receber(alocacao, veiculo, cliente):
     assert multa1.repasse == "Recebido"
 
 
+def test_multa_em_nd_nao_pode_virar_advertencia(alocacao, veiculo, cliente):
+    """Anular o resultado não desfaz a ND — a cobrança continuaria de pé (revisão)."""
+    multa = Multa.objects.create(
+        veiculo=veiculo,
+        data_infracao=date(2026, 7, 5),
+        descricao="Avançar sinal",
+        valor=Decimal("293.47"),
+    )
+    nd = services.gerar_nd_de_multas(cliente, [multa], date(2026, 7, 20))
+
+    multa.resultado = Multa.Resultado.ADVERTENCIA
+    with pytest.raises(ValidationError) as erro:
+        multa.full_clean()
+    assert f"ND {nd.numero:03d}" in str(erro.value)
+
+    # e enquanto estiver assim, a multa não some da tela de repasse
+    multa.save()
+    assert multa.repasse.startswith(f"Incluída na ND {nd.numero:03d}")
+    assert "revisar" in multa.repasse
+
+    # sem ND, converter em advertência continua liberado
+    outra = Multa.objects.create(
+        veiculo=veiculo, data_infracao=date(2026, 7, 6), valor=Decimal("100.00")
+    )
+    outra.resultado = Multa.Resultado.ADVERTENCIA
+    outra.full_clean()
+    assert outra.repasse == "Não se aplica"
+
+
 def test_alertas_fici(alocacao, veiculo):
     hoje = date(2026, 7, 20)
     Multa.objects.create(
@@ -154,13 +183,6 @@ def test_alertas_fici(alocacao, veiculo):
     )
     alertas = services.alertas_fici(hoje)
     assert [m.descricao for m in alertas] == ["Prazo próximo"]
-
-
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
 
 
 def test_telas_de_multas_renderizam(usuario_logado, alocacao, veiculo, cliente):

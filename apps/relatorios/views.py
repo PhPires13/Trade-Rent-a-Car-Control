@@ -1,22 +1,13 @@
-from datetime import date
-
 from django.shortcuts import render
+
+from apps.financeiro.periodos import ano_mes
 
 from . import exportar, services
 
 
-def _ano_mes(request):
-    try:
-        ano, mes = request.GET.get("mes", "").split("-")
-        return int(ano), int(mes)
-    except (ValueError, AttributeError):
-        hoje = date.today()
-        return hoje.year, hoje.month
-
-
 def relatorios(request):
     """Central de relatórios mensais com exportação p/ contabilidade (docs.md §5)."""
-    ano, mes = _ano_mes(request)
+    ano, mes = ano_mes(request)
     tipo = request.GET.get("exportar")
     formato = request.GET.get("formato", "xlsx")
     if tipo:
@@ -78,6 +69,37 @@ def _exportar(tipo, formato, ano, mes):
             ["", v.placa, "Proteção Auto Truck (mensalidade)", "", float(v.mensalidade_protecao)]
             for v in d["frota_protegida"]
         ]
+        linhas += [
+            [
+                m.data_infracao.strftime("%d/%m/%Y"),
+                m.veiculo.placa,
+                "Multa absorvida pela empresa",
+                (m.descricao or m.codigo)[:80],
+                float(m.valor),
+            ]
+            for m in d["multas_empresa"]
+        ]
+        linhas += [
+            [
+                v.data_aquisicao.strftime("%d/%m/%Y"),
+                v.placa,
+                "Custos de compra",
+                v.marca_modelo[:80],
+                float(v.custos_entrada),
+            ]
+            for v in d["compras"]
+        ]
+        linhas += [
+            [
+                v.data_venda.strftime("%d/%m/%Y"),
+                v.placa,
+                "Custos de venda",
+                v.marca_modelo[:80],
+                float(v.custos_venda),
+            ]
+            for v in d["vendas"]
+        ]
+        # toda linha acima soma no TOTAL e vice-versa — a planilha fecha com ela mesma
         linhas.append(["", "", "TOTAL", "", float(d["total_geral"])])
         return exportar.exportar(
             formato,

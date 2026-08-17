@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from simple_history.models import HistoricalRecords
 
@@ -30,7 +31,9 @@ class OrgaoAutuador(models.Model):
     endereco = models.TextField("endereço (protocolo presencial/AR)", blank=True)
     observacoes = models.TextField("observações", blank=True)
 
-    history = HistoricalRecords()
+    # Credenciais ficam fora do histórico: sem isso toda senha já usada — inclusive
+    # a que foi trocada porque vazou — ficaria guardada e visível para sempre.
+    history = HistoricalRecords(excluded_fields=["login", "senha"])
 
     class Meta:
         verbose_name = "órgão autuador"
@@ -73,6 +76,13 @@ class Multa(models.Model):
         CONDUTOR = "condutor", "Condutor identificado"
         EMPRESA = "empresa", "Empresa (absorve)"
         VENDEDOR = "vendedor", "Vendedor anterior (antes da aquisição)"
+
+    # Resultados em que a multa deixa de ser devida — não há o que repassar.
+    RESULTADOS_ANULADORES = (
+        Resultado.ADVERTENCIA,
+        Resultado.CANCELADA,
+        Resultado.NAO_EXIGIVEL,
+    )
 
     veiculo = models.ForeignKey(
         Veiculo, verbose_name="veículo", on_delete=models.PROTECT, related_name="multas"
@@ -173,29 +183,53 @@ class Multa(models.Model):
             self.cliente = cliente_vigente(self.veiculo, self.data_infracao)
         super().save(*args, **kwargs)
 
+    def clean(self):
+        """Não deixa anular o resultado de uma multa que já está sendo cobrada.
+
+        A ND congela o valor numa cobrança própria: mudar o resultado aqui não
+        desfaz nada, só escondia a multa da tela enquanto o cliente continuava
+        sendo cobrado (revisão de segurança/financeiro).
+        """
+        super().clean()
+        if not self.pk or self.resultado not in self.RESULTADOS_ANULADORES:
+            return
+        anterior = type(self).objects.filter(pk=self.pk).values_list("resultado", flat=True).first()
+        if anterior in self.RESULTADOS_ANULADORES:
+            return  # já estava assim; não trava a edição dos outros campos
+        item = self.itens_nd.select_related("nota_debito").first()
+        if item:
+            raise ValidationError(
+                {
+                    "resultado": (
+                        f"Esta multa está na ND {item.nota_debito.numero:03d}, que continua "
+                        "sendo cobrada do cliente. Ajuste ou cancele a nota de débito antes "
+                        "de registrar este resultado."
+                    )
+                }
+            )
+
     @property
     def item_nd(self):
         return getattr(self, "_item_nd_cache", None) or self.itens_nd.first()
 
     @property
     def repasse(self):
-        """A cobrar → Incluída em ND → Recebido; ou 'não se aplica' (docs.md §4.7)."""
-        if self.responsavel in (self.Responsavel.EMPRESA, self.Responsavel.VENDEDOR):
-            return "Não se aplica"
-        if (
-            self.resultado
-            in (
-                self.Resultado.ADVERTENCIA,
-                self.Resultado.CANCELADA,
-                self.Resultado.NAO_EXIGIVEL,
-            )
-            or not self.valor
-        ):
-            return "Não se aplica"
+        """A cobrar → Incluída em ND → Recebido; ou 'não se aplica' (docs.md §4.7).
+
+        O vínculo com a ND é checado primeiro: multa já cobrada não pode sumir da
+        tela porque o resultado mudou — a cobrança da ND continua de pé.
+        """
         item = self.itens_nd.select_related("nota_debito").first()
         if item:
             cobranca = getattr(item.nota_debito, "cobranca", None)
             if cobranca and cobranca.status == "pago":
                 return "Recebido"
-            return f"Incluída na ND {item.nota_debito.numero:03d}"
+            rotulo = f"Incluída na ND {item.nota_debito.numero:03d}"
+            if self.resultado in self.RESULTADOS_ANULADORES:
+                rotulo += " — revisar: resultado anulou a multa"
+            return rotulo
+        if self.responsavel in (self.Responsavel.EMPRESA, self.Responsavel.VENDEDOR):
+            return "Não se aplica"
+        if self.resultado in self.RESULTADOS_ANULADORES or not self.valor:
+            return "Não se aplica"
         return "A cobrar"

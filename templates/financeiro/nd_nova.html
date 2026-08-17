@@ -9,24 +9,30 @@
   por enquanto os itens são descritos manualmente.
 </p>
 
+{{ itens_iniciais|json_script:"nd-itens-iniciais" }}
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
-      x-data='{ itens: [{d: "", v: ""}] }'>
+      x-data='{ itens: JSON.parse(document.getElementById("nd-itens-iniciais").textContent), enviando: false }'
+      x-on:submit="enviando = true">
   {% csrf_token %}
+  <input type="hidden" name="token" value="{{ token }}">
   <div>
     <label class="mb-1 block text-sm font-medium">Cliente</label>
     <select name="cliente" required>
       <option value="">— escolha —</option>
-      {% for c in clientes %}<option value="{{ c.pk }}">{{ c.nome }}</option>{% endfor %}
+      {% for c in clientes %}
+      <option value="{{ c.pk }}" {% if post.cliente == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.nome }}</option>
+      {% endfor %}
     </select>
   </div>
   <div class="grid gap-4 sm:grid-cols-2">
     <div>
       <label class="mb-1 block text-sm font-medium">Data de emissão</label>
-      <input type="date" name="data_emissao" value="{{ hoje|date:'Y-m-d' }}" required>
+      <input type="date" name="data_emissao" required
+             value="{% if post.data_emissao %}{{ post.data_emissao }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}">
     </div>
     <div>
       <label class="mb-1 block text-sm font-medium">Vencimento (opcional)</label>
-      <input type="date" name="vencimento">
+      <input type="date" name="vencimento" value="{{ post.vencimento|default:'' }}">
     </div>
   </div>
 
@@ -45,11 +51,14 @@
 
   <div>
     <label class="mb-1 block text-sm font-medium">Observações</label>
-    <textarea name="observacoes" rows="2"></textarea>
+    <textarea name="observacoes" rows="2">{{ post.observacoes|default:'' }}</textarea>
   </div>
 
   <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Emitir</button>
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95"
+            x-bind:disabled="enviando" x-bind:class="enviando ? 'cursor-wait opacity-50' : ''">
+      <span x-show="!enviando">Emitir</span><span x-show="enviando">Emitindo…</span>
+    </button>
     <a href="{% url 'financeiro:nds' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
   </div>
 </form>

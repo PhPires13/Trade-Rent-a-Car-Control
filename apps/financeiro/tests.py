@@ -52,26 +52,98 @@ def test_gera_cobrancas_ate_hoje_e_eh_idempotente(alocacao):
     assert vencimentos == [date(2026, 7, 1), date(2026, 7, 8), date(2026, 7, 15)]
 
 
-def test_cobranca_usa_valor_da_troca_vigente(alocacao, db):
-    substituto = Veiculo.objects.create(placa="RNB9J66", marca_modelo="Voyage")
-    TrocaTemporaria.objects.create(
+def _trocar(alocacao, retirada, valor=Decimal("750.00"), placa="RNB9J66"):
+    substituto = Veiculo.objects.create(placa=placa, marca_modelo="Voyage")
+    return TrocaTemporaria.objects.create(
         alocacao=alocacao,
         veiculo_substituto=substituto,
-        data_retirada=date(2026, 7, 6),
+        data_retirada=retirada,
         km_retirada=0,
-        valor_semanal_ajustado=Decimal("750.00"),
+        valor_semanal_ajustado=valor,
     )
+
+
+def test_cobranca_rateia_valor_da_troca_por_dias(alocacao, db):
+    _trocar(alocacao, retirada=date(2026, 7, 6))  # aberta a partir de segunda 06/07
     services.gerar_cobrancas_semanais(hoje=date(2026, 7, 9))
+    # semana 08–14/07: troca vigente a semana inteira → valor ajustado cheio
     semana2 = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 8))
     assert semana2.valor == Decimal("750.00")
+    # semana 01–07/07: 5 dias a 650 + 2 dias (06 e 07) a 750 → rateio (docs.md §4.2)
     semana1 = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 1))
-    assert semana1.valor == Decimal("650.00")
+    assert semana1.valor == Decimal("678.57")
+
+
+def test_troca_que_nao_cruza_o_vencimento_entra_no_rateio(alocacao, db):
+    # retirada quinta 02/07 e devolução terça 07/07 — não cruza nenhuma quarta
+    troca = _trocar(alocacao, retirada=date(2026, 7, 2))
+    troca.devolver(data_devolucao=date(2026, 7, 7), km_devolucao=100)
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 9))
+    # semana 01–07/07: 1 dia a 650 + 6 dias (02–07) a 750
+    semana1 = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 1))
+    assert semana1.valor == Decimal("735.71")
+    # semana 08–14/07: sem troca → valor normal
+    semana2 = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 8))
+    assert semana2.valor == Decimal("650.00")
+
+
+def test_troca_curta_cruzando_o_vencimento_nao_precifica_a_semana_toda(alocacao, db):
+    # retirada terça 07/07 e devolução quinta 09/07 — cruza a quarta 08/07
+    troca = _trocar(alocacao, retirada=date(2026, 7, 7))
+    troca.devolver(data_devolucao=date(2026, 7, 9), km_devolucao=100)
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 9))
+    # semana 01–07/07: só o dia 07 a 750
+    semana1 = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 1))
+    assert semana1.valor == Decimal("664.29")
+    # semana 08–14/07: dias 08 e 09 a 750, o resto a 650 — não os 750 cheios
+    semana2 = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 8))
+    assert semana2.valor == Decimal("678.57")
 
 
 def test_nao_gera_apos_encerramento(alocacao):
     alocacao.encerrar(data_termino=date(2026, 7, 10), km_devolucao=51_000)
     services.gerar_cobrancas_semanais(hoje=date(2026, 7, 30))
     assert Cobranca.objects.filter(origem="aluguel").count() == 2  # 01/07 e 08/07
+
+
+def test_mudar_dia_vencimento_nao_regenera_cobrancas_retroativas(alocacao):
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 16))  # quartas 01, 08 e 15/07
+    alocacao.dia_vencimento = 4  # dono muda o vencimento para sexta-feira
+    alocacao.save()
+    criadas = services.gerar_cobrancas_semanais(hoje=date(2026, 7, 17))
+    # a mudança vale só para frente: nada de 03, 10 e 17/07 retroativos
+    assert [c.vencimento for c in criadas] == [date(2026, 7, 17)]
+    assert Cobranca.objects.filter(origem="aluguel").count() == 4
+
+
+def test_devolucao_no_dia_do_ciclo_nao_cobra_semana_nao_usada(alocacao):
+    # devolução na quarta 15/07 (dia do ciclo): a semana 15–21/07 não é devida
+    alocacao.encerrar(data_termino=date(2026, 7, 15), km_devolucao=51_000)
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 16))
+    vencimentos = list(
+        Cobranca.objects.filter(origem="aluguel").values_list("vencimento", flat=True)
+    )
+    assert vencimentos == [date(2026, 7, 1), date(2026, 7, 8)]
+
+
+def test_encerrar_cancela_cobranca_da_semana_nao_usada(alocacao):
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 15))  # cron da manhã já gerou 15/07
+    alocacao.encerrar(data_termino=date(2026, 7, 15), km_devolucao=51_000)
+    cobranca = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 15))
+    assert cobranca.status == Cobranca.Status.CANCELADA
+    # a rotina do dia seguinte não recria nem reativa a semana cancelada
+    assert services.gerar_cobrancas_semanais(hoje=date(2026, 7, 16)) == []
+
+
+def test_encerrar_preserva_cobranca_com_pagamento(alocacao, cliente):
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 15))
+    cobranca = Cobranca.objects.get(origem="aluguel", vencimento=date(2026, 7, 15))
+    services.registrar_recebimento(
+        cliente, date(2026, 7, 15), Decimal("650.00"), "pix", [(cobranca, Decimal("650.00"))]
+    )
+    alocacao.encerrar(data_termino=date(2026, 7, 15), km_devolucao=51_000)
+    cobranca.refresh_from_db()
+    assert cobranca.status == Cobranca.Status.PAGO  # paga não é cancelada
 
 
 # ---------- atraso, inadimplência e encargos ----------
@@ -86,16 +158,48 @@ def test_atraso_marca_cobranca_e_cliente_inadimplente(alocacao, cliente):
     assert cliente.status == Cliente.Status.INADIMPLENTE
 
 
-def test_pagamento_reverte_inadimplencia(alocacao, cliente):
+def test_pagamento_reverte_inadimplencia_na_hora(alocacao, cliente):
     services.gerar_cobrancas_semanais(hoje=date(2026, 7, 1))
     services.marcar_atrasos(hoje=date(2026, 7, 3))
     cobranca = Cobranca.objects.get(origem="aluguel")
     services.registrar_recebimento(
         cliente, date(2026, 7, 3), Decimal("650.00"), "pix", [(cobranca, Decimal("650.00"))]
     )
-    services.marcar_atrasos(hoje=date(2026, 7, 3))
+    # sem esperar a rotina do dia seguinte (decisão nº 14)
     cliente.refresh_from_db()
     assert cliente.status == Cliente.Status.ATIVO
+
+
+def test_pagamento_parcial_nao_reverte_inadimplencia(alocacao, cliente):
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 1))
+    services.marcar_atrasos(hoje=date(2026, 7, 3))
+    cobranca = Cobranca.objects.get(origem="aluguel")
+    services.registrar_recebimento(
+        cliente, date(2026, 7, 3), Decimal("300.00"), "pix", [(cobranca, Decimal("300.00"))]
+    )
+    cliente.refresh_from_db()
+    assert cliente.status == Cliente.Status.INADIMPLENTE
+
+
+def test_desconto_de_caucao_reverte_inadimplencia_na_hora(alocacao, cliente):
+    services.abrir_caucao(alocacao, valor_recebido=Decimal("1000.00"), data=date(2026, 7, 1))
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 1))
+    services.marcar_atrasos(hoje=date(2026, 7, 3))
+    cobranca = Cobranca.objects.get(origem="aluguel")
+    services.descontar_da_caucao(alocacao.caucao, cobranca, Decimal("650.00"), date(2026, 7, 3))
+    cliente.refresh_from_db()
+    assert cliente.status == Cliente.Status.ATIVO
+
+
+def test_cobranca_judicial_mantem_cliente_inadimplente(alocacao, cliente):
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 1))
+    services.marcar_atrasos(hoje=date(2026, 7, 10))
+    cobranca = Cobranca.objects.get(origem="aluguel")
+    cobranca.status = Cobranca.Status.JUDICIAL  # decisão nº 17
+    cobranca.save(update_fields=["status"])
+    services.marcar_atrasos(hoje=date(2026, 7, 11))  # rotina seguinte não pode reativar
+    cliente.refresh_from_db()
+    assert cliente.status == Cliente.Status.INADIMPLENTE
 
 
 def test_encargo_sugerido_5_e_10_por_cento(alocacao):
@@ -256,14 +360,59 @@ def test_base_do_das_so_conta_locacao(alocacao, cliente):
     assert resumo["caucao_recebida"] == Decimal("500.00")
 
 
+def test_base_do_das_inclui_aluguel_quitado_pela_caucao(alocacao, cliente):
+    services.abrir_caucao(alocacao, valor_recebido=Decimal("1000.00"), data=date(2026, 7, 1))
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 1))
+    aluguel = Cobranca.objects.get(origem="aluguel")
+    services.descontar_da_caucao(alocacao.caucao, aluguel, Decimal("650.00"), date(2026, 7, 5))
+    nd = services.emitir_nota_debito(cliente, date(2026, 7, 6), [("Multa", Decimal("200.00"))])
+    services.descontar_da_caucao(alocacao.caucao, nd.cobranca, Decimal("200.00"), date(2026, 7, 6))
+    resumo = services.resumo_fiscal(2026, 7)
+    # abater da caução tem o mesmo efeito de quitação (docs.md §4.3): entra na base
+    assert resumo["locacao"] == Decimal("650.00")
+    assert resumo["total_diversos"] == Decimal("200.00")  # ND via caução fica fora do DAS
+
+
+# ---------- exclusões no Admin ----------
+
+
+def test_apagar_recebimento_reabre_cobranca(alocacao, cliente):
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 1))
+    cobranca = Cobranca.objects.get(origem="aluguel")
+    recebimento = services.registrar_recebimento(
+        cliente, date(2026, 7, 1), Decimal("650.00"), "pix", [(cobranca, Decimal("650.00"))]
+    )
+    cobranca.refresh_from_db()
+    assert cobranca.status == Cobranca.Status.PAGO
+    recebimento.delete()  # lançado errado, apagado no Admin
+    cobranca.refresh_from_db()
+    assert cobranca.saldo == Decimal("650.00")
+    assert cobranca.status == Cobranca.Status.ATRASADO  # dívida volta a aparecer
+
+
+def test_apagar_desconto_de_caucao_reabre_cobranca(alocacao, cliente):
+    services.abrir_caucao(alocacao, valor_recebido=Decimal("1000.00"), data=date(2026, 7, 1))
+    services.gerar_cobrancas_semanais(hoje=date(2026, 7, 1))
+    cobranca = Cobranca.objects.get(origem="aluguel")
+    movimentacao = services.descontar_da_caucao(
+        alocacao.caucao, cobranca, Decimal("650.00"), date(2026, 7, 5)
+    )
+    movimentacao.delete()
+    cobranca.refresh_from_db()
+    assert cobranca.saldo == Decimal("650.00")
+    assert cobranca.status == Cobranca.Status.ATRASADO
+
+
+def test_sobra_nao_reforca_caucao_de_contrato_encerrado(alocacao, cliente):
+    services.abrir_caucao(alocacao, valor_recebido=Decimal("1000.00"), data=date(2026, 7, 1))
+    alocacao.encerrar(data_termino=date(2026, 7, 10), km_devolucao=51_000)
+    with pytest.raises(ValidationError):
+        services.registrar_recebimento(
+            cliente, date(2026, 7, 12), Decimal("100.00"), "pix", [], sobra_destino="caucao"
+        )
+
+
 # ---------- telas ----------
-
-
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
 
 
 def test_telas_do_financeiro_renderizam(usuario_logado, alocacao, cliente):

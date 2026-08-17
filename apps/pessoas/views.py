@@ -17,13 +17,9 @@ from apps.financeiro.models import (
 
 from .models import Cliente, CondutorAutorizado
 
-#: Cobranças que ainda pesam no saldo devedor do cliente (docs.md §4.3).
-COBRANCAS_EM_ABERTO = [
-    Cobranca.Status.PENDENTE,
-    Cobranca.Status.PARCIAL,
-    Cobranca.Status.ATRASADO,
-    Cobranca.Status.JUDICIAL,
-]
+#: Cobranças que ainda pesam no saldo devedor do cliente (docs.md §4.3) —
+#: inclui judicial; a fonte única dos conjuntos de status é o modelo.
+COBRANCAS_EM_ABERTO = Cobranca.STATUS_DEVIDOS
 
 
 class ClienteForm(forms.ModelForm):
@@ -62,6 +58,24 @@ class ClienteForm(forms.ModelForm):
             choices.insert(1, (Cliente.Status.INADIMPLENTE, "Inadimplente (automático)"))
         self.fields["status"].choices = choices
         self.fields["status"].help_text = "Inadimplente é controlado pelos atrasos, todo dia."
+
+    def clean_status(self):
+        """Inativar com carro na rua esconderia o cliente da lista e da cobrança.
+
+        Espelha a regra inversa da alocação ("cliente inativo não recebe
+        veículo"): enquanto houver alocação ativa, o cadastro fica ativo.
+        """
+        status = self.cleaned_data["status"]
+        if (
+            status == Cliente.Status.INATIVO
+            and self.instance.pk
+            and self.instance.alocacoes.filter(status=Alocacao.Status.ATIVA).exists()
+        ):
+            raise forms.ValidationError(
+                "Este cliente ainda está com um carro alugado. "
+                "Encerre a alocação antes de marcar como inativo."
+            )
+        return status
 
 
 class CondutorInlineForm(forms.ModelForm):

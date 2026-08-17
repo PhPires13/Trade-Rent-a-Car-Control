@@ -76,4 +76,21 @@
   <p class="text-gray-500">Nenhum sinistro registrado.</p>
   {% endfor %}
 </div>
+
+{% if pagina.paginator.num_pages > 1 %}
+<div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+  <span>Mostrando {{ pagina.start_index }}–{{ pagina.end_index }} de {{ pagina.paginator.count }} sinistros</span>
+  <span class="flex items-center gap-2">
+    {% if pagina.has_previous %}
+      <a href="?{{ filtros }}&pagina=1" class="underline">« Primeira</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.previous_page_number }}" class="underline">‹ Anterior</a>
+    {% endif %}
+    <span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
+    {% if pagina.has_next %}
+      <a href="?{{ filtros }}&pagina={{ pagina.next_page_number }}" class="underline">Próxima ›</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.paginator.num_pages }}" class="underline">Última »</a>
+    {% endif %}
+  </span>
+</div>
+{% endif %}
 {% endblock %}

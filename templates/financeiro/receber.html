@@ -27,7 +27,18 @@
 <form method="post"
       x-data='{ valor: 0, aplicado: 0,
                 recalc() { this.aplicado = Array.from(document.querySelectorAll(".aplicacao"))
-                  .reduce((s, el) => s + (parseFloat(el.value.replace(",", ".")) || 0), 0); } }'
+                  .reduce((s, el) => s + (parseFloat(el.value.replace(",", ".")) || 0), 0); },
+                distribuir() {
+                  let resta = this.valor;
+                  document.querySelectorAll(".aplicacao").forEach((el) => {
+                    const saldo = parseFloat(el.dataset.saldo) || 0;
+                    const usar = Math.min(resta, saldo);
+                    el.value = usar > 0 ? usar.toFixed(2).replace(".", ",") : "";
+                    resta = Math.max(resta - usar, 0);
+                  });
+                  this.recalc();
+                } }'
+      x-init="valor = parseFloat($el.querySelector('[name=valor]').value.replace(',', '.')) || 0; recalc()"
       class="rounded-lg bg-white p-6 shadow">
   {% csrf_token %}
   <input type="hidden" name="cliente" value="{{ cliente.pk }}">
@@ -35,25 +46,29 @@
   <div class="mb-4 grid gap-4 sm:grid-cols-4">
     <div>
       <label class="mb-1 block text-sm font-medium">Valor recebido (R$)</label>
-      <input type="text" name="valor" required x-on:input="valor = parseFloat($event.target.value.replace(',', '.')) || 0"
+      <input type="text" name="valor" required value="{{ post.valor|default:'' }}"
+             x-on:input="valor = parseFloat($event.target.value.replace(',', '.')) || 0"
              class="w-full rounded border border-gray-300 px-2 py-1">
     </div>
     <div>
       <label class="mb-1 block text-sm font-medium">Data</label>
-      <input type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" required
+      <input type="date" name="data" required
+             value="{% if post.data %}{{ post.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}"
              class="w-full rounded border border-gray-300 px-2 py-1">
     </div>
     <div>
       <label class="mb-1 block text-sm font-medium">Forma</label>
       <select name="forma" class="w-full rounded border border-gray-300 px-2 py-1">
-        {% for valor, rotulo in formas %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}
+        {% for valor, rotulo in formas %}
+        <option value="{{ valor }}" {% if post.forma == valor %}selected{% endif %}>{{ rotulo }}</option>
+        {% endfor %}
       </select>
     </div>
     <div>
       <label class="mb-1 block text-sm font-medium">Sobra vira</label>
       <select name="sobra_destino" class="w-full rounded border border-gray-300 px-2 py-1">
         <option value="credito">Crédito do cliente</option>
-        <option value="caucao">Reforço de caução</option>
+        <option value="caucao" {% if post.sobra_destino == "caucao" %}selected{% endif %}>Reforço de caução</option>
       </select>
     </div>
   </div>
@@ -64,17 +79,31 @@
         <th class="px-3 py-2">Vencimento</th>
         <th class="px-3 py-2">Cobrança</th>
         <th class="px-3 py-2">Saldo devedor</th>
-        <th class="px-3 py-2">Aplicar (R$)</th>
+        <th class="px-3 py-2">
+          Aplicar (R$)
+          {% if linhas %}
+          <button type="button" x-on:click="distribuir()"
+                  class="ml-2 rounded bg-gray-200 px-2 py-0.5 text-xs font-normal hover:bg-gray-300"
+                  title="Preenche da cobrança mais antiga para a mais nova, até acabar o valor recebido">
+            distribuir automaticamente
+          </button>
+          {% endif %}
+        </th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100">
-      {% for cobranca in cobrancas_abertas %}
-      <tr class="{% if cobranca.status == 'atrasado' %}bg-red-50{% endif %}">
+      {% for cobranca, digitado in linhas %}
+      <tr class="{% if cobranca.status == 'atrasado' %}bg-red-50{% elif cobranca.status == 'judicial' %}bg-purple-50{% endif %}">
         <td class="px-3 py-2">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
-        <td class="px-3 py-2">{{ cobranca.descricao }}</td>
+        <td class="px-3 py-2">
+          {{ cobranca.descricao }}
+          {% if cobranca.status == 'judicial' %}<span class="rounded bg-purple-100 px-1 text-xs font-semibold text-purple-800">Judicial</span>{% endif %}
+        </td>
         <td class="px-3 py-2 font-semibold">R$ {{ cobranca.saldo|intcomma }}</td>
         <td class="px-3 py-2">
-          <input type="text" name="aplicar_{{ cobranca.pk }}" placeholder="0,00"
+          <input type="text" name="aplicar_{{ cobranca.pk }}" placeholder="0,00" value="{{ digitado }}"
+                 {# ponto decimal fixo: o parseFloat do botão "distribuir" não entende vírgula #}
+                 data-saldo="{{ cobranca.saldo|stringformat:'.2f' }}"
                  class="aplicacao w-28 rounded border border-gray-300 px-2 py-1"
                  x-on:input="recalc()">
         </td>
@@ -102,7 +131,7 @@
             x-bind:disabled="aplicado > valor" x-bind:class="aplicado > valor ? 'opacity-50 cursor-not-allowed' : ''">
       Confirmar recebimento
     </button>
-    <input type="text" name="observacoes" placeholder="observações (opcional)"
+    <input type="text" name="observacoes" placeholder="observações (opcional)" value="{{ post.observacoes|default:'' }}"
            class="flex-1 rounded border border-gray-300 px-2 py-1 text-sm">
   </div>
 </form>

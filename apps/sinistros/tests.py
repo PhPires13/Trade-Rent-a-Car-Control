@@ -107,13 +107,6 @@ def test_dias_parado_da_manutencao(veiculo, db):
     assert manutencao.dias_parado == 8
 
 
-@pytest.fixture
-def usuario_logado(client, django_user_model):
-    django_user_model.objects.create_user(username="dono", password="senha-forte-123")
-    client.login(username="dono", password="senha-forte-123")
-    return client
-
-
 def test_telas_de_sinistros_renderizam(usuario_logado, alocacao, veiculo):
     sinistro = Sinistro.objects.create(
         veiculo=veiculo, data=date(2026, 7, 1), envolvido="associado", tipo="colisao"

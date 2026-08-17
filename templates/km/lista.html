@@ -37,8 +37,9 @@
         <td class="px-3 py-2">{{ veiculo.km_atual|intcomma }}</td>
         <form method="post" action="{% url 'km:registrar' veiculo.pk %}">
           {% csrf_token %}
+          <input type="hidden" name="mes" value="{{ mes|date:'Y-m' }}">
           <td class="px-3 py-2">
-            <input type="date" name="data_leitura" value="{{ hoje|date:'Y-m-d' }}" required
+            <input type="date" name="data_leitura" value="{{ data_sugerida|date:'Y-m-d' }}" required
                    class="rounded border border-gray-300 px-2 py-1">
           </td>
           <td class="px-3 py-2">

@@ -3,7 +3,9 @@ from decimal import Decimal, InvalidOperation
 
 from django import forms
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.http import urlencode
 
 from .models import AuxilioMotorista, Sinistro
 
@@ -49,10 +51,17 @@ def lista(request):
     status = request.GET.get("status")
     if status:
         sinistros = sinistros.filter(status=status)
+    pagina = Paginator(sinistros, 25).get_page(request.GET.get("pagina"))
     return render(
         request,
         "sinistros/lista.html",
-        {"sinistros": sinistros[:200], "statuses": Sinistro.Status.choices, "filtro": status or ""},
+        {
+            "sinistros": pagina.object_list,
+            "pagina": pagina,
+            "filtros": urlencode({"status": status or ""}),
+            "statuses": Sinistro.Status.choices,
+            "filtro": status or "",
+        },
     )
 
 
