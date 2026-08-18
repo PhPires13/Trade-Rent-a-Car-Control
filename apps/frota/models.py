@@ -138,6 +138,27 @@ class Veiculo(models.Model):
     )
 
     rastreador_fornecedor = models.CharField("rastreador — fornecedor", max_length=80, blank=True)
+    foto = models.ImageField(
+        "foto do carro",
+        upload_to="veiculos/",
+        null=True,
+        blank=True,
+        help_text="Aparece no card da frota e na ficha do veículo",
+    )
+    # IPVA e licenciamento do ciclo vigente (docs.md §4.1 e §5; decisão nº 21).
+    # O histórico dos anos anteriores fica no simple-history e na despesa do mês do pagamento.
+    ipva_ano = models.PositiveIntegerField("IPVA — ano", null=True, blank=True)
+    ipva_valor = models.DecimalField(
+        "IPVA — valor (R$)", max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    ipva_vencimento = models.DateField("IPVA — vencimento", null=True, blank=True)
+    ipva_pago_em = models.DateField(
+        "IPVA — pago em",
+        null=True,
+        blank=True,
+        help_text="Preencha ao pagar — a data define o mês da despesa nos relatórios",
+    )
+    licenciamento_vencimento = models.DateField("licenciamento — vencimento", null=True, blank=True)
     rastreador_vigencia_fim = models.DateField(
         "rastreador — fim da vigência", null=True, blank=True
     )

@@ -145,6 +145,20 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Fotos e documentos enviados (carro, motorista, CNH). Servidos por view autenticada
+# (config.views.midia) — CNH é documento sensível, nunca pode virar URL pública.
+# Em produção (Railway), aponte MEDIA_ROOT para um volume persistente (ex.: /data/midia).
+MEDIA_URL = "midia/"
+MEDIA_ROOT = env("MEDIA_ROOT", default=str(BASE_DIR / "midia"))
+
+# Leitura automática da CNH no cadastro (apps/pessoas/cnh.py) — opcional:
+# sem ANTHROPIC_API_KEY o cadastro segue funcionando, só sem o preenchimento automático.
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
+CNH_MODELO = env("CNH_MODELO", default="claude-opus-5")
+
+# Chave Pix da empresa — entra na mensagem de cobrança pronta do WhatsApp (opcional).
+CHAVE_PIX = env("CHAVE_PIX", default="")
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},

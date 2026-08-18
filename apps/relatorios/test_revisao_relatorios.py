@@ -153,6 +153,7 @@ def test_recebiveis_saldo_anotado_e_uma_query(db, django_assert_max_num_queries)
 
 
 def test_serie_mensal_roda_com_queries_fixas(db, django_assert_max_num_queries):
-    with django_assert_max_num_queries(10):
+    # +1 consulta do IPVA pago no mês (etapa 11) — continua fixo, não cresce com meses
+    with django_assert_max_num_queries(11):
         pontos = services.serie_mensal(2026, 7)
     assert len(pontos) == 6

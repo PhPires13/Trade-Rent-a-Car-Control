@@ -7,7 +7,7 @@
   {% if veiculo %}Editar veículo — {{ veiculo.placa }}{% else %}Novo veículo{% endif %}
 </h1>
 
-<form method="post" class="space-y-6">
+<form method="post" enctype="multipart/form-data" class="space-y-6">
   {% csrf_token %}
   {% if form.non_field_errors %}
   <div class="rounded border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-700">

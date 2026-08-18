@@ -47,7 +47,13 @@
 
 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
   {% for card in cards %}
-  <div class="flex flex-col rounded-lg bg-white p-4 shadow">
+  <div class="flex flex-col overflow-hidden rounded-lg bg-white p-4 shadow">
+    {% if card.veiculo.foto %}
+    <a href="{% url 'frota:detalhe' card.veiculo.pk %}" class="-mx-4 -mt-4 mb-3 block">
+      <img src="{{ card.veiculo.foto.url }}" alt="{{ card.veiculo.marca_modelo }} {{ card.veiculo.placa }}"
+           loading="lazy" class="h-36 w-full object-cover">
+    </a>
+    {% endif %}
     <div class="mb-2 flex flex-wrap items-center gap-2">
       <a href="{% url 'frota:detalhe' card.veiculo.pk %}"
          class="text-lg font-black underline decoration-marca-amarelo decoration-2">{{ card.veiculo.placa }}</a>

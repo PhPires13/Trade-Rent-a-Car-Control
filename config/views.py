@@ -1,7 +1,9 @@
 from datetime import date, timedelta
 
+from django.conf import settings
 from django.db.models import Q, Sum
 from django.shortcuts import redirect, render
+from django.views.static import serve
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import ZERO, Cobranca
@@ -11,6 +13,15 @@ from apps.manutencao.services import preventivas_em_alerta
 from apps.multas.services import alertas_fici
 from apps.pessoas.models import Cliente
 from apps.sinistros.models import Sinistro
+
+
+def midia(request, caminho):
+    """Serve fotos e documentos enviados — SEMPRE atrás do login.
+
+    O LoginRequiredMiddleware cobre esta view como qualquer outra; CNH e fotos
+    de clientes nunca podem virar URL pública (por isso não usamos static()).
+    """
+    return serve(request, caminho, document_root=settings.MEDIA_ROOT)
 
 
 def buscar(request):

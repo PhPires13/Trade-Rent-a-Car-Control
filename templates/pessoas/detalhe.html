@@ -5,7 +5,11 @@
 
 {% block conteudo %}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-2xl font-bold">
+  <h1 class="flex items-center gap-3 text-2xl font-bold">
+    {% if cliente.foto %}
+    <img src="{{ cliente.foto.url }}" alt="Foto de {{ cliente.nome }}"
+         class="h-14 w-14 rounded-full object-cover shadow">
+    {% endif %}
     {{ cliente.nome }}
     {% if cliente.status == "ativo" %}
       <span class="ml-2 rounded bg-green-100 px-2 py-0.5 text-sm font-semibold text-green-700">Ativo</span>
@@ -48,6 +52,12 @@
             <span class="{% if cnh_vencida %}font-semibold text-red-700{% elif cnh_a_vencer %}font-semibold text-yellow-700{% endif %}">
               — válida até {{ cliente.cnh_validade|date:"d/m/Y" }}{% if cnh_vencida %} (vencida){% elif cnh_a_vencer %} (vence em breve){% endif %}
             </span>
+          {% endif %}
+          {% if cliente.cnh_frente or cliente.cnh_verso %}
+          <span class="ml-1 text-xs">
+            {% if cliente.cnh_frente %}<a href="{{ cliente.cnh_frente.url }}" target="_blank" rel="noopener" class="underline">ver frente</a>{% endif %}
+            {% if cliente.cnh_verso %}<a href="{{ cliente.cnh_verso.url }}" target="_blank" rel="noopener" class="underline">ver verso</a>{% endif %}
+          </span>
           {% endif %}
         </dd>
       </div>

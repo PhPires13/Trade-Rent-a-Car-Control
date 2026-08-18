@@ -1,4 +1,4 @@
-"""Vigências e documentos a vencer — rastreador, bateria e CNH (docs.md §5)."""
+"""Vigências e documentos a vencer — IPVA, licenciamento, rastreador, bateria e CNH (§5)."""
 
 from datetime import date, timedelta
 
@@ -14,6 +14,25 @@ def vigencias_a_vencer(hoje=None):
     limite = hoje + timedelta(days=DIAS_ALERTA_VIGENCIA)
     alertas = []
     frota = Veiculo.objects.exclude(status=Veiculo.Status.VENDIDO)
+    # IPVA em aberto (sem data de pagamento) vencendo — decisão nº 21 / tabela do §5
+    for veiculo in frota.filter(ipva_vencimento__lte=limite, ipva_pago_em__isnull=True):
+        alertas.append(
+            {
+                "data": veiculo.ipva_vencimento,
+                "vencido": veiculo.ipva_vencimento < hoje,
+                "descricao": f"IPVA do {veiculo.placa}"
+                + (f" ({veiculo.ipva_ano})" if veiculo.ipva_ano else "")
+                + (f" — R$ {veiculo.ipva_valor}" if veiculo.ipva_valor else ""),
+            }
+        )
+    for veiculo in frota.filter(licenciamento_vencimento__lte=limite):
+        alertas.append(
+            {
+                "data": veiculo.licenciamento_vencimento,
+                "vencido": veiculo.licenciamento_vencimento < hoje,
+                "descricao": f"Licenciamento do {veiculo.placa}",
+            }
+        )
     for veiculo in frota.filter(rastreador_vigencia_fim__lte=limite):
         alertas.append(
             {

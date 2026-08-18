@@ -147,7 +147,7 @@
         {% for p in itens %}
           {{ p.item.nome }}
           {% if p.faltam_km <= 0 %}<span class="font-semibold text-red-700">vencida há {{ p.faltam_km|intcomma|cut:"-" }} km</span>
-          {% else %}<span class="text-yellow-800">faltam {{ p.faltam_km|intcomma }} km</span>{% endif %}
+          {% else %}<span class="text-yellow-800">faltam {{ p.faltam_km|intcomma }} km{% if p.dias_restantes is not None %} (≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }}){% endif %}</span>{% endif %}
           {% if not forloop.last %} · {% endif %}
         {% endfor %}
       </li>

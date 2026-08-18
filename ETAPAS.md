@@ -136,9 +136,18 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 
 - [x] **280 testes passando** (+97); `makemigrations --check` e `check --deploy` limpos; telas verificadas no navegador
 
+### Etapa 11 — Fotos, CNH automática, IPVA, WhatsApp e previsão em dias (18/08/2026)
+- [x] **Foto do carro e do motorista**: upload no cadastro, exibida nos cards da frota e de clientes e nas fichas; arquivos servidos por rota autenticada (`/midia/…` atrás do login — CNH e fotos nunca viram URL pública); em produção, volume persistente via `MEDIA_ROOT`
+- [x] **CNH com foto (frente e verso)** no cadastro do motorista + **leitura automática**: botão "Ler dados da CNH" envia as fotos para a API do Claude (visão + saída estruturada) e preenche nome, CPF, número, categoria e validade **como sugestão** — quem cadastra confere e ajusta antes de salvar; sem `ANTHROPIC_API_KEY` o cadastro funciona normalmente, só sem o preenchimento
+- [x] **IPVA e licenciamento** (prometidos no §4.1/§5, decisão nº 21): campos no veículo (ano, valor, vencimento, pago em), alerta de vencimento no painel (some ao pagar), badge pago/em aberto na ficha e despesa do mês do pagamento nos relatórios (tela, export e gráfico)
+- [x] **Cobrança pronta no WhatsApp**: botão "💬 cobrar no WhatsApp" nas cobranças devidas abre o wa.me do cliente com a mensagem preenchida (nome, valor, vencimento — variação para atraso com dias — e a `CHAVE_PIX` configurada); nada é enviado automaticamente
+- [x] **Previsão das preventivas em dias**: além dos km, cada item mostra "≈ X dias" no ritmo real do carro (média da última leitura mensal) e o alerta antecipa quando faltam ≤ 14 dias — um carro de app a 300 km/dia era avisado só 3 dias antes pela margem de 1.000 km
+- [x] Menu em três zonas (logo à esquerda, navegação central, Admin/busca/sair à direita)
+- [x] **307 testes passando** (+27; API da CNH testada com mock — nenhum teste chama a API de verdade); telas verificadas no navegador
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:
-1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY` (**obrigatória**), `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` e, de preferência, `CREDENCIAIS_KEY` antes de cadastrar credenciais de portais; cron diário `python manage.py rotina_diaria`.
+1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY` (**obrigatória**), `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` e, de preferência, `CREDENCIAIS_KEY` antes de cadastrar credenciais de portais; opcionais `ANTHROPIC_API_KEY` (leitura de CNH), `CHAVE_PIX` (mensagem de cobrança) e volume persistente com `MEDIA_ROOT` para as fotos; cron diário `python manage.py rotina_diaria`.
 2. **Carga inicial**: cadastrar frota/clientes reais (ou preparar os "outros dados organizados" — decisão nº 9).
 3. **Fase 2 do roadmap** (docs.md §7): anexos, notificações WhatsApp/e-mail, emissão de fatura/ND, importação de planilhas.

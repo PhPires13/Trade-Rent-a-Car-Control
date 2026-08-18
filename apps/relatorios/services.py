@@ -66,6 +66,11 @@ def despesas_do_mes(ano, mes):
         data_venda__year=ano, data_venda__month=mes, custos_venda__isnull=False
     )
     total_custos_venda = sum((v.custos_venda for v in vendas), ZERO)
+    # IPVA entra como despesa no mês do pagamento (decisão nº 21)
+    ipvas = Veiculo.objects.filter(
+        ipva_pago_em__year=ano, ipva_pago_em__month=mes, ipva_valor__isnull=False
+    ).order_by("placa")
+    total_ipva = sum((v.ipva_valor for v in ipvas), ZERO)
     # multa absorvida pela empresa não gera cobrança — é despesa do mês (docs.md §5),
     # pela data da infração, como a ficha do veículo já conta (desmobilização)
     multas_empresa = (
@@ -96,6 +101,8 @@ def despesas_do_mes(ano, mes):
         "total_multas_empresa": total_multas_empresa,
         "compras": list(compras),
         "total_custos_compra": total_custos_compra,
+        "ipvas": list(ipvas),
+        "total_ipva": total_ipva,
         "total_geral": (
             total_manutencao
             + total_protecao
@@ -103,6 +110,7 @@ def despesas_do_mes(ano, mes):
             + total_custos_venda
             + total_multas_empresa
             + total_custos_compra
+            + total_ipva
         ),
     }
 
@@ -185,6 +193,11 @@ def serie_mensal(ano, mes, quantidade=6):
         "data_aquisicao",
         "custos_entrada",
     )
+    ipvas = _somas_por_mes(
+        Veiculo.objects.filter(ipva_pago_em__range=(inicio, fim), ipva_valor__isnull=False),
+        "ipva_pago_em",
+        "ipva_valor",
+    )
     # candidatos à proteção uma vez; o recorte por mês (comprado até o fim dele,
     # não vendido antes dele) é o mesmo de despesas_do_mes, aplicado em memória
     protegidos = list(
@@ -220,6 +233,7 @@ def serie_mensal(ano, mes, quantidade=6):
             + custos_venda.get(chave, ZERO)
             + multas_empresa.get(chave, ZERO)
             + custos_compra.get(chave, ZERO)
+            + ipvas.get(chave, ZERO)
         )
         pontos.append(
             {"rotulo": f"{mes_i:02d}/{ano_i}", "receita": float(receita), "despesa": float(despesa)}

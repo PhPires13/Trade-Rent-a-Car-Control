@@ -167,7 +167,8 @@ def test_alertas_da_frota_em_lote(oleo, django_assert_max_num_queries, db):
         veiculo=Veiculo.objects.get(placa="TQ00A00"), item=oleo, intervalo_km=20_000
     )
 
-    with django_assert_max_num_queries(4):
+    # 4 fixas + 1 da média de km/dia (previsão das preventivas em dias — etapa 11)
+    with django_assert_max_num_queries(5):
         alertas = preventivas_em_alerta()
 
     # o carro com intervalo de 20.000 km ainda está em dia (próxima aos 109.000)

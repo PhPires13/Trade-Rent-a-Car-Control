@@ -7,15 +7,32 @@
   {% if cliente %}Editar cliente — {{ cliente.nome }}{% else %}Novo cliente{% endif %}
 </h1>
 
-<form method="post" class="max-w-lg space-y-4 rounded-lg bg-white p-6 shadow">
+<form method="post" enctype="multipart/form-data" class="max-w-lg space-y-4 rounded-lg bg-white p-6 shadow">
   {% csrf_token %}
   {% for erro in form.non_field_errors %}<p class="text-sm text-red-600">{{ erro }}</p>{% endfor %}
   {% for field in form %}
   <div>
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+    {% if field.name == "foto" and cliente and cliente.foto %}
+      <img src="{{ cliente.foto.url }}" alt="Foto de {{ cliente.nome }}"
+           class="mb-2 h-24 w-24 rounded-full object-cover">
+    {% endif %}
     {{ field }}
     {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+
+    {% if field.name == "cnh_verso" and cnh_leitura %}
+    <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm" id="leitor-cnh">
+      <button type="button" id="botao-ler-cnh"
+              class="rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">
+        📷 Ler dados da CNH
+      </button>
+      <span class="ml-2 text-xs text-gray-600">
+        Preenche nome, CPF e CNH a partir das fotos — confira e ajuste antes de salvar.
+      </span>
+      <p id="status-cnh" class="mt-2 hidden text-xs"></p>
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
   <div class="flex gap-3">
@@ -25,9 +42,65 @@
   </div>
 </form>
 
+{% if cnh_leitura %}
+<script>
+  (function () {
+    const botao = document.getElementById("botao-ler-cnh");
+    if (!botao) return;
+    const status = document.getElementById("status-cnh");
+    const campos = { nome: "id_nome", cpf: "id_cpf_cnpj", cnh_numero: "id_cnh_numero",
+                     cnh_categoria: "id_cnh_categoria", cnh_validade: "id_cnh_validade" };
+
+    function avisar(texto, erro) {
+      status.textContent = texto;
+      status.classList.remove("hidden");
+      status.className = "mt-2 text-xs " + (erro ? "text-red-600" : "text-green-700");
+    }
+
+    botao.addEventListener("click", async function () {
+      const frente = document.getElementById("id_cnh_frente").files[0];
+      const verso = document.getElementById("id_cnh_verso").files[0];
+      if (!frente && !verso) {
+        avisar("Escolha a foto da frente e/ou do verso da CNH primeiro.", true);
+        return;
+      }
+      const dados = new FormData();
+      if (frente) dados.append("cnh_frente", frente);
+      if (verso) dados.append("cnh_verso", verso);
+      botao.disabled = true;
+      avisar("Lendo a CNH…", false);
+      try {
+        const resposta = await fetch("{% url 'pessoas:cnh_extrair' %}", {
+          method: "POST",
+          headers: { "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value },
+          body: dados,
+        });
+        const corpo = await resposta.json();
+        if (!resposta.ok) {
+          avisar(corpo.erro || "Não consegui ler a CNH.", true);
+          return;
+        }
+        let preenchidos = 0;
+        for (const [chave, idCampo] of Object.entries(campos)) {
+          const valor = corpo.dados[chave];
+          const campo = document.getElementById(idCampo);
+          if (valor && campo) { campo.value = valor; preenchidos++; }
+        }
+        avisar("Dados preenchidos (" + preenchidos + " campos) — confira antes de salvar.", false);
+      } catch (e) {
+        avisar("Falha de conexão ao ler a CNH — tente de novo.", true);
+      } finally {
+        botao.disabled = false;
+      }
+    });
+  })();
+</script>
+{% endif %}
+
 <style>
   form input, form select, form textarea {
     width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
   }
+  form input[type="file"] { border: none; padding: 0.2rem 0; }
 </style>
 {% endblock %}

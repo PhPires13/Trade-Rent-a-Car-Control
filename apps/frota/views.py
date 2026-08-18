@@ -138,7 +138,17 @@ class VeiculoForm(forms.ModelForm):
     SECOES = (
         (
             "Identificação",
-            ["placa", "renavam", "chassi", "marca_modelo", "ano", "categoria", "uso"],
+            ["placa", "renavam", "chassi", "marca_modelo", "ano", "categoria", "uso", "foto"],
+        ),
+        (
+            "IPVA e licenciamento",
+            [
+                "ipva_ano",
+                "ipva_valor",
+                "ipva_vencimento",
+                "ipva_pago_em",
+                "licenciamento_vencimento",
+            ],
         ),
         (
             "Aquisição",
@@ -178,6 +188,12 @@ class VeiculoForm(forms.ModelForm):
             "ano",
             "categoria",
             "uso",
+            "foto",
+            "ipva_ano",
+            "ipva_valor",
+            "ipva_vencimento",
+            "ipva_pago_em",
+            "licenciamento_vencimento",
             "data_aquisicao",
             "valor_compra",
             "custos_entrada",
@@ -195,6 +211,9 @@ class VeiculoForm(forms.ModelForm):
         ]
         widgets = {
             "data_aquisicao": forms.DateInput(attrs={"type": "date"}),
+            "ipva_vencimento": forms.DateInput(attrs={"type": "date"}),
+            "ipva_pago_em": forms.DateInput(attrs={"type": "date"}),
+            "licenciamento_vencimento": forms.DateInput(attrs={"type": "date"}),
             "rastreador_vigencia_fim": forms.DateInput(attrs={"type": "date"}),
             "bateria_data_troca": forms.DateInput(attrs={"type": "date"}),
             "bateria_garantia_fim": forms.DateInput(attrs={"type": "date"}),
@@ -225,7 +244,7 @@ class VeiculoForm(forms.ModelForm):
 
 
 def _formulario_veiculo(request, veiculo):
-    form = VeiculoForm(request.POST or None, instance=veiculo)
+    form = VeiculoForm(request.POST or None, request.FILES or None, instance=veiculo)
     if request.method == "POST" and form.is_valid():
         salvo = form.save()
         messages.success(request, f"Veículo {salvo.placa} salvo.")

@@ -91,6 +91,16 @@ def _exportar(tipo, formato, ano, mes):
         ]
         linhas += [
             [
+                v.ipva_pago_em.strftime("%d/%m/%Y"),
+                v.placa,
+                "IPVA",
+                f"IPVA {v.ipva_ano}" if v.ipva_ano else "IPVA",
+                float(v.ipva_valor),
+            ]
+            for v in d["ipvas"]
+        ]
+        linhas += [
+            [
                 v.data_venda.strftime("%d/%m/%Y"),
                 v.placa,
                 "Custos de venda",

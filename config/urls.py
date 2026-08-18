@@ -6,6 +6,7 @@ from config import views
 
 urlpatterns = [
     path("", views.painel, name="painel"),
+    path("midia/<path:caminho>", views.midia, name="midia"),
     path("buscar/", views.buscar, name="buscar"),
     path("entrar/", auth_views.LoginView.as_view(template_name="login.html"), name="login"),
     path("sair/", auth_views.LogoutView.as_view(), name="logout"),

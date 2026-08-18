@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from django import forms
 from django.contrib import messages
 from django.db.models import Sum
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.alocacoes.models import Alocacao
@@ -15,6 +16,7 @@ from apps.financeiro.models import (
     MovimentoCredito,
 )
 
+from . import cnh
 from .models import Cliente, CondutorAutorizado
 
 #: Cobranças que ainda pesam no saldo devedor do cliente (docs.md §4.3) —
@@ -31,6 +33,9 @@ class ClienteForm(forms.ModelForm):
             "telefone",
             "email",
             "endereco",
+            "foto",
+            "cnh_frente",
+            "cnh_verso",
             "cnh_numero",
             "cnh_categoria",
             "cnh_validade",
@@ -257,22 +262,30 @@ def detalhe(request, cliente_id):
 
 
 def novo(request):
-    form = ClienteForm(request.POST or None)
+    form = ClienteForm(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
         cliente = form.save()
         messages.success(request, f"Cliente {cliente.nome} cadastrado.")
         return redirect("pessoas:detalhe", cliente.pk)
-    return render(request, "pessoas/cliente_form.html", {"form": form, "cliente": None})
+    return render(
+        request,
+        "pessoas/cliente_form.html",
+        {"form": form, "cliente": None, "cnh_leitura": cnh.disponivel()},
+    )
 
 
 def editar(request, cliente_id):
     cliente = get_object_or_404(Cliente, pk=cliente_id)
-    form = ClienteForm(request.POST or None, instance=cliente)
+    form = ClienteForm(request.POST or None, request.FILES or None, instance=cliente)
     if request.method == "POST" and form.is_valid():
         form.save()
         messages.success(request, f"Cadastro de {cliente.nome} atualizado.")
         return redirect("pessoas:detalhe", cliente.pk)
-    return render(request, "pessoas/cliente_form.html", {"form": form, "cliente": cliente})
+    return render(
+        request,
+        "pessoas/cliente_form.html",
+        {"form": form, "cliente": cliente, "cnh_leitura": cnh.disponivel()},
+    )
 
 
 def condutor_novo(request, cliente_id):
@@ -300,3 +313,38 @@ def condutor_editar(request, condutor_id):
             return redirect("pessoas:detalhe", condutor.cliente_id)
         return redirect("pessoas:lista")
     return render(request, "pessoas/condutor_form.html", {"form": form, "condutor": condutor})
+
+
+def cnh_extrair(request):
+    """Lê as fotos da CNH e devolve os dados como sugestão para o formulário.
+
+    Nada é gravado aqui — o retorno preenche os campos na tela e quem cadastra
+    valida e ajusta antes de salvar (pedido do dono: preencher para validação).
+    """
+    if request.method != "POST":
+        return JsonResponse({"erro": "Método inválido."}, status=405)
+    if not cnh.disponivel():
+        return JsonResponse(
+            {"erro": "Leitura automática desligada — configure a ANTHROPIC_API_KEY."},
+            status=503,
+        )
+    fotos = [f for f in [request.FILES.get("cnh_frente"), request.FILES.get("cnh_verso")] if f]
+    if not fotos:
+        return JsonResponse({"erro": "Envie a foto da frente e/ou do verso da CNH."}, status=400)
+    for foto in fotos:
+        problema = cnh.validar_upload(foto)
+        if problema:
+            return JsonResponse({"erro": problema}, status=400)
+    dados = cnh.extrair_dados(fotos)
+    if dados is None:
+        return JsonResponse(
+            {"erro": "Não consegui ler a CNH agora — preencha manualmente ou tente de novo."},
+            status=502,
+        )
+    if not dados.get("legivel"):
+        return JsonResponse(
+            {"erro": "As fotos não estão legíveis — tire outra foto com o documento inteiro."},
+            status=422,
+        )
+    dados.pop("legivel", None)
+    return JsonResponse({"dados": dados})

@@ -3,10 +3,14 @@
 from dataclasses import dataclass
 
 from apps.frota.models import Veiculo
+from apps.km.models import RegistroKm
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
 
 MARGEM_ALERTA_KM = 1_000
+#: Um carro de app roda ~300 km/dia: 1.000 km de margem viram só 3 dias de aviso.
+#: A previsão em dias (média do próprio carro) antecipa o alerta a tempo de agendar.
+MARGEM_ALERTA_DIAS = 14
 
 
 @dataclass
@@ -16,6 +20,7 @@ class StatusPreventiva:
     ultima: Manutencao | None
     km_proximo: int | None
     faltam_km: int | None
+    media_km_dia: float | None = None
 
     # Impede o Django template de tentar instanciar a classe ao resolver Status.X
     do_not_call_in_templates = True
@@ -26,12 +31,22 @@ class StatusPreventiva:
     VENCIDA = "vencida"
 
     @property
+    def dias_restantes(self):
+        """Previsão em dias no ritmo do próprio carro (última leitura mensal)."""
+        if self.faltam_km is None or not self.media_km_dia:
+            return None
+        if self.faltam_km <= 0:
+            return 0
+        return round(self.faltam_km / self.media_km_dia)
+
+    @property
     def status(self):
         if self.faltam_km is None:
             return self.SEM_REGISTRO
         if self.faltam_km <= 0:
             return self.VENCIDA
-        if self.faltam_km <= MARGEM_ALERTA_KM:
+        dias = self.dias_restantes
+        if self.faltam_km <= MARGEM_ALERTA_KM or (dias is not None and dias <= MARGEM_ALERTA_DIAS):
             return self.PROXIMA
         return self.OK
 
@@ -64,8 +79,23 @@ def _ultimas_manutencoes(ids, itens):
     return ultimas
 
 
-def _status_do_veiculo(veiculo, itens, personalizados, ultimas):
+def _medias_km_dia(ids):
+    """{veiculo_id: km/dia da leitura mensal mais recente} numa query só."""
+    medias = {}
+    leituras = RegistroKm.objects.filter(
+        veiculo_id__in=ids, dias__isnull=False, km_anterior__isnull=False
+    ).order_by("mes_referencia")
+    for veiculo_id, km, km_anterior, dias in leituras.values_list(
+        "veiculo_id", "km", "km_anterior", "dias"
+    ):
+        if dias and km >= km_anterior:
+            medias[veiculo_id] = (km - km_anterior) / dias  # sobrescreve: fica a mais recente
+    return medias
+
+
+def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias=None):
     """Regra dos intervalos — única fonte da aritmética das preventivas."""
+    media = (medias or {}).get(veiculo.pk)
     resultado = []
     for item in itens:
         intervalo = personalizados.get((veiculo.pk, item.pk)) or item.intervalo_km_padrao
@@ -83,6 +113,7 @@ def _status_do_veiculo(veiculo, itens, personalizados, ultimas):
                 ultima=ultima,
                 km_proximo=km_proximo,
                 faltam_km=faltam,
+                media_km_dia=media,
             )
         )
     return resultado
@@ -96,6 +127,7 @@ def resumo_preventivas(veiculo):
         itens,
         _intervalos_personalizados([veiculo.pk]),
         _ultimas_manutencoes([veiculo.pk], itens),
+        _medias_km_dia([veiculo.pk]),
     )
 
 
@@ -110,8 +142,9 @@ def resumos_por_veiculo(veiculos):
     itens = _itens_preventivos()
     personalizados = _intervalos_personalizados(ids)
     ultimas = _ultimas_manutencoes(ids, itens)
+    medias = _medias_km_dia(ids)
     return {
-        veiculo.pk: _status_do_veiculo(veiculo, itens, personalizados, ultimas)
+        veiculo.pk: _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias)
         for veiculo in veiculos
     }
 

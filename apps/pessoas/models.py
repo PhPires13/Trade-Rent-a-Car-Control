@@ -25,6 +25,15 @@ class Cliente(models.Model):
     email = models.EmailField("e-mail", blank=True)
     endereco = models.TextField("endereço", blank=True)
 
+    foto = models.ImageField(
+        "foto do motorista",
+        upload_to="clientes/",
+        null=True,
+        blank=True,
+        help_text="Aparece no card de clientes e na ficha",
+    )
+    cnh_frente = models.ImageField("CNH — foto da frente", upload_to="cnh/", null=True, blank=True)
+    cnh_verso = models.ImageField("CNH — foto do verso", upload_to="cnh/", null=True, blank=True)
     cnh_numero = models.CharField("CNH — número", max_length=20, blank=True)
     cnh_categoria = models.CharField("CNH — categoria", max_length=5, blank=True)
     cnh_validade = models.DateField("CNH — validade", null=True, blank=True)

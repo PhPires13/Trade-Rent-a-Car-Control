@@ -12,7 +12,7 @@ from django.utils.http import urlencode
 
 from apps.pessoas.models import Cliente
 
-from . import services
+from . import services, whatsapp
 from .models import ZERO, Caucao, Cobranca, MovimentacaoCaucao, MovimentoCredito, NotaDebito
 from .periodos import ano_mes
 
@@ -64,6 +64,11 @@ def cobrancas(request):
             and cobranca.origem != Cobranca.Origem.ENCARGO
             and not cobranca.encargos.exclude(status=Cobranca.Status.CANCELADA).exists()
             else None
+        )
+        cobranca.link_whatsapp = (
+            whatsapp.link_cobranca(cobranca, hoje)
+            if cobranca.status in Cobranca.STATUS_DEVIDOS
+            else ""
         )
         linhas.append((cobranca, encargo))
     return render(

@@ -77,6 +77,12 @@
             <button class="text-xs text-purple-700 underline">reabrir</button>
           </form>
           {% endif %}
+          {% if cobranca.link_whatsapp %}
+          <a href="{{ cobranca.link_whatsapp }}" target="_blank" rel="noopener"
+             class="block text-xs text-green-700 underline" title="Abre o WhatsApp com a mensagem de cobrança pronta">
+            💬 cobrar no WhatsApp
+          </a>
+          {% endif %}
           {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.status != "judicial" %}
             {% if cobranca.origem == "excedente_km" or cobranca.origem == "encargo" or cobranca.origem == "outro" %}
             <form method="post" action="{% url 'financeiro:cancelar' cobranca.pk %}"
