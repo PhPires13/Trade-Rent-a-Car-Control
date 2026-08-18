@@ -45,6 +45,9 @@ class ClienteForm(forms.ModelForm):
             "observacoes",
         ]
         widgets = {
+            "foto": forms.ClearableFileInput(attrs={"accept": "image/*"}),
+            "cnh_frente": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
+            "cnh_verso": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
             "cnh_validade": forms.DateInput(attrs={"type": "date"}),
             "endereco": forms.Textarea(attrs={"rows": 2}),
             "observacoes": forms.Textarea(attrs={"rows": 3}),

@@ -5,6 +5,7 @@ from . import views
 app_name = "frota"
 
 urlpatterns = [
+    path("crlv/extrair/", views.crlv_extrair, name="crlv_extrair"),
     path("", views.hub, name="hub"),
     path("categorias/", views.categorias, name="categorias"),
     path("fornecedores/", views.fornecedores, name="fornecedores"),

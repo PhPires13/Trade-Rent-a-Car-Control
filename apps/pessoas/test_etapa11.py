@@ -83,11 +83,32 @@ def test_extrair_ilegivel_pede_outra_foto(usuario_logado, settings):
     assert "legíveis" in json.loads(resposta.content)["erro"]
 
 
-def test_extrair_rejeita_arquivo_que_nao_e_imagem(usuario_logado, settings):
+def test_extrair_aceita_pdf_da_cnh_digital(usuario_logado, settings):
     settings.ANTHROPIC_API_KEY = "chave-de-teste"
     pdf = SimpleUploadedFile("cnh.pdf", b"%PDF-1.4 x", content_type="application/pdf")
-    resposta = usuario_logado.post("/clientes/cnh/extrair/", {"cnh_frente": pdf})
+    with mock.patch("apps.pessoas.views.cnh.extrair_dados", return_value=dict(DADOS_LIDOS)) as m:
+        resposta = usuario_logado.post("/clientes/cnh/extrair/", {"cnh_frente": pdf})
+    assert resposta.status_code == 200
+    m.assert_called_once()
+
+
+def test_extrair_rejeita_arquivo_que_nao_e_imagem_nem_pdf(usuario_logado, settings):
+    settings.ANTHROPIC_API_KEY = "chave-de-teste"
+    texto = SimpleUploadedFile("cnh.txt", b"nao sou uma cnh", content_type="text/plain")
+    resposta = usuario_logado.post("/clientes/cnh/extrair/", {"cnh_frente": texto})
     assert resposta.status_code == 400
+
+
+def test_form_do_cliente_aceita_cnh_em_pdf(db, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path
+    from apps.pessoas.views import ClienteForm
+
+    pdf = SimpleUploadedFile("cnh.pdf", b"%PDF-1.4 x", content_type="application/pdf")
+    form = ClienteForm(
+        {"nome": "Arlen", "cpf_cnpj": "111.222.333-44", "status": Cliente.Status.ATIVO},
+        {"cnh_frente": pdf},
+    )
+    assert form.is_valid(), form.errors
 
 
 def test_extrair_dados_monta_a_chamada_certa(settings):

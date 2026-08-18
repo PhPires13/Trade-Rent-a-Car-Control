@@ -1,5 +1,9 @@
+from django.core.validators import FileExtensionValidator
 from django.db import models
 from simple_history.models import HistoricalRecords
+
+#: CRLV-e exporta em PDF; foto de celular vem em JPG/PNG/WebP.
+EXTENSOES_DOCUMENTO = ["jpg", "jpeg", "png", "webp", "pdf"]
 
 
 def normalizar_placa(texto):
@@ -144,6 +148,13 @@ class Veiculo(models.Model):
         null=True,
         blank=True,
         help_text="Aparece no card da frota e na ficha do veículo",
+    )
+    documento = models.FileField(
+        "documento do carro — CRLV (foto ou PDF)",
+        upload_to="veiculos/documentos/",
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(EXTENSOES_DOCUMENTO)],
     )
     # IPVA e licenciamento do ciclo vigente (docs.md §4.1 e §5; decisão nº 21).
     # O histórico dos anos anteriores fica no simple-history e na despesa do mês do pagamento.

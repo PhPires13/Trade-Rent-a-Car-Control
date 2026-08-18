@@ -3,12 +3,16 @@ from datetime import date
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.html import format_html
 
 from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente
 
-from .models import Alocacao, TrocaTemporaria
+from . import checklist
+from .models import Alocacao, TrocaTemporaria, Vistoria
 from .services import linha_do_tempo
 
 
@@ -118,7 +122,16 @@ def nova(request):
                 f"Atenção: a CNH de {cliente.nome} está vencida "
                 f"desde {cliente.cnh_validade:%d/%m/%Y}.",
             )
-        messages.success(request, f"Veículo {alocacao.veiculo.placa} alocado a {cliente.nome}.")
+        messages.success(
+            request,
+            format_html(
+                'Veículo {} alocado a {}. <a href="{}" class="font-semibold underline">'
+                "Gerar contrato de locação →</a>",
+                alocacao.veiculo.placa,
+                cliente.nome,
+                reverse("alocacoes:contrato", args=[alocacao.pk]),
+            ),
+        )
         return redirect("alocacoes:lista")
     return render(request, "alocacoes/nova.html", {"form": form})
 
@@ -212,3 +225,141 @@ def timeline(request, veiculo_id):
         "alocacoes/linha_tempo.html",
         {"veiculo": veiculo, "eventos": linha_do_tempo(veiculo)},
     )
+
+
+def contrato(request, alocacao_id):
+    """Contrato de locação pronto para imprimir/assinar, gerado da alocação.
+
+    É uma minuta com os dados do sistema (partes, veículo, valores, franquia);
+    imprimir → PDF pelo navegador. Campos da empresa vêm do settings
+    (EMPRESA_*) e ficam em branco para preencher à mão quando não configurados.
+    """
+    from django.conf import settings
+
+    alocacao = get_object_or_404(
+        Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
+    )
+    return render(
+        request,
+        "alocacoes/contrato.html",
+        {
+            "alocacao": alocacao,
+            "veiculo": alocacao.veiculo,
+            "cliente": alocacao.cliente,
+            "empresa": {
+                "razao_social": settings.EMPRESA_RAZAO_SOCIAL,
+                "cnpj": settings.EMPRESA_CNPJ,
+                "endereco": settings.EMPRESA_ENDERECO,
+                "cidade_uf": settings.EMPRESA_CIDADE_UF,
+            },
+            "hoje": date.today(),
+        },
+    )
+
+
+class VistoriaForm(forms.ModelForm):
+    class Meta:
+        model = Vistoria
+        fields = ["tipo", "data", "km", "combustivel", "avarias", "notas", "foto"]
+        widgets = {
+            "data": forms.DateInput(attrs={"type": "date"}),
+            "avarias": forms.Textarea(attrs={"rows": 4}),
+            "notas": forms.Textarea(attrs={"rows": 2}),
+            "foto": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
+        }
+
+
+#: Itens impressos no checklist em branco — uma linha por região do carro.
+ITENS_CHECKLIST = [
+    "Para-choque dianteiro",
+    "Para-choque traseiro",
+    "Capô",
+    "Teto",
+    "Porta-malas / tampa",
+    "Lateral esquerda (portas e paralamas)",
+    "Lateral direita (portas e paralamas)",
+    "Retrovisores",
+    "Vidros e para-brisa",
+    "Faróis e lanternas",
+    "Pneus e rodas (4 + estepe)",
+    "Bancos e forros",
+    "Painel e comandos",
+    "Tapetes / interior",
+    "Macaco, chave de roda e triângulo",
+    "Documento do carro no porta-luvas",
+]
+
+
+def vistoria_imprimir(request, alocacao_id):
+    """Checklist de vistoria em branco para imprimir e preencher à mão."""
+    alocacao = get_object_or_404(
+        Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
+    )
+    return render(
+        request,
+        "alocacoes/vistoria_imprimir.html",
+        {
+            "alocacao": alocacao,
+            "itens": ITENS_CHECKLIST,
+            "hoje": date.today(),
+            "combustiveis": Vistoria.Combustivel.choices,
+        },
+    )
+
+
+def vistoria_nova(request, alocacao_id):
+    """Registra a vistoria — a foto do checklist preenchido carrega os campos."""
+    alocacao = get_object_or_404(
+        Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
+    )
+    form = VistoriaForm(request.POST or None, request.FILES or None, initial={"data": date.today()})
+    if request.method == "POST" and form.is_valid():
+        vistoria = form.save(commit=False)
+        vistoria.alocacao = alocacao
+        vistoria.save()
+        messages.success(
+            request,
+            f"Vistoria de {vistoria.get_tipo_display().lower()} registrada "
+            f"para {alocacao.veiculo.placa}.",
+        )
+        return redirect("alocacoes:timeline", alocacao.veiculo.pk)
+    return render(
+        request,
+        "alocacoes/vistoria_form.html",
+        {
+            "alocacao": alocacao,
+            "form": form,
+            "checklist_leitura": checklist.disponivel(),
+            "vistorias": alocacao.vistorias.all(),
+        },
+    )
+
+
+def vistoria_extrair(request):
+    """Lê a foto do checklist preenchido e devolve os dados para o formulário."""
+    if request.method != "POST":
+        return JsonResponse({"erro": "Método inválido."}, status=405)
+    if not checklist.disponivel():
+        return JsonResponse(
+            {"erro": "Leitura automática desligada — configure a ANTHROPIC_API_KEY."},
+            status=503,
+        )
+    arquivo = request.FILES.get("foto")
+    if not arquivo:
+        return JsonResponse({"erro": "Envie a foto do checklist preenchido."}, status=400)
+    problema = checklist.validar_upload(arquivo)
+    if problema:
+        return JsonResponse({"erro": problema}, status=400)
+    dados = checklist.extrair_dados([arquivo])
+    if dados is None:
+        return JsonResponse(
+            {"erro": "Não consegui ler o checklist agora — preencha manualmente."},
+            status=502,
+        )
+    if not dados.get("legivel"):
+        return JsonResponse(
+            {"erro": "A foto não está legível — tire outra com o formulário inteiro."},
+            status=422,
+        )
+    dados.pop("legivel", None)
+    return JsonResponse({"dados": dados})

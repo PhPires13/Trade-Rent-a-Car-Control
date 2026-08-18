@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Checklist de vistoria — {{ alocacao.veiculo.placa }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="nao-imprime mb-4 flex items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Checklist de vistoria</h1>
+  <div class="flex items-center gap-3 text-sm">
+    <button onclick="window.print()"
+            class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">
+      🖨 Imprimir
+    </button>
+    <a href="{% url 'alocacoes:vistoria_nova' alocacao.pk %}" class="underline">Registrar vistoria (ler foto)</a>
+    <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
+  </div>
+</div>
+<p class="nao-imprime mb-4 text-xs text-gray-500">
+  Imprima, preencha à mão na entrega/devolução e depois fotografe o formulário preenchido em
+  "Registrar vistoria" — o sistema lê a foto e carrega os dados para você conferir e salvar.
+</p>
+
+<div class="checklist mx-auto max-w-3xl rounded-lg bg-white p-8 text-sm shadow print:shadow-none">
+  <div class="mb-4 flex items-center justify-between border-b-2 border-gray-800 pb-2">
+    <div>
+      <span class="rounded bg-marca-preto px-2 py-1 text-lg font-black text-marca-amarelo">TRADE</span>
+      <span class="ml-1 italic">Rent a Car</span>
+    </div>
+    <h2 class="text-lg font-black uppercase">Checklist de vistoria</h2>
+  </div>
+
+  <div class="mb-3 grid grid-cols-2 gap-x-8 gap-y-1">
+    <p><strong>Veículo:</strong> {{ alocacao.veiculo.marca_modelo }} — {{ alocacao.veiculo.placa }}</p>
+    <p><strong>Cliente:</strong> {{ alocacao.cliente.nome }}</p>
+    <p><strong>Tipo:</strong> ☐ Entrada (entrega) &nbsp;&nbsp; ☐ Saída (devolução)</p>
+    <p><strong>Data:</strong> ____ / ____ / ________</p>
+    <p><strong>KM no painel:</strong> ______________________</p>
+    <p><strong>Combustível:</strong>
+      {% for valor, rotulo in combustiveis %}☐ {{ rotulo }}&nbsp;&nbsp;{% endfor %}
+    </p>
+  </div>
+
+  <table class="mb-4 w-full border-collapse border border-gray-400 text-xs">
+    <thead>
+      <tr class="bg-gray-100">
+        <th class="border border-gray-400 px-2 py-1 text-left">Item</th>
+        <th class="border border-gray-400 px-2 py-1">OK</th>
+        <th class="border border-gray-400 px-2 py-1">Avaria</th>
+        <th class="border border-gray-400 px-2 py-1 text-left">Descrição da marca/avaria</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in itens %}
+      <tr>
+        <td class="border border-gray-400 px-2 py-2">{{ item }}</td>
+        <td class="border border-gray-400 px-2 py-2 text-center">☐</td>
+        <td class="border border-gray-400 px-2 py-2 text-center">☐</td>
+        <td class="border border-gray-400 px-2 py-2"></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="mb-1 font-semibold">Notas:</p>
+  <div class="mb-6 space-y-4">
+    <div class="border-b border-gray-400"></div>
+    <div class="border-b border-gray-400"></div>
+    <div class="border-b border-gray-400"></div>
+  </div>
+
+  <div class="mt-10 grid gap-10 sm:grid-cols-2">
+    <div class="border-t border-gray-800 pt-1 text-center">
+      Trade Rent a Car
+    </div>
+    <div class="border-t border-gray-800 pt-1 text-center">
+      {{ alocacao.cliente.nome }}
+    </div>
+  </div>
+</div>
+
+<style>
+  @media print {
+    header, .nao-imprime { display: none !important; }
+    body { background: white !important; }
+    .checklist { box-shadow: none !important; padding: 0 !important; max-width: 100% !important; }
+    main { padding: 0 !important; max-width: 100% !important; }
+  }
+</style>
+{% endblock %}

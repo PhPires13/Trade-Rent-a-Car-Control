@@ -66,7 +66,9 @@
 <div class="rounded-lg bg-white p-5 shadow">
   <h2 class="mb-3 font-semibold">Dados cadastrais</h2>
   <dl class="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Renavam</dt><dd>{{ veiculo.renavam|default:"—" }}</dd></div>
+    <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Renavam</dt>
+      <dd>{{ veiculo.renavam|default:"—" }}
+        {% if veiculo.documento %}<a href="{{ veiculo.documento.url }}" target="_blank" rel="noopener" class="ml-1 text-xs underline">ver CRLV</a>{% endif %}</dd></div>
     <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Chassi</dt><dd>{{ veiculo.chassi|default:"—" }}</dd></div>
     <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Categoria</dt><dd>{{ veiculo.categoria.nome|default:"—" }}</dd></div>
     <div class="flex justify-between border-b border-gray-100 pb-1"><dt class="text-gray-500">Uso</dt><dd>{{ veiculo.get_uso_display }}</dd></div>

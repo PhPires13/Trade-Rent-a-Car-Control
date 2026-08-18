@@ -143,7 +143,11 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Cobrança pronta no WhatsApp**: botão "💬 cobrar no WhatsApp" nas cobranças devidas abre o wa.me do cliente com a mensagem preenchida (nome, valor, vencimento — variação para atraso com dias — e a `CHAVE_PIX` configurada); nada é enviado automaticamente
 - [x] **Previsão das preventivas em dias**: além dos km, cada item mostra "≈ X dias" no ritmo real do carro (média da última leitura mensal) e o alerta antecipa quando faltam ≤ 14 dias — um carro de app a 300 km/dia era avisado só 3 dias antes pela margem de 1.000 km
 - [x] Menu em três zonas (logo à esquerda, navegação central, Admin/busca/sair à direita)
-- [x] **307 testes passando** (+27; API da CNH testada com mock — nenhum teste chama a API de verdade); telas verificadas no navegador
+- [x] **CNH em PDF** (CNH digital) além de foto, com leitura automática disparada ao escolher o arquivo — e aviso visível na tela quando a `ANTHROPIC_API_KEY` não está configurada
+- [x] **Documento do carro (CRLV)** no cadastro do veículo: foto ou PDF, leitura automática preenchendo placa, renavam, chassi, marca/modelo e ano; "ver CRLV" na ficha
+- [x] **Contrato de locação** gerado da alocação (partes, veículo, valores, caução, franquia): minuta pronta para imprimir/assinar (PDF pelo navegador), oferecida ao criar a alocação e disponível na lista; dados da empresa via `EMPRESA_*`
+- [x] **Checklist de vistoria (entrada/saída)**: o sistema imprime o formulário em branco (itens do carro, km, combustível, notas), o preenchimento é à mão, e a foto do papel preenchido é lida para carregar a vistoria no sistema — validação humana antes de salvar; km da vistoria puxa o odômetro
+- [x] **322 testes passando** (+42; toda leitura por API testada com mock); telas verificadas no navegador
 
 ## 🎉 MVP completo
 

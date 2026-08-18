@@ -159,6 +159,12 @@ CNH_MODELO = env("CNH_MODELO", default="claude-opus-5")
 
 # Chave Pix da empresa — entra na mensagem de cobrança pronta do WhatsApp (opcional).
 CHAVE_PIX = env("CHAVE_PIX", default="")
+
+# Dados da empresa no contrato de locação (opcionais — o contrato imprime "___" no lugar).
+EMPRESA_RAZAO_SOCIAL = env("EMPRESA_RAZAO_SOCIAL", default="Trade Rent a Car")
+EMPRESA_CNPJ = env("EMPRESA_CNPJ", default="")
+EMPRESA_ENDERECO = env("EMPRESA_ENDERECO", default="")
+EMPRESA_CIDADE_UF = env("EMPRESA_CIDADE_UF", default="Belo Horizonte/MG")
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},

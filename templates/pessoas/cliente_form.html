@@ -21,17 +21,25 @@
     {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
 
-    {% if field.name == "cnh_verso" and cnh_leitura %}
-    <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm" id="leitor-cnh">
-      <button type="button" id="botao-ler-cnh"
-              class="rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">
-        📷 Ler dados da CNH
-      </button>
-      <span class="ml-2 text-xs text-gray-600">
-        Preenche nome, CPF e CNH a partir das fotos — confira e ajuste antes de salvar.
-      </span>
-      <p id="status-cnh" class="mt-2 hidden text-xs"></p>
-    </div>
+    {% if field.name == "cnh_verso" %}
+      {% if cnh_leitura %}
+      <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm" id="leitor-cnh">
+        <span class="text-xs text-gray-700">
+          📷 Ao escolher a foto ou o PDF da CNH, os dados (nome, CPF e CNH) são lidos e
+          preenchidos automaticamente — confira e ajuste antes de salvar.
+        </span>
+        <button type="button" id="botao-ler-cnh"
+                class="mt-2 block rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">
+          Ler dados da CNH de novo
+        </button>
+        <p id="status-cnh" class="mt-2 hidden text-xs"></p>
+      </div>
+      {% else %}
+      <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500">
+        A leitura automática da CNH está desligada — configure a variável
+        <code>ANTHROPIC_API_KEY</code> no servidor para preencher o cadastro a partir da foto/PDF.
+      </p>
+      {% endif %}
     {% endif %}
   </div>
   {% endfor %}
@@ -57,11 +65,11 @@
       status.className = "mt-2 text-xs " + (erro ? "text-red-600" : "text-green-700");
     }
 
-    botao.addEventListener("click", async function () {
+    async function lerCnh() {
       const frente = document.getElementById("id_cnh_frente").files[0];
       const verso = document.getElementById("id_cnh_verso").files[0];
       if (!frente && !verso) {
-        avisar("Escolha a foto da frente e/ou do verso da CNH primeiro.", true);
+        avisar("Escolha a foto ou o PDF da frente e/ou do verso da CNH primeiro.", true);
         return;
       }
       const dados = new FormData();
@@ -75,9 +83,10 @@
           headers: { "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value },
           body: dados,
         });
-        const corpo = await resposta.json();
+        let corpo = {};
+        try { corpo = await resposta.json(); } catch (e) { /* resposta sem JSON (ex.: 500) */ }
         if (!resposta.ok) {
-          avisar(corpo.erro || "Não consegui ler a CNH.", true);
+          avisar(corpo.erro || "Não consegui ler a CNH (erro " + resposta.status + ").", true);
           return;
         }
         let preenchidos = 0;
@@ -92,7 +101,16 @@
       } finally {
         botao.disabled = false;
       }
-    });
+    }
+
+    botao.addEventListener("click", lerCnh);
+    // Lê sozinho assim que a CNH é escolhida — o botão fica para reler/corrigir.
+    for (const id of ["id_cnh_frente", "id_cnh_verso"]) {
+      const campo = document.getElementById(id);
+      if (campo) campo.addEventListener("change", function () {
+        if (campo.files.length) lerCnh();
+      });
+    }
   })();
 </script>
 {% endif %}

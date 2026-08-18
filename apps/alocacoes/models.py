@@ -266,3 +266,62 @@ class TrocaTemporaria(models.Model):
     @property
     def ativa(self):
         return self.data_devolucao is None
+
+
+class Vistoria(models.Model):
+    """Checklist de entrada/saída do carro (km, combustível, marcas, notas).
+
+    O papel continua existindo: o sistema imprime o checklist em branco, o
+    preenchimento é feito à mão na entrega/devolução, e a foto do formulário
+    preenchido pode ser lida para carregar os dados aqui (validação humana antes
+    de salvar — mesmo fluxo da CNH e do CRLV).
+    """
+
+    class Tipo(models.TextChoices):
+        ENTRADA = "entrada", "Entrada (entrega ao cliente)"
+        SAIDA = "saida", "Saída (devolução do cliente)"
+
+    class Combustivel(models.TextChoices):
+        CHEIO = "cheio", "Cheio"
+        TRES_QUARTOS = "tres_quartos", "3/4"
+        MEIO = "meio", "1/2"
+        UM_QUARTO = "um_quarto", "1/4"
+        RESERVA = "reserva", "Reserva"
+
+    alocacao = models.ForeignKey(
+        Alocacao, verbose_name="alocação", on_delete=models.PROTECT, related_name="vistorias"
+    )
+    tipo = models.CharField("tipo", max_length=10, choices=Tipo.choices)
+    data = models.DateField("data")
+    km = models.PositiveIntegerField("KM no painel", null=True, blank=True)
+    combustivel = models.CharField(
+        "combustível", max_length=15, choices=Combustivel.choices, blank=True
+    )
+    avarias = models.TextField(
+        "marcas e avarias",
+        blank=True,
+        help_text="Riscos, amassados, trincas — onde e como estão",
+    )
+    notas = models.TextField("notas", blank=True)
+    foto = models.FileField(
+        "foto/PDF do checklist preenchido",
+        upload_to="vistorias/",
+        null=True,
+        blank=True,
+    )
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "vistoria"
+        ordering = ["-data", "-pk"]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} — {self.alocacao.veiculo.placa} em {self.data:%d/%m/%Y}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        veiculo = self.alocacao.veiculo
+        if self.km and self.km > veiculo.km_atual:
+            veiculo.km_atual = self.km
+            veiculo.save(update_fields=["km_atual"])

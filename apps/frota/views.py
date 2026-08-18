@@ -5,14 +5,14 @@ from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Count
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
 
-from . import desmobilizacao
+from . import crlv, desmobilizacao
 from .models import Categoria, Fornecedor, Veiculo, normalizar_placa
 
 
@@ -138,7 +138,17 @@ class VeiculoForm(forms.ModelForm):
     SECOES = (
         (
             "Identificação",
-            ["placa", "renavam", "chassi", "marca_modelo", "ano", "categoria", "uso", "foto"],
+            [
+                "placa",
+                "renavam",
+                "chassi",
+                "marca_modelo",
+                "ano",
+                "categoria",
+                "uso",
+                "foto",
+                "documento",
+            ],
         ),
         (
             "IPVA e licenciamento",
@@ -189,6 +199,7 @@ class VeiculoForm(forms.ModelForm):
             "categoria",
             "uso",
             "foto",
+            "documento",
             "ipva_ano",
             "ipva_valor",
             "ipva_vencimento",
@@ -210,6 +221,8 @@ class VeiculoForm(forms.ModelForm):
             "observacoes",
         ]
         widgets = {
+            "foto": forms.ClearableFileInput(attrs={"accept": "image/*"}),
+            "documento": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
             "data_aquisicao": forms.DateInput(attrs={"type": "date"}),
             "ipva_vencimento": forms.DateInput(attrs={"type": "date"}),
             "ipva_pago_em": forms.DateInput(attrs={"type": "date"}),
@@ -249,7 +262,11 @@ def _formulario_veiculo(request, veiculo):
         salvo = form.save()
         messages.success(request, f"Veículo {salvo.placa} salvo.")
         return redirect("frota:detalhe", salvo.pk)
-    return render(request, "frota/veiculo_form.html", {"form": form, "veiculo": veiculo})
+    return render(
+        request,
+        "frota/veiculo_form.html",
+        {"form": form, "veiculo": veiculo, "crlv_leitura": crlv.disponivel()},
+    )
 
 
 def veiculo_novo(request):
@@ -369,3 +386,37 @@ def vender(request, veiculo_id):
             mensagens = getattr(erro, "messages", ["Preencha os campos corretamente."])
             messages.error(request, "; ".join(mensagens))
     return render(request, "frota/vender.html", {"veiculo": veiculo, "hoje": date.today()})
+
+
+def crlv_extrair(request):
+    """Lê a foto/PDF do CRLV e devolve os dados como sugestão para o formulário.
+
+    Nada é gravado aqui — o retorno preenche placa/renavam/chassi/modelo/ano
+    na tela e quem cadastra valida e ajusta antes de salvar.
+    """
+    if request.method != "POST":
+        return JsonResponse({"erro": "Método inválido."}, status=405)
+    if not crlv.disponivel():
+        return JsonResponse(
+            {"erro": "Leitura automática desligada — configure a ANTHROPIC_API_KEY."},
+            status=503,
+        )
+    arquivo = request.FILES.get("documento")
+    if not arquivo:
+        return JsonResponse({"erro": "Envie a foto ou o PDF do CRLV."}, status=400)
+    problema = crlv.validar_upload(arquivo)
+    if problema:
+        return JsonResponse({"erro": problema}, status=400)
+    dados = crlv.extrair_dados([arquivo])
+    if dados is None:
+        return JsonResponse(
+            {"erro": "Não consegui ler o documento agora — preencha manualmente ou tente de novo."},
+            status=502,
+        )
+    if not dados.get("legivel"):
+        return JsonResponse(
+            {"erro": "O documento não está legível — envie outra foto com ele inteiro."},
+            status=422,
+        )
+    dados.pop("legivel", None)
+    return JsonResponse({"dados": dados})

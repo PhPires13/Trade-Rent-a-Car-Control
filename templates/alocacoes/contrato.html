@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Contrato — {{ veiculo.placa }} × {{ cliente.nome }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-4 flex items-center justify-between gap-3 nao-imprime">
+  <h1 class="text-2xl font-bold">Contrato de locação</h1>
+  <div class="flex items-center gap-3 text-sm">
+    <button onclick="window.print()"
+            class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">
+      🖨 Imprimir / salvar PDF
+    </button>
+    <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
+  </div>
+</div>
+<p class="mb-4 text-xs text-gray-500 nao-imprime">
+  Minuta gerada pelo sistema com os dados da alocação — revise antes de assinar.
+  Dados da empresa em branco podem ser configurados no servidor (EMPRESA_*).
+</p>
+
+<div class="contrato mx-auto max-w-3xl rounded-lg bg-white p-10 leading-relaxed shadow print:shadow-none">
+  <h2 class="mb-6 text-center text-lg font-black uppercase">
+    Contrato de Locação de Veículo por Prazo Semanal
+  </h2>
+
+  <p class="mb-3">
+    <strong>LOCADORA:</strong> {{ empresa.razao_social }},
+    CNPJ {{ empresa.cnpj|default:"___.___.___/____-__" }},
+    com endereço em {{ empresa.endereco|default:"________________________________________" }}.
+  </p>
+  <p class="mb-3">
+    <strong>LOCATÁRIO(A):</strong> {{ cliente.nome }},
+    CPF/CNPJ {{ cliente.cpf_cnpj }},
+    {% if cliente.cnh_numero %}CNH nº {{ cliente.cnh_numero }}{% if cliente.cnh_categoria %} (cat. {{ cliente.cnh_categoria }}){% endif %}{% if cliente.cnh_validade %}, válida até {{ cliente.cnh_validade|date:"d/m/Y" }}{% endif %},{% else %}CNH nº ______________,{% endif %}
+    {% if cliente.telefone %}telefone {{ cliente.telefone }},{% endif %}
+    residente em {{ cliente.endereco|default:"________________________________________" }}.
+  </p>
+
+  <h3 class="mb-2 mt-6 font-bold">Cláusula 1ª — Objeto</h3>
+  <p class="mb-3">
+    A LOCADORA cede em locação ao(à) LOCATÁRIO(A) o veículo
+    <strong>{{ veiculo.marca_modelo }}</strong>, placa <strong>{{ veiculo.placa }}</strong>{% if veiculo.ano %},
+    ano {{ veiculo.ano }}{% endif %}{% if veiculo.renavam %}, RENAVAM {{ veiculo.renavam }}{% endif %}{% if veiculo.chassi %}, chassi {{ veiculo.chassi }}{% endif %},
+    entregue em {{ alocacao.data_inicio|date:"d/m/Y" }} com {{ alocacao.km_entrega|intcomma }} km,
+    destinado a uso pessoal e profissional lícito, incluindo transporte por aplicativo.
+  </p>
+
+  <h3 class="mb-2 font-bold">Cláusula 2ª — Prazo e renovação</h3>
+  <p class="mb-3">
+    A locação vigora por períodos semanais a partir de {{ alocacao.data_inicio|date:"d/m/Y" }},
+    renovando-se automaticamente a cada semana enquanto não houver devolução do veículo
+    ou denúncia por qualquer das partes.
+  </p>
+
+  <h3 class="mb-2 font-bold">Cláusula 3ª — Valor e pagamento</h3>
+  <p class="mb-3">
+    O aluguel é de <strong>R$ {{ alocacao.valor_semanal|intcomma }} por semana</strong>,
+    pago antecipadamente a cada {{ alocacao.get_dia_vencimento_display|lower }},
+    via Pix ou outro meio aceito pela LOCADORA. O atraso sujeita o(a) LOCATÁRIO(A)
+    a encargos de 5% (até 4 dias) ou 10% (acima), além das medidas de cobrança cabíveis.
+  </p>
+
+  {% if alocacao.caucao_valor %}
+  <h3 class="mb-2 font-bold">Cláusula 4ª — Caução</h3>
+  <p class="mb-3">
+    O(A) LOCATÁRIO(A) entrega a título de caução o valor de
+    <strong>R$ {{ alocacao.caucao_valor|intcomma }}</strong>, restituível na devolução do
+    veículo, deduzidos débitos pendentes, avarias e multas de sua responsabilidade.
+  </p>
+  {% endif %}
+
+  <h3 class="mb-2 font-bold">Cláusula {% if alocacao.caucao_valor %}5ª{% else %}4ª{% endif %} — Quilometragem</h3>
+  <p class="mb-3">
+    {% if alocacao.limite_km == "limitado" %}
+    A locação inclui franquia de <strong>{{ alocacao.franquia_km_mensal|intcomma }} km por mês</strong>.
+    O quilômetro excedente será cobrado a
+    <strong>R$ {{ alocacao.taxa_km_excedido|default:"____" }}/km</strong>, apurado nas leituras
+    mensais de odômetro.
+    {% else %}
+    A locação é de quilometragem livre, permanecendo o(a) LOCATÁRIO(A) obrigado(a) a
+    apresentar o veículo para a leitura mensal de odômetro.
+    {% endif %}
+  </p>
+
+  <h3 class="mb-2 font-bold">Cláusula {% if alocacao.caucao_valor %}6ª{% else %}5ª{% endif %} — Obrigações do(a) locatário(a)</h3>
+  <p class="mb-1">a) usar o veículo com zelo e apenas condutores habilitados e autorizados;</p>
+  <p class="mb-1">b) arcar com multas de trânsito de sua responsabilidade e indicar o condutor infrator no prazo legal (FICI);</p>
+  <p class="mb-1">c) comunicar imediatamente sinistros, panes e apreensões;</p>
+  <p class="mb-1">d) apresentar o veículo para manutenções preventivas quando convocado;</p>
+  <p class="mb-3">e) devolver o veículo nas condições recebidas, ressalvado o desgaste natural.</p>
+
+  <h3 class="mb-2 font-bold">Cláusula {% if alocacao.caucao_valor %}7ª{% else %}6ª{% endif %} — Devolução e rescisão</h3>
+  <p class="mb-3">
+    O veículo pode ser devolvido a qualquer tempo, encerrando-se a locação com o acerto
+    de valores pendentes e da caução. A LOCADORA pode rescindir o contrato em caso de
+    inadimplência, uso irregular ou violação das cláusulas acima, com retomada imediata
+    do veículo.
+  </p>
+
+  <h3 class="mb-2 font-bold">Cláusula {% if alocacao.caucao_valor %}8ª{% else %}7ª{% endif %} — Foro</h3>
+  <p class="mb-6">
+    Fica eleito o foro da comarca de {{ empresa.cidade_uf }} para dirimir questões deste contrato.
+  </p>
+
+  {% if alocacao.observacoes %}
+  <p class="mb-6 text-sm"><strong>Condições particulares:</strong> {{ alocacao.observacoes }}</p>
+  {% endif %}
+
+  <p class="mb-10">{{ empresa.cidade_uf }}, {{ hoje|date:"d \d\e F \d\e Y" }}.</p>
+
+  <div class="grid gap-10 sm:grid-cols-2">
+    <div class="border-t border-gray-800 pt-1 text-center text-sm">
+      {{ empresa.razao_social }}<br><span class="text-gray-500">Locadora</span>
+    </div>
+    <div class="border-t border-gray-800 pt-1 text-center text-sm">
+      {{ cliente.nome }}<br><span class="text-gray-500">Locatário(a)</span>
+    </div>
+  </div>
+</div>
+
+<style>
+  @media print {
+    header, .nao-imprime { display: none !important; }
+    body { background: white !important; }
+    .contrato { box-shadow: none !important; padding: 0 !important; max-width: 100% !important; }
+    main { padding: 0 !important; max-width: 100% !important; }
+  }
+</style>
+{% endblock %}

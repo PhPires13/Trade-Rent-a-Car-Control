@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block titulo %}Vistoria — {{ alocacao.veiculo.placa }} — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mb-4 flex items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">
+    Vistoria — {{ alocacao.veiculo.placa }} <span class="text-gray-500">({{ alocacao.cliente.nome }})</span>
+  </h1>
+  <div class="flex items-center gap-3 text-sm">
+    <a href="{% url 'alocacoes:vistoria_imprimir' alocacao.pk %}" class="underline">🖨 Checklist em branco</a>
+    <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
+  </div>
+</div>
+
+<form method="post" enctype="multipart/form-data" class="max-w-lg space-y-4 rounded-lg bg-white p-6 shadow">
+  {% csrf_token %}
+  {% for erro in form.non_field_errors %}<p class="text-sm text-red-600">{{ erro }}</p>{% endfor %}
+
+  <div>
+    <label class="mb-1 block text-sm font-medium" for="{{ form.foto.id_for_label }}">{{ form.foto.label }}</label>
+    {{ form.foto }}
+    {% if checklist_leitura %}
+    <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-2 text-xs" id="leitor-checklist">
+      <span class="text-gray-700">📷 Ao escolher a foto do checklist preenchido, os campos abaixo são
+        lidos e carregados — confira e ajuste antes de salvar.</span>
+      <p id="status-checklist" class="mt-1 hidden"></p>
+    </div>
+    {% else %}
+    <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500">
+      Leitura automática desligada — configure a <code>ANTHROPIC_API_KEY</code> para carregar os
+      dados a partir da foto do checklist.
+    </p>
+    {% endif %}
+  </div>
+
+  {% for field in form %}
+    {% if field.name != "foto" %}
+    <div>
+      <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+      {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Salvar vistoria</button>
+</form>
+
+{% if vistorias %}
+<div class="mt-6 max-w-lg rounded-lg bg-white p-5 shadow">
+  <h2 class="mb-2 font-semibold">Vistorias desta alocação</h2>
+  <ul class="divide-y divide-gray-100 text-sm">
+    {% for vistoria in vistorias %}
+    <li class="flex items-center justify-between py-2">
+      <span>
+        {{ vistoria.get_tipo_display }} — {{ vistoria.data|date:"d/m/Y" }}
+        {% if vistoria.km %}· {{ vistoria.km|intcomma }} km{% endif %}
+        {% if vistoria.combustivel %}· ⛽ {{ vistoria.get_combustivel_display }}{% endif %}
+      </span>
+      {% if vistoria.foto %}<a href="{{ vistoria.foto.url }}" target="_blank" rel="noopener" class="text-xs underline">ver foto</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if checklist_leitura %}
+<script>
+  (function () {
+    const campoFoto = document.getElementById("id_foto");
+    const status = document.getElementById("status-checklist");
+    if (!campoFoto || !status) return;
+
+    function avisar(texto, erro) {
+      status.textContent = texto;
+      status.classList.remove("hidden");
+      status.className = "mt-1 " + (erro ? "text-red-600" : "text-green-700");
+    }
+
+    campoFoto.addEventListener("change", async function () {
+      const arquivo = campoFoto.files[0];
+      if (!arquivo) return;
+      const dados = new FormData();
+      dados.append("foto", arquivo);
+      avisar("Lendo o checklist…", false);
+      try {
+        const resposta = await fetch("{% url 'alocacoes:vistoria_extrair' %}", {
+          method: "POST",
+          headers: { "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value },
+          body: dados,
+        });
+        let corpo = {};
+        try { corpo = await resposta.json(); } catch (e) { /* sem JSON */ }
+        if (!resposta.ok) {
+          avisar(corpo.erro || "Não consegui ler o checklist (erro " + resposta.status + ").", true);
+          return;
+        }
+        const d = corpo.dados;
+        let preenchidos = 0;
+        const setar = (id, valor) => {
+          const campo = document.getElementById(id);
+          if (valor !== null && valor !== undefined && valor !== "" && campo) {
+            campo.value = valor; preenchidos++;
+          }
+        };
+        setar("id_tipo", d.tipo);
+        setar("id_data", d.data);
+        setar("id_km", d.km);
+        setar("id_combustivel", d.combustivel);
+        setar("id_avarias", d.avarias);
+        setar("id_notas", d.notas);
+        avisar("Dados carregados (" + preenchidos + " campos) — confira antes de salvar.", false);
+      } catch (e) {
+        avisar("Falha de conexão ao ler o checklist — tente de novo.", true);
+      }
+    });
+  })();
+</script>
+{% endif %}
+
+<style>
+  form input, form select, form textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+  }
+  form input[type="file"] { border: none; padding: 0.2rem 0; }
+</style>
+{% endblock %}

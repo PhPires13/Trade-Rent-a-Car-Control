@@ -22,9 +22,26 @@
       {% for field in campos %}
       <div {% if field.name == "observacoes" %}class="sm:col-span-2"{% endif %}>
         <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {% if field.name == "foto" and veiculo and veiculo.foto %}
+          <img src="{{ veiculo.foto.url }}" alt="{{ veiculo.placa }}" class="mb-2 h-20 w-32 rounded object-cover">
+        {% endif %}
         {{ field }}
         {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
         {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+        {% if field.name == "documento" %}
+          {% if crlv_leitura %}
+          <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-2 text-xs" id="leitor-crlv">
+            <span class="text-gray-700">📄 Ao escolher a foto ou o PDF do CRLV, placa, renavam, chassi,
+              modelo e ano são lidos e preenchidos — confira antes de salvar.</span>
+            <p id="status-crlv" class="mt-1 hidden"></p>
+          </div>
+          {% else %}
+          <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500">
+            Leitura automática do documento desligada — configure a <code>ANTHROPIC_API_KEY</code>
+            para preencher o cadastro a partir da foto/PDF do CRLV.
+          </p>
+          {% endif %}
+        {% endif %}
       </div>
       {% endfor %}
     </div>
@@ -38,9 +55,58 @@
   </div>
 </form>
 
+{% if crlv_leitura %}
+<script>
+  (function () {
+    const campoDocumento = document.getElementById("id_documento");
+    const status = document.getElementById("status-crlv");
+    if (!campoDocumento || !status) return;
+    const campos = { placa: "id_placa", renavam: "id_renavam", chassi: "id_chassi",
+                     marca_modelo: "id_marca_modelo", ano: "id_ano" };
+
+    function avisar(texto, erro) {
+      status.textContent = texto;
+      status.classList.remove("hidden");
+      status.className = "mt-1 " + (erro ? "text-red-600" : "text-green-700");
+    }
+
+    campoDocumento.addEventListener("change", async function () {
+      const arquivo = campoDocumento.files[0];
+      if (!arquivo) return;
+      const dados = new FormData();
+      dados.append("documento", arquivo);
+      avisar("Lendo o documento…", false);
+      try {
+        const resposta = await fetch("{% url 'frota:crlv_extrair' %}", {
+          method: "POST",
+          headers: { "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value },
+          body: dados,
+        });
+        let corpo = {};
+        try { corpo = await resposta.json(); } catch (e) { /* sem JSON (ex.: 500) */ }
+        if (!resposta.ok) {
+          avisar(corpo.erro || "Não consegui ler o documento (erro " + resposta.status + ").", true);
+          return;
+        }
+        let preenchidos = 0;
+        for (const [chave, idCampo] of Object.entries(campos)) {
+          const valor = corpo.dados[chave];
+          const campo = document.getElementById(idCampo);
+          if (valor && campo) { campo.value = valor; preenchidos++; }
+        }
+        avisar("Dados preenchidos (" + preenchidos + " campos) — confira antes de salvar.", false);
+      } catch (e) {
+        avisar("Falha de conexão ao ler o documento — tente de novo.", true);
+      }
+    });
+  })();
+</script>
+{% endif %}
+
 <style>
   form input, form select, form textarea {
     width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
   }
+  form input[type="file"] { border: none; padding: 0.2rem 0; }
 </style>
 {% endblock %}
