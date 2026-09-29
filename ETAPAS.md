@@ -149,6 +149,22 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Checklist de vistoria (entrada/saída)**: o sistema imprime o formulário em branco (itens do carro, km, combustível, notas), o preenchimento é à mão, e a foto do papel preenchido é lida para carregar a vistoria no sistema — validação humana antes de salvar; km da vistoria puxa o odômetro
 - [x] **322 testes passando** (+42; toda leitura por API testada com mock); telas verificadas no navegador
 
+### Etapa 12 — Revisão de UX (29/09/2026)
+*Auditoria de interface navegando as telas com uma frota de sandbox realista (7 carros, 6 clientes, 35 cobranças) + 4 agentes em paralelo por área.*
+- [x] **Dinheiro no formato brasileiro em todo lugar**: filtro único `|brl` ("R$ 14.800,00") no lugar de três formatos misturados (inclusive "R$ 1380.00" americano nas mensagens); **formulários aceitam "58.000,00", "1.850" e "1250,5"** — antes rejeitavam qualquer vírgula com "Informe um número" — e exibem o valor no mesmo formato
+- [x] **Cabeçalho**: seção atual destacada, menu hambúrguer em telas menores (antes quebrava em 2 linhas), busca e conta agrupadas (Admin vira "Retaguarda" dentro do menu do usuário)
+- [x] **Mensagens coloridas por tipo** (erro vermelho, aviso âmbar, sucesso verde) e dispensáveis — antes erro e confirmação eram a mesma caixa amarela
+- [x] **Resumo de erros no topo dos formulários** com link para cada campo, e campo inválido em vermelho
+- [x] **Login**: mantém o usuário digitado após erro, foco na senha, "mostrar senha", tela própria para o bloqueio de força bruta
+- [x] **Painel reorganizado**: saudação com data, dinheiro primeiro (recebido × previsto com barra), cards da frota clicáveis e filtrando, sem contadores redundantes/contraditórios
+- [x] **Frota**: grade alinhada (área de foto fixa com placeholder), filtros aplicam ao escolher; ficha mostra quando o motorista está no substituto, "Registrar venda" sai do destaque, sinistros filtrados pelo carro
+- [x] **Uploads**: documento (CNH/CRLV) antes dos campos que ele preenche, seletor de arquivo em português, aviso de leitura desligada sem jargão técnico
+- [x] **Financeiro**: bug de totais ao digitar milhar na tela de receber (virava R$ 1,25 e travava o botão), cliente carrega ao escolher, rótulos em português claro, confirmação antes de aplicar encargo/emitir ND/devolver caução, status corretos nas NDs, extrato com "Registrar pagamento"
+- [x] **Alocações/Clientes**: ações da lista agrupadas ("Contrato" + menu "Mais ▾", encerrar em vermelho separado), encerrar mostra o que vai acontecer e pede confirmação, preço de referência da categoria ao escolher o carro, estados vazios com próximo passo, ficha do cliente com "Receber pagamento"
+- [x] **KM/Manutenção/Multas/Sinistros**: última leitura como referência ao registrar KM (e HTML inválido do formulário corrigido), FICI/NIC/AIT explicados, ações irreversíveis viram botões com confirmação, dinheiro brasileiro no auxílio e na NIC, "Cobrar do cliente" no lugar de "Gerar repasse"
+- [x] **Frota secundária/Relatórios/Busca**: venda aceita "45.000,00" (antes quebrava) com aviso de irreversível e resumo do carro, ranking "Quando vender cada carro" com legenda dos níveis, preço da categoria voltava em branco ao editar, busca sem resultado com dicas
+- [x] **344 testes passando** (+22); telas verificadas no navegador (desktop e celular)
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:

@@ -1,5 +1,5 @@
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 
 from django import forms
 from django.contrib import messages
@@ -7,10 +7,13 @@ from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import urlencode
 
+from apps.campos import FormularioBR, dinheiro_br
+from apps.formatos import brl
+
 from .models import AuxilioMotorista, Sinistro
 
 
-class SinistroForm(forms.ModelForm):
+class SinistroForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Sinistro
         fields = [
@@ -51,6 +54,9 @@ def lista(request):
     status = request.GET.get("status")
     if status:
         sinistros = sinistros.filter(status=status)
+    placa = request.GET.get("veiculo", "").strip()
+    if placa:
+        sinistros = sinistros.filter(veiculo__placa__icontains=placa)
     pagina = Paginator(sinistros, 25).get_page(request.GET.get("pagina"))
     return render(
         request,
@@ -58,7 +64,8 @@ def lista(request):
         {
             "sinistros": pagina.object_list,
             "pagina": pagina,
-            "filtros": urlencode({"status": status or ""}),
+            "filtros": urlencode({"status": status or "", "veiculo": placa}),
+            "filtro_veiculo": placa,
             "statuses": Sinistro.Status.choices,
             "filtro": status or "",
         },
@@ -82,13 +89,13 @@ def solicitar_auxilio(request, sinistro_id):
             valor = request.POST.get("valor", "").strip()
             AuxilioMotorista.objects.create(
                 sinistro=sinistro,
-                valor=Decimal(valor.replace(",", ".")) if valor else None,
+                valor=dinheiro_br(valor) if valor else None,
                 status=AuxilioMotorista.Status.SOLICITADO,
                 data_solicitacao=date.today(),
             )
             messages.success(request, "Auxílio motorista registrado como solicitado.")
         except InvalidOperation:
-            messages.error(request, "Valor inválido.")
+            messages.error(request, "Valor inválido — digite no formato 1.412,00.")
     return redirect("sinistros:lista")
 
 
@@ -98,13 +105,13 @@ def receber_auxilio(request, auxilio_id):
         try:
             valor = request.POST.get("valor", "").strip()
             if valor:
-                auxilio.valor = Decimal(valor.replace(",", "."))
+                auxilio.valor = dinheiro_br(valor)
             auxilio.status = AuxilioMotorista.Status.RECEBIDO
             auxilio.data_recebimento = date.today()
             auxilio.save()
             messages.success(
                 request,
-                f"Auxílio de R$ {auxilio.valor} recebido — outro crédito, fora da base do DAS.",
+                f"Auxílio de {brl(auxilio.valor)} recebido — outro crédito, fora da base do DAS.",
             )
         except InvalidOperation:
             messages.error(request, "Valor inválido.")

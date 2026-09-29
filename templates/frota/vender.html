@@ -4,42 +4,74 @@
 {% block titulo %}Vender — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-2 text-2xl font-bold">Registrar venda — {{ veiculo }}</h1>
-<p class="mb-6 text-sm text-gray-600">
-  KM atual: {{ veiculo.km_atual|intcomma }}
-  {% if veiculo.valor_venda_estimado %}· estimado: R$ {{ veiculo.valor_venda_estimado|intcomma }}{% endif %}
-  — o veículo precisa estar sem alocação ativa. O crédito da venda é "outro crédito" (fora da base do DAS).
-</p>
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Registrar venda do veículo</h1>
+  <a href="{% url 'frota:ficha' veiculo.pk %}" class="text-sm text-gray-500 underline">← voltar à ficha</a>
+</div>
 
-<form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow">
-  {% csrf_token %}
-  <div>
-    <label class="mb-1 block text-sm font-medium">Data da venda</label>
-    <input type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" required>
+<div class="grid max-w-3xl gap-6">
+  {# resumo do carro: a pessoa confirma que está vendendo o carro certo #}
+  <div class="rounded-lg bg-white p-5 shadow">
+    <div class="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <span class="text-xl font-black">{{ veiculo.placa }}</span>
+      <span class="text-gray-600">{{ veiculo.marca_modelo }}</span>
+      <span class="text-sm text-gray-500">· {{ veiculo.km_atual|intcomma }} km</span>
+    </div>
+    <dl class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+      <div><dt class="text-gray-500">Investido no carro</dt><dd class="font-semibold">{{ ficha.investido|brl }}</dd></div>
+      <div><dt class="text-gray-500">Já rendeu (receita − despesas)</dt><dd class="font-semibold">{{ ficha.resultado_operacional|brl }}</dd></div>
+      <div>
+        <dt class="text-gray-500">Do investimento já voltou</dt>
+        <dd class="font-semibold">{% if ficha.percentual_recuperado is not None %}{% widthratio ficha.percentual_recuperado 1 100 %}%{% else %}—{% endif %}</dd>
+      </div>
+      <div><dt class="text-gray-500">Valor de mercado estimado</dt><dd class="font-semibold">{{ veiculo.valor_venda_estimado|brl }}</dd></div>
+    </dl>
   </div>
-  <div>
-    <label class="mb-1 block text-sm font-medium">Valor da venda (R$)</label>
-    <input type="text" name="valor" required>
+
+  {# ação irreversível: consequências claras antes de preencher #}
+  <div class="rounded border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">
+    <p class="font-semibold">Atenção: esta ação não pode ser desfeita.</p>
+    <ul class="mt-1 list-inside list-disc space-y-0.5">
+      <li>O carro sai da frota ativa e não poderá mais ser alugado.</li>
+      <li>Ele precisa estar <strong>devolvido</strong> — sem nenhum cliente com ele agora.</li>
+      <li>O valor da venda entra como receita, mas <strong>não conta para o DAS</strong>.</li>
+      <li>O resultado final (lucro ou prejuízo do carro) aparece na ficha do veículo.</li>
+    </ul>
   </div>
-  <div>
-    <label class="mb-1 block text-sm font-medium">Comprador</label>
-    <input type="text" name="comprador">
-  </div>
-  <div class="grid grid-cols-2 gap-3">
+
+  <form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow"
+        onsubmit="return confirm('Confirmar a venda de {{ veiculo.placa|escapejs }} ({{ veiculo.marca_modelo|escapejs }})?\n\nO carro sai da frota e esta ação não pode ser desfeita.');">
+    {% csrf_token %}
     <div>
-      <label class="mb-1 block text-sm font-medium">Custos da venda (R$)</label>
-      <input type="text" name="custos" placeholder="comissão, transferência">
+      <label for="venda-data" class="mb-1 block text-sm font-medium">Data da venda</label>
+      <input id="venda-data" type="date" name="data" value="{% if dados.data %}{{ dados.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}" required>
     </div>
     <div>
-      <label class="mb-1 block text-sm font-medium">KM na venda</label>
-      <input type="number" name="km" value="{{ veiculo.km_atual }}">
+      <label for="venda-valor" class="mb-1 block text-sm font-medium">Valor recebido na venda (R$)</label>
+      <input id="venda-valor" type="text" name="valor" inputmode="decimal" placeholder="ex.: 45.000,00"
+             value="{{ dados.valor|default:'' }}" required>
     </div>
-  </div>
-  <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Vender</button>
-    <a href="{% url 'frota:ranking' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
-  </div>
-</form>
+    <div>
+      <label for="venda-comprador" class="mb-1 block text-sm font-medium">Comprador <span class="font-normal text-gray-400">(opcional)</span></label>
+      <input id="venda-comprador" type="text" name="comprador" placeholder="nome de quem comprou" value="{{ dados.comprador|default:'' }}">
+    </div>
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div>
+        <label for="venda-custos" class="mb-1 block text-sm font-medium">Custos da venda (R$) <span class="font-normal text-gray-400">(opcional)</span></label>
+        <input id="venda-custos" type="text" name="custos" inputmode="decimal" placeholder="ex.: 1.200,00" value="{{ dados.custos|default:'' }}">
+        <p class="mt-1 text-xs text-gray-500">Comissão, transferência, despachante…</p>
+      </div>
+      <div>
+        <label for="venda-km" class="mb-1 block text-sm font-medium">KM no dia da venda</label>
+        <input id="venda-km" type="number" name="km" min="0" value="{{ dados.km|default:veiculo.km_atual }}">
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4">
+      <button class="rounded bg-red-700 px-4 py-2 font-bold text-white hover:bg-red-800">Confirmar venda do {{ veiculo.placa }}</button>
+      <a href="{% url 'frota:ficha' veiculo.pk %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+    </div>
+  </form>
+</div>
 
 <style>
   form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }

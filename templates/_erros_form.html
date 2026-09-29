@@ -1,0 +1,10 @@
+{# Resumo de erros no topo do formulário — uso: {% include "_erros_form.html" %} (espera `form`). #}
+{% if form.errors %}
+<div class="mb-4 rounded border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">
+  <p class="font-semibold">Não foi possível salvar — corrija {% if form.errors|length > 1 %}os {{ form.errors|length }} campos destacados{% else %}o campo destacado{% endif %} abaixo.</p>
+  <ul class="mt-1 list-inside list-disc">
+    {% for campo in form %}{% if campo.errors %}<li><a href="#{{ campo.id_for_label }}" class="underline">{{ campo.label }}</a>: {{ campo.errors|join:" " }}</li>{% endif %}{% endfor %}
+    {% for erro in form.non_field_errors %}<li>{{ erro }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}

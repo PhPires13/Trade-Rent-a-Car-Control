@@ -1,6 +1,6 @@
 import csv
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 from uuid import uuid4
 
 from django.contrib import messages
@@ -10,6 +10,8 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import urlencode
 
+from apps.campos import dinheiro_br
+from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
 from . import services, whatsapp
@@ -25,15 +27,8 @@ COBRANCAS_POR_PAGINA = 50
 
 
 def _decimal_br(texto):
-    """Decimal aceitando o jeito brasileiro de digitar: '1.250,00' → 1250.00.
-
-    Sem vírgula o texto vale como está ('650' ou '650.00'); com vírgula,
-    os pontos são separador de milhar e caem fora.
-    """
-    texto = (texto or "").strip()
-    if "," in texto:
-        texto = texto.replace(".", "").replace(",", ".")
-    return Decimal(texto)
+    """Parser único de dinheiro brasileiro (apps/campos.py)."""
+    return dinheiro_br(texto)
 
 
 def cobrancas(request):
@@ -93,9 +88,18 @@ def aplicar_encargo(request, cobranca_id):
         try:
             valor = _decimal_br(request.POST["valor"])
             services.aplicar_encargo(cobranca, valor)
-            messages.success(request, f"Encargo de R$ {valor} aplicado.")
+            messages.success(request, f"Encargo de {brl(valor)} aplicado.")
         except (ValidationError, KeyError, InvalidOperation) as erro:
-            messages.error(request, "; ".join(getattr(erro, "messages", ["Valor inválido."])))
+            messages.error(
+                request,
+                "; ".join(
+                    getattr(
+                        erro,
+                        "messages",
+                        ["Valor do encargo inválido — digite só números (ex.: 45,00)."],
+                    )
+                ),
+            )
     return redirect("financeiro:cobrancas")
 
 
@@ -184,7 +188,9 @@ def receber(request):
             try:
                 data = date.fromisoformat(post.get("data", ""))
             except ValueError:
-                raise ValidationError("Data do recebimento inválida.") from None
+                raise ValidationError(
+                    "Data do recebimento inválida — escolha a data no calendário."
+                ) from None
             aplicacoes = []
             for cobranca in cobrancas_abertas:
                 bruto = post.get(f"aplicar_{cobranca.pk}", "").strip()
@@ -205,7 +211,7 @@ def receber(request):
                 sobra_destino=post.get("sobra_destino", "credito"),
                 observacoes=post.get("observacoes", ""),
             )
-            messages.success(request, f"Recebimento de R$ {valor} lançado para {cliente.nome}.")
+            messages.success(request, f"Recebimento de {brl(valor)} lançado para {cliente.nome}.")
             return redirect(f"{request.path}?cliente={cliente.pk}")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
@@ -250,7 +256,11 @@ def nd_nova(request):
         usados = request.session.get("nd_tokens_usados", [])
         if token and token in usados:
             # segunda submissão do mesmo formulário: a ND já foi emitida
-            messages.info(request, "Nota de débito já emitida — clique duplo ignorado.")
+            messages.warning(
+                request,
+                "Esta nota de débito já tinha sido emitida — o clique duplo foi ignorado "
+                "e nada foi cobrado em dobro.",
+            )
             return redirect("financeiro:nds")
         try:
             cliente = get_object_or_404(Cliente, pk=post["cliente"])
@@ -272,12 +282,16 @@ def nd_nova(request):
             )
             if token:
                 request.session["nd_tokens_usados"] = (usados + [token])[-20:]
-            messages.success(request, f"ND {nd.numero:03d} emitida (R$ {nd.total}).")
+            messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")
             return redirect("financeiro:nds")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
         except (KeyError, InvalidOperation, ValueError):
-            messages.error(request, "Preencha cliente, data e itens corretamente.")
+            messages.error(
+                request,
+                "Não deu para emitir: escolha o cliente, confira a data de emissão e "
+                "preencha ao menos um item com descrição e valor (ex.: 150,00).",
+            )
     itens_iniciais = [{"d": "", "v": ""}]
     if post:
         digitados = [
@@ -328,7 +342,7 @@ def caucao_detalhe(request, caucao_id):
                 )
             else:
                 if tipo == "devolucao" and valor > caucao.saldo:
-                    raise ValidationError(f"Devolução acima do saldo (R$ {caucao.saldo}).")
+                    raise ValidationError(f"Devolução acima do saldo ({brl(caucao.saldo)}).")
                 MovimentacaoCaucao.objects.create(
                     caucao=caucao,
                     tipo=tipo,
@@ -337,12 +351,18 @@ def caucao_detalhe(request, caucao_id):
                     forma=request.POST.get("forma", ""),
                     observacoes=request.POST.get("observacoes", ""),
                 )
-            messages.success(request, "Movimentação registrada.")
+            messages.success(
+                request, f"Movimentação de {brl(valor)} registrada na caução de {cliente.nome}."
+            )
             return redirect("financeiro:caucao_detalhe", caucao.pk)
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
         except (KeyError, InvalidOperation, ValueError):
-            messages.error(request, "Preencha os campos corretamente.")
+            messages.error(
+                request,
+                "Não deu para registrar: confira o valor (ex.: 1.500,00), a data e, "
+                "se for desconto, escolha a cobrança a quitar.",
+            )
     return render(
         request,
         "financeiro/caucao_detalhe.html",

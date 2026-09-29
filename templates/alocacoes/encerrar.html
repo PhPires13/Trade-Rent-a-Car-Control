@@ -1,31 +1,75 @@
 {% extends "base.html" %}
-{% load humanize %}
 
 {% block titulo %}Encerrar alocação — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-2 text-2xl font-bold">Encerrar alocação</h1>
-<p class="mb-6 text-sm text-gray-600">
-  {{ alocacao.veiculo }} com <strong>{{ alocacao.cliente.nome }}</strong>
-  desde {{ alocacao.data_inicio|date:"d/m/Y" }} — entrega com {{ alocacao.km_entrega|intcomma }} km.
-</p>
+<a href="{% url 'alocacoes:lista' %}" class="text-sm text-gray-600 underline">← Alocações</a>
+<h1 class="mb-1 mt-2 text-2xl font-bold">Encerrar alocação</h1>
+<p class="mb-6 text-sm text-gray-600">Use quando o cliente devolveu o carro de vez.</p>
 
-<form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow">
-  {% csrf_token %}
-  <div>
-    <label class="mb-1 block text-sm font-medium" for="data_termino">Data da devolução</label>
-    <input type="date" name="data_termino" id="data_termino" value="{{ hoje|date:'Y-m-d' }}" required>
+<div class="grid max-w-3xl gap-6 md:grid-cols-2">
+  <div class="space-y-4">
+    <dl class="rounded-lg border-l-4 border-marca-amarelo bg-white p-5 text-sm shadow">
+      <div class="mb-2">
+        <dt class="text-gray-500">Carro</dt>
+        <dd class="text-base font-bold">{{ alocacao.veiculo.placa }} <span class="font-normal text-gray-600">{{ alocacao.veiculo.marca_modelo }}</span></dd>
+      </div>
+      <div class="mb-2">
+        <dt class="text-gray-500">Cliente</dt>
+        <dd class="font-semibold">{{ alocacao.cliente.nome }}</dd>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div><dt class="text-gray-500">Desde</dt><dd>{{ alocacao.data_inicio|date:"d/m/Y" }}</dd></div>
+        <div><dt class="text-gray-500">KM na entrega</dt><dd>{{ alocacao.km_entrega|milhar }} km</dd></div>
+        <div><dt class="text-gray-500">Valor/semana</dt><dd>{{ alocacao.valor_semanal|brl }}</dd></div>
+        <div><dt class="text-gray-500">Caução retida</dt><dd>{% if caucao %}{{ caucao.saldo|brl }}{% else %}—{% endif %}</dd></div>
+      </div>
+    </dl>
+
+    <div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-700">
+      <p class="mb-1 font-semibold">O que acontece ao encerrar</p>
+      <ul class="list-inside list-disc space-y-1">
+        <li>O carro volta a ficar <strong>disponível</strong> para alugar.</li>
+        <li>Semanas com vencimento a partir da data de devolução que <strong>ainda não foram pagas</strong> são canceladas.</li>
+        {% if caucao and caucao.saldo > 0 %}
+        <li>Em seguida você vai para a tela da <strong>caução</strong> ({{ caucao.saldo|brl }}) para descontar débitos e devolver o restante.</li>
+        {% endif %}
+        <li>Não dá para desfazer — confira a data e o KM antes.</li>
+      </ul>
+    </div>
   </div>
-  <div>
-    <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM na devolução</label>
-    <input type="number" name="km_devolucao" id="km_devolucao" min="{{ alocacao.km_entrega }}" required>
+
+  {% if troca_ativa %}
+  <div class="h-fit rounded-lg border-l-4 border-red-500 bg-red-50 p-5 text-sm text-red-900">
+    <p class="font-semibold">Antes de encerrar, devolva o carro substituto.</p>
+    <p class="mt-1">{{ alocacao.cliente.nome }} está com o substituto {{ troca_ativa.veiculo_substituto.placa }} desde {{ troca_ativa.data_retirada|date:"d/m/Y" }}.</p>
+    <a href="{% url 'alocacoes:troca_devolver' troca_ativa.pk %}"
+       class="mt-3 inline-block rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Devolver substituto</a>
   </div>
-  <p class="text-xs text-gray-500">O veículo volta a ficar disponível. O acerto de caução será feito no módulo financeiro (etapa 4).</p>
-  <div class="flex gap-3">
-    <button class="rounded bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700">Encerrar</button>
-    <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
-  </div>
-</form>
+  {% else %}
+  <form method="post" class="h-fit space-y-4 rounded-lg bg-white p-6 shadow"
+        onsubmit="return confirm('Encerrar a alocação de {{ alocacao.veiculo.placa|escapejs }} com {{ alocacao.cliente.nome|escapejs }}? Não dá para desfazer.')">
+    {% csrf_token %}
+    <div>
+      <label class="mb-1 block text-sm font-medium" for="data_termino">Data em que o carro voltou</label>
+      <input type="date" name="data_termino" id="data_termino"
+             value="{% firstof request.POST.data_termino hoje|date:'Y-m-d' %}"
+             min="{{ alocacao.data_inicio|date:'Y-m-d' }}" required>
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM no painel na devolução</label>
+      <input type="number" name="km_devolucao" id="km_devolucao" inputmode="numeric"
+             value="{{ request.POST.km_devolucao }}" min="{{ alocacao.km_entrega }}"
+             placeholder="saiu com {{ alocacao.km_entrega|milhar }}" required>
+      <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da entrega ({{ alocacao.km_entrega|milhar }} km).</p>
+    </div>
+    <div class="flex items-center gap-3 pt-2">
+      <button class="rounded bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700">Encerrar alocação</button>
+      <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Voltar sem encerrar</a>
+    </div>
+  </form>
+  {% endif %}
+</div>
 
 <style>
   form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }

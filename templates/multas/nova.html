@@ -3,10 +3,15 @@
 {% block titulo %}Nova multa — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-6 text-2xl font-bold">Nova multa</h1>
+<h1 class="mb-1 text-2xl font-bold">Nova multa</h1>
+<p class="mb-6 text-sm text-gray-500">
+  Copie os dados da notificação que chegou do órgão. O sistema descobre sozinho qual cliente estava com o carro
+  na data da infração. O <strong>AIT</strong> é o número do auto de infração impresso na notificação.
+</p>
 
 <form method="post" class="max-w-2xl space-y-4 rounded-lg bg-white p-6 shadow">
   {% csrf_token %}
+  {% include "_erros_form.html" %}
   <div class="grid gap-4 sm:grid-cols-2">
     {% for field in form %}
     <div {% if field.name == "descricao" or field.name == "observacoes" %}class="sm:col-span-2"{% endif %}>

@@ -233,4 +233,4 @@ def test_badge_de_excedente_na_lista_mensal(usuario_logado, alocacao_limitada, v
     registro = registrar(veiculo, date(2026, 7, 15), 54_000)
     gerar_cobranca_excedente(registro)
     resposta = usuario_logado.get("/km/?mes=2026-07")
-    assert "excedente R$" in resposta.content.decode()
+    assert "km excedente: R$" in resposta.content.decode()

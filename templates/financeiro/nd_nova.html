@@ -4,19 +4,28 @@
 
 {% block conteudo %}
 <h1 class="mb-4 text-2xl font-bold">Emitir nota de débito</h1>
-<p class="mb-6 text-sm text-gray-500">
-  A numeração é automática (sequência atual). Multas entrarão como itens automáticos na etapa 5 —
-  por enquanto os itens são descritos manualmente.
+<p class="mb-6 max-w-xl text-sm text-gray-500">
+  Use para cobrar do cliente o que não é aluguel (multa, avaria, franquia, combustível…).
+  O número da nota é gerado sozinho e a nota vira uma cobrança em aberto para o cliente.
+  Esses valores <strong>não entram na base do DAS</strong>.
 </p>
 
 {{ itens_iniciais|json_script:"nd-itens-iniciais" }}
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
-      x-data='{ itens: JSON.parse(document.getElementById("nd-itens-iniciais").textContent), enviando: false }'
-      x-on:submit="enviando = true">
+      x-data='{ itens: JSON.parse(document.getElementById("nd-itens-iniciais").textContent), enviando: false,
+                br(texto) {
+                  let t = String(texto || "").replace(/R\$|\s/g, "");
+                  if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+                  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+                  return parseFloat(t) || 0;
+                },
+                get total() { return this.itens.reduce((s, it) => s + this.br(it.v), 0); },
+                reais(n) { return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); } }'
+      x-on:submit="if (!confirm('Emitir a nota de débito de ' + reais(total) + '? Depois de emitida, o número fica usado.')) { $event.preventDefault(); } else { enviando = true; }">
   {% csrf_token %}
   <input type="hidden" name="token" value="{{ token }}">
   <div>
-    <label class="mb-1 block text-sm font-medium">Cliente</label>
+    <label class="mb-1 block text-sm font-medium">Cliente *</label>
     <select name="cliente" required>
       <option value="">— escolha —</option>
       {% for c in clientes %}
@@ -26,7 +35,7 @@
   </div>
   <div class="grid gap-4 sm:grid-cols-2">
     <div>
-      <label class="mb-1 block text-sm font-medium">Data de emissão</label>
+      <label class="mb-1 block text-sm font-medium">Data de emissão *</label>
       <input type="date" name="data_emissao" required
              value="{% if post.data_emissao %}{{ post.data_emissao }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}">
     </div>
@@ -37,16 +46,21 @@
   </div>
 
   <div>
-    <label class="mb-1 block text-sm font-medium">Itens</label>
+    <label class="mb-1 block text-sm font-medium">O que está sendo cobrado *</label>
+    <p class="mb-2 text-xs text-gray-500">Um item por linha: descrição e valor em reais.</p>
     <template x-for="(item, i) in itens" x-bind:key="i">
       <div class="mb-2 flex gap-2">
         <input type="text" name="item_descricao" placeholder="descrição (ex.: multa avanço de sinal 12/04)"
                x-model="item.d" class="flex-1">
-        <input type="text" name="item_valor" placeholder="valor" x-model="item.v" class="w-28">
-        <button type="button" class="text-red-600" x-on:click="itens.splice(i, 1)" x-show="itens.length > 1">✕</button>
+        <input type="text" name="item_valor" placeholder="R$ ex.: 150,00" x-model="item.v" class="w-28" aria-label="Valor do item">
+        <button type="button" class="px-1 text-red-600" x-on:click="itens.splice(i, 1)" x-show="itens.length > 1"
+                title="Remover este item" aria-label="Remover este item">✕</button>
       </div>
     </template>
-    <button type="button" class="text-sm underline" x-on:click="itens.push({d: '', v: ''})">+ adicionar item</button>
+    <div class="flex items-center justify-between">
+      <button type="button" class="text-sm underline" x-on:click="itens.push({d: '', v: ''})">+ adicionar outro item</button>
+      <div class="text-sm">Total da nota: <strong x-text="reais(total)"></strong></div>
+    </div>
   </div>
 
   <div>
@@ -54,10 +68,10 @@
     <textarea name="observacoes" rows="2">{{ post.observacoes|default:'' }}</textarea>
   </div>
 
-  <div class="flex gap-3">
+  <div class="flex items-center gap-3">
     <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95"
             x-bind:disabled="enviando" x-bind:class="enviando ? 'cursor-wait opacity-50' : ''">
-      <span x-show="!enviando">Emitir</span><span x-show="enviando">Emitindo…</span>
+      <span x-show="!enviando">Emitir nota de débito</span><span x-show="enviando">Emitindo…</span>
     </button>
     <a href="{% url 'financeiro:nds' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
   </div>

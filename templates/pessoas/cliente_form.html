@@ -9,7 +9,7 @@
 
 <form method="post" enctype="multipart/form-data" class="max-w-lg space-y-4 rounded-lg bg-white p-6 shadow">
   {% csrf_token %}
-  {% for erro in form.non_field_errors %}<p class="text-sm text-red-600">{{ erro }}</p>{% endfor %}
+  {% include "_erros_form.html" %}
   {% for field in form %}
   <div>
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
@@ -25,8 +25,8 @@
       {% if cnh_leitura %}
       <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm" id="leitor-cnh">
         <span class="text-xs text-gray-700">
-          📷 Ao escolher a foto ou o PDF da CNH, os dados (nome, CPF e CNH) são lidos e
-          preenchidos automaticamente — confira e ajuste antes de salvar.
+          📷 <strong>Comece por aqui:</strong> escolha a foto ou o PDF da CNH e nome, CPF, número,
+          categoria e validade são preenchidos sozinhos — confira e ajuste antes de salvar.
         </span>
         <button type="button" id="botao-ler-cnh"
                 class="mt-2 block rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">
@@ -35,9 +35,10 @@
         <p id="status-cnh" class="mt-2 hidden text-xs"></p>
       </div>
       {% else %}
-      <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500">
-        A leitura automática da CNH está desligada — configure a variável
-        <code>ANTHROPIC_API_KEY</code> no servidor para preencher o cadastro a partir da foto/PDF.
+      <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500"
+         title="Técnico: configurar a variável ANTHROPIC_API_KEY no servidor">
+        A leitura automática da CNH ainda não está ativada — guarde as fotos aqui e preencha os
+        campos à mão. Para ativar a leitura, fale com quem cuida do sistema.
       </p>
       {% endif %}
     {% endif %}

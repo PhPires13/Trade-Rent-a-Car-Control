@@ -15,6 +15,7 @@ from django.db import transaction
 from django.db.models import Q, Sum
 
 from apps.alocacoes.models import Alocacao
+from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
 from .models import (
@@ -209,12 +210,12 @@ def registrar_recebimento(
     total = sum((Decimal(v) for _, v in aplicacoes), ZERO)
     if total > valor:
         raise ValidationError(
-            f"Total alocado (R$ {total}) maior que o valor recebido (R$ {valor})."
+            f"Total alocado ({brl(total)}) maior que o valor recebido ({brl(valor)})."
         )
     if forma == Recebimento.Forma.CREDITO:
         saldo_credito = MovimentoCredito.saldo_do_cliente(cliente)
         if valor > saldo_credito:
-            raise ValidationError(f"Crédito insuficiente (saldo R$ {saldo_credito}).")
+            raise ValidationError(f"Crédito insuficiente (saldo {brl(saldo_credito)}).")
     recebimento = Recebimento.objects.create(
         cliente=cliente, data=data, valor=valor, forma=forma, observacoes=observacoes
     )
@@ -235,8 +236,8 @@ def registrar_recebimento(
             raise ValidationError(f"Cobrança {cobranca} não é deste cliente.")
         if valor_aplicado > cobranca.saldo:
             raise ValidationError(
-                f"Aplicação de R$ {valor_aplicado} acima do saldo devedor "
-                f"(R$ {cobranca.saldo}) de '{cobranca.descricao}'."
+                f"Aplicação de {brl(valor_aplicado)} acima do saldo devedor "
+                f"({brl(cobranca.saldo)}) de '{cobranca.descricao}'."
             )
         AplicacaoRecebimento.objects.create(
             recebimento=recebimento, cobranca=cobranca, valor=valor_aplicado
@@ -325,9 +326,9 @@ def descontar_da_caucao(caucao, cobranca, valor, data, observacoes=""):
     """Desconto na caução quitando (total ou parcialmente) uma cobrança."""
     valor = Decimal(valor)
     if valor > caucao.saldo:
-        raise ValidationError(f"Desconto acima do saldo da caução (R$ {caucao.saldo}).")
+        raise ValidationError(f"Desconto acima do saldo da caução ({brl(caucao.saldo)}).")
     if valor > cobranca.saldo:
-        raise ValidationError(f"Desconto acima do saldo devedor (R$ {cobranca.saldo}).")
+        raise ValidationError(f"Desconto acima do saldo devedor ({brl(cobranca.saldo)}).")
     movimentacao = MovimentacaoCaucao.objects.create(
         caucao=caucao,
         tipo=MovimentacaoCaucao.Tipo.DESCONTO,

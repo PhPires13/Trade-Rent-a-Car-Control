@@ -3,10 +3,15 @@
 {% block titulo %}Registrar manutenção — {{ veiculo.placa }}{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-6 text-2xl font-bold">Registrar manutenção — {{ veiculo }}</h1>
+<div class="mb-1 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Registrar manutenção — {{ veiculo }}</h1>
+  <a href="{% url 'manutencao:historico' veiculo.pk %}" class="text-sm underline">Ver histórico do veículo</a>
+</div>
+<p class="mb-6 text-sm text-gray-500">Se escolher um item do plano (troca de óleo, pneus…), o contador da próxima preventiva recomeça a partir deste KM.</p>
 
 <form method="post" class="max-w-lg space-y-4 rounded-lg bg-white p-6 shadow">
   {% csrf_token %}
+  {% include "_erros_form.html" %}
   {% for field in form %}
   <div>
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>

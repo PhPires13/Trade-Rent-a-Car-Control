@@ -4,58 +4,64 @@
 {% block titulo %}Painel — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-6 text-2xl font-bold">Painel</h1>
-
-<div class="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-  <div class="rounded-lg bg-marca-preto p-4 text-white shadow">
-    <div class="text-3xl font-black text-marca-amarelo">{{ total_veiculos }}</div>
-    <div class="text-sm text-gray-300">
-      Veículos na frota{% if ocupacao is not None %} · <span class="font-semibold text-marca-amarelo">{{ ocupacao }}%</span> ocupação{% endif %}
-    </div>
-  </div>
-  {% for status, qtde in veiculos_por_status.items %}
-  <div class="rounded-lg bg-white p-4 shadow">
-    <div class="text-3xl font-black">{{ qtde }}</div>
-    <div class="text-sm text-gray-500">{{ status }}</div>
-  </div>
-  {% endfor %}
-  <div class="rounded-lg bg-white p-4 shadow">
-    <div class="text-3xl font-black">{{ total_clientes_ativos }}</div>
-    <div class="text-sm text-gray-500">Clientes ativos</div>
-  </div>
-  <a href="{% url 'alocacoes:lista' %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
-    <div class="text-3xl font-black">{{ alocacoes_ativas }}</div>
-    <div class="text-sm text-gray-500">Alocações ativas</div>
-  </a>
+<div class="mb-6 flex flex-wrap items-baseline justify-between gap-2">
+  <h1 class="text-2xl font-bold">Olá, {{ user.first_name|default:user.get_username }}</h1>
+  <p class="text-sm text-gray-500">{{ hoje|date:"l, d \d\e F \d\e Y"|lower|capfirst }}</p>
 </div>
 
+<h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Dinheiro</h2>
 <div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
   <a href="{% url 'financeiro:cobrancas' %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
-    <div class="text-2xl font-black">R$ {{ semana_recebido|floatformat:2 }} <span class="text-base font-normal text-gray-400">/ R$ {{ semana_total|floatformat:2 }}</span></div>
-    <div class="text-sm text-gray-500">Recebido / a receber na semana</div>
+    <div class="text-sm text-gray-500">Recebido nesta semana</div>
+    <div class="text-2xl font-black">{{ semana_recebido|brl }}</div>
+    <div class="text-xs text-gray-500">de {{ semana_total|brl }} previstos</div>
+    {% if semana_total %}
+    <div class="mt-2 h-1.5 w-full overflow-hidden rounded bg-gray-100" role="progressbar"
+         aria-label="Recebido da semana" aria-valuenow="{{ percentual_semana }}" aria-valuemin="0" aria-valuemax="100">
+      <div class="h-full bg-green-500" style="width: {{ percentual_semana }}%"></div>
+    </div>
+    {% endif %}
   </a>
-  <a href="{% url 'financeiro:cobrancas' %}?status=atrasado" class="rounded-lg {% if atrasado_total %}bg-red-50 ring-1 ring-red-200{% else %}bg-white{% endif %} p-4 shadow">
-    <div class="text-2xl font-black {% if atrasado_total %}text-red-700{% endif %}">R$ {{ atrasado_total|floatformat:2 }}</div>
-    <div class="text-sm text-gray-500">Em atraso (saldo devedor)</div>
+  <a href="{% url 'financeiro:cobrancas' %}?status=atrasado" class="rounded-lg {% if atrasado_total %}bg-red-50 ring-1 ring-red-200{% else %}bg-white{% endif %} p-4 shadow hover:ring-2 hover:ring-red-300">
+    <div class="text-sm text-gray-500">Em atraso</div>
+    <div class="text-2xl font-black {% if atrasado_total %}text-red-700{% else %}text-green-700{% endif %}">{{ atrasado_total|brl }}</div>
+    <div class="text-xs text-gray-500">{% if atrasado_total %}saldo vencido a cobrar →{% else %}ninguém em atraso{% endif %}</div>
   </a>
   <div class="rounded-lg bg-white p-4 shadow">
-    <div class="text-2xl font-black">{{ inadimplentes|length }}</div>
-    <div class="text-sm text-gray-500">
-      Inadimplentes
-      {% if inadimplentes %}
-        <span class="text-xs">({% for c in inadimplentes %}<a class="underline" href="{% url 'financeiro:extrato_cliente' c.pk %}">{{ c.nome }}</a>{% if not forloop.last %}, {% endif %}{% endfor %})</span>
-      {% endif %}
-      {% if nds_abertas %}· <a href="{% url 'financeiro:nds' %}" class="underline">{{ nds_abertas }} ND{{ nds_abertas|pluralize }} em aberto</a>{% endif %}
+    <div class="text-sm text-gray-500">Clientes inadimplentes</div>
+    <div class="text-2xl font-black {% if inadimplentes %}text-red-700{% endif %}">{{ inadimplentes|length }}</div>
+    {% if inadimplentes %}
+    <div class="mt-1 text-xs leading-relaxed">
+      {% for c in inadimplentes %}<a class="underline hover:text-marca-preto" href="{% url 'financeiro:extrato_cliente' c.pk %}">{{ c.nome }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
     </div>
+    {% endif %}
+    {% if nds_abertas %}<div class="mt-1 text-xs"><a href="{% url 'financeiro:nds' %}" class="underline">{{ nds_abertas }} nota{{ nds_abertas|pluralize }} de débito em aberto</a></div>{% endif %}
   </div>
+</div>
+
+<h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Frota</h2>
+<div class="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+  <a href="{% url 'frota:hub' %}" class="rounded-lg bg-marca-preto p-4 text-white shadow hover:ring-2 hover:ring-marca-amarelo">
+    <div class="text-3xl font-black text-marca-amarelo">{{ total_veiculos }}</div>
+    <div class="text-sm text-gray-300">
+      carros na frota{% if ocupacao is not None %}<br><span class="font-semibold text-marca-amarelo">{{ ocupacao }}%</span> de ocupação{% endif %}
+    </div>
+  </a>
+  {% for valor, rotulo, qtde in veiculos_por_status %}
+  <a href="{% if valor == 'alocado' %}{% url 'alocacoes:lista' %}{% else %}{% url 'frota:hub' %}?status={{ valor }}{% endif %}"
+     class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo {% if not qtde %}opacity-60{% endif %}">
+    <div class="text-3xl font-black">{{ qtde }}</div>
+    <div class="text-sm text-gray-500">{{ rotulo }}</div>
+  </a>
+  {% endfor %}
 </div>
 
 {% if vigencias %}
 <div class="mb-8 rounded-lg bg-white p-5 shadow">
   <h2 class="mb-3 font-semibold">Vigências e documentos a vencer (30 dias)</h2>
-  <ul class="grid gap-1 text-sm sm:grid-cols-2">
+  <ul class="gap-8 space-y-1 text-sm sm:columns-2">
     {% for alerta in vigencias %}
-    <li>
+    <li class="break-inside-avoid">
       <span class="{% if alerta.vencido %}font-semibold text-red-700{% else %}text-yellow-800{% endif %}">{{ alerta.data|date:"d/m/Y" }}</span>
       — {{ alerta.descricao }}{% if alerta.vencido %} <span class="text-xs font-semibold text-red-700">(vencido)</span>{% endif %}
     </li>
@@ -73,8 +79,8 @@
       <span class="font-semibold">{{ troca.alocacao.cliente.nome }}</span>
       está com o substituto <span class="font-semibold">{{ troca.veiculo_substituto.placa }}</span>
       desde {{ troca.data_retirada|date:"d/m/Y" }}
-      {% if troca.motivo %}<span class="text-gray-500">({{ troca.motivo }})</span>{% endif %}
-      — <a href="{% url 'alocacoes:troca_devolver' troca.pk %}" class="underline">devolver</a>
+      {% if troca.motivo %}<span class="text-gray-500">— {{ troca.motivo }}</span>{% endif %}
+      · <a href="{% url 'alocacoes:troca_devolver' troca.pk %}" class="font-medium underline">registrar devolução</a>
     </li>
     {% endfor %}
   </ul>
@@ -99,7 +105,7 @@
 {% endif %}
 
 {% if fici_em_alerta or auxilios_disponiveis %}
-<div class="mb-8 grid gap-6 lg:grid-cols-2">
+<div class="mb-8 grid gap-6 {% if fici_em_alerta and auxilios_disponiveis %}lg:grid-cols-2{% endif %}">
   {% if fici_em_alerta %}
   <div class="rounded-lg border-l-4 border-red-500 bg-white p-5 shadow">
     <h2 class="mb-3 flex items-center justify-between font-semibold">
@@ -166,7 +172,7 @@
     {% if leituras_pendentes %}
     <ul class="flex flex-wrap gap-2 text-sm">
       {% for veiculo in leituras_pendentes %}
-      <li class="rounded bg-yellow-100 px-2 py-1 font-medium text-yellow-900">{{ veiculo.placa }}</li>
+      <li><a href="{% url 'km:lista' %}#pendente-{{ veiculo.pk }}" class="inline-block rounded bg-yellow-100 px-2 py-1 font-medium text-yellow-900 hover:bg-yellow-200">{{ veiculo.placa }}</a></li>
       {% endfor %}
     </ul>
     {% else %}

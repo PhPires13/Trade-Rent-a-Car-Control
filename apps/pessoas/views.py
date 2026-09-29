@@ -7,6 +7,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.alocacoes.models import Alocacao
+from apps.campos import FormularioBR
 from apps.financeiro.models import (
     ZERO,
     AplicacaoRecebimento,
@@ -24,21 +25,22 @@ from .models import Cliente, CondutorAutorizado
 COBRANCAS_EM_ABERTO = Cobranca.STATUS_DEVIDOS
 
 
-class ClienteForm(forms.ModelForm):
+class ClienteForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Cliente
+        # CNH primeiro: a leitura automática preenche os campos logo abaixo dela
         fields = [
+            "cnh_frente",
+            "cnh_verso",
             "nome",
             "cpf_cnpj",
+            "cnh_numero",
+            "cnh_categoria",
+            "cnh_validade",
             "telefone",
             "email",
             "endereco",
             "foto",
-            "cnh_frente",
-            "cnh_verso",
-            "cnh_numero",
-            "cnh_categoria",
-            "cnh_validade",
             "dia_vencimento",
             "caucao_referencia",
             "status",

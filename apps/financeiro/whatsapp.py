@@ -8,6 +8,8 @@ from urllib.parse import quote
 
 from django.conf import settings
 
+from apps.formatos import brl
+
 
 def telefone_whatsapp(telefone):
     """Só dígitos, com DDI 55 — mesmo critério do hub de clientes."""
@@ -22,7 +24,7 @@ def telefone_whatsapp(telefone):
 def mensagem_cobranca(cobranca, hoje):
     """Texto da cobrança — variação para em dia × atrasada."""
     nome = cobranca.cliente.nome.split()[0]
-    valor = f"R$ {cobranca.saldo:.2f}".replace(".", ",")
+    valor = brl(cobranca.saldo)
     vencimento = cobranca.vencimento.strftime("%d/%m")
     if cobranca.vencimento < hoje:
         dias = (hoje - cobranca.vencimento).days

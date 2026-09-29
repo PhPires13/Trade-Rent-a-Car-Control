@@ -98,6 +98,8 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
+            # {{ valor|brl }} / {{ km|milhar }} em qualquer template (apps/formatos.py)
+            "builtins": ["apps.formatos"],
         },
     },
 ]
@@ -126,6 +128,7 @@ AXES_LOCKOUT_PARAMETERS = ["username"]
 AXES_FAILURE_LIMIT = 6
 AXES_COOLOFF_TIME = timedelta(minutes=15)  # destrava sozinho, nunca bloqueio permanente
 AXES_RESET_ON_SUCCESS = True
+AXES_LOCKOUT_TEMPLATE = "bloqueio.html"  # tela com o visual do login, não texto puro
 AXES_COOLOFF_MESSAGE = (
     "Muitas tentativas de senha erradas. Por segurança, o acesso a esta conta ficou "
     "bloqueado por 15 minutos — tente de novo mais tarde."

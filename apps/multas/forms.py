@@ -7,10 +7,12 @@ tratamento de credenciais: um form próprio no admin já devolveu a senha do
 
 from django import forms
 
+from apps.campos import FormularioBR
+
 from .models import Multa, OrgaoAutuador
 
 
-class MultaForm(forms.ModelForm):
+class MultaForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Multa
         fields = [

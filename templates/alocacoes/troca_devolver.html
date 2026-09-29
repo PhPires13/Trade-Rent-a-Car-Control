@@ -1,31 +1,51 @@
 {% extends "base.html" %}
-{% load humanize %}
 
 {% block titulo %}Devolver substituto — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-2 text-2xl font-bold">Devolver substituto</h1>
+<a href="{% url 'alocacoes:lista' %}" class="text-sm text-gray-600 underline">← Alocações</a>
+<h1 class="mb-1 mt-2 text-2xl font-bold">Devolver carro substituto</h1>
 <p class="mb-6 text-sm text-gray-600">
-  <strong>{{ troca.alocacao.cliente.nome }}</strong> está com o
-  {{ troca.veiculo_substituto }} desde {{ troca.data_retirada|date:"d/m/Y" }}
-  (retirada com {{ troca.km_retirada|intcomma }} km).
+  <strong>{{ troca.alocacao.cliente.nome }}</strong> devolve o substituto
+  <strong>{{ troca.veiculo_substituto.placa }}</strong> ({{ troca.veiculo_substituto.marca_modelo }})
+  e volta a ficar com o carro dele, <strong>{{ troca.alocacao.veiculo.placa }}</strong>.
 </p>
 
-<form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow">
-  {% csrf_token %}
-  <div>
-    <label class="mb-1 block text-sm font-medium" for="data_devolucao">Data da devolução</label>
-    <input type="date" name="data_devolucao" id="data_devolucao" value="{{ hoje|date:'Y-m-d' }}" required>
-  </div>
-  <div>
-    <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM na devolução</label>
-    <input type="number" name="km_devolucao" id="km_devolucao" min="{{ troca.km_retirada }}" required>
-  </div>
-  <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Devolver</button>
-    <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
-  </div>
-</form>
+<div class="grid max-w-3xl gap-6 md:grid-cols-2">
+  <dl class="h-fit rounded-lg border-l-4 border-marca-amarelo bg-white p-5 text-sm shadow">
+    <div class="grid grid-cols-2 gap-2">
+      <div><dt class="text-gray-500">Retirou em</dt><dd>{{ troca.data_retirada|date:"d/m/Y" }}</dd></div>
+      <div><dt class="text-gray-500">KM na retirada</dt><dd>{{ troca.km_retirada|milhar }} km</dd></div>
+      {% if troca.motivo %}<div class="col-span-2"><dt class="text-gray-500">Motivo</dt><dd>{{ troca.motivo }}</dd></div>{% endif %}
+      {% if troca.valor_semanal_ajustado %}<div class="col-span-2"><dt class="text-gray-500">Valor/semana durante a troca</dt><dd>{{ troca.valor_semanal_ajustado|brl }}</dd></div>{% endif %}
+    </div>
+    <p class="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-600">
+      A alocação continua ativa. O substituto volta a ficar disponível para alugar.
+    </p>
+  </dl>
+
+  <form method="post" class="h-fit space-y-4 rounded-lg bg-white p-6 shadow"
+        onsubmit="return confirm('Confirmar a devolução do substituto {{ troca.veiculo_substituto.placa|escapejs }}?')">
+    {% csrf_token %}
+    <div>
+      <label class="mb-1 block text-sm font-medium" for="data_devolucao">Data em que o substituto voltou</label>
+      <input type="date" name="data_devolucao" id="data_devolucao"
+             value="{% firstof request.POST.data_devolucao hoje|date:'Y-m-d' %}"
+             min="{{ troca.data_retirada|date:'Y-m-d' }}" required>
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM do substituto na devolução</label>
+      <input type="number" name="km_devolucao" id="km_devolucao" inputmode="numeric"
+             value="{{ request.POST.km_devolucao }}" min="{{ troca.km_retirada }}"
+             placeholder="saiu com {{ troca.km_retirada|milhar }}" required>
+      <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da retirada ({{ troca.km_retirada|milhar }} km).</p>
+    </div>
+    <div class="flex items-center gap-3 pt-2">
+      <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar devolução</button>
+      <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+    </div>
+  </form>
+</div>
 
 <style>
   form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }

@@ -2,11 +2,12 @@ from datetime import date, timedelta
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
+from apps.formatos import brl
 from apps.frota.models import Veiculo
 
 from .excedente import gerar_cobranca_excedente
@@ -109,7 +110,14 @@ def lista_mensal(request):
     clientes = _clientes_das_leituras(registros)
     for registro in registros:
         registro.cliente = clientes[registro.pk]
-    pendentes = veiculos_com_leitura_pendente(mes)
+    # Última leitura antes do mês — a tela mostra como dica do número esperado.
+    anteriores = RegistroKm.objects.filter(veiculo=OuterRef("pk"), mes_referencia__lt=mes).order_by(
+        "-mes_referencia"
+    )
+    pendentes = veiculos_com_leitura_pendente(mes).annotate(
+        ultimo_km=Subquery(anteriores.values("km")[:1]),
+        ultima_leitura=Subquery(anteriores.values("data_leitura")[:1]),
+    )
     return render(
         request,
         "km/lista.html",
@@ -165,7 +173,7 @@ def registrar(request, veiculo_id):
         if cobranca:
             messages.warning(
                 request,
-                f"Franquia estourada — cobrança de excedente de R$ {cobranca.valor} "
+                f"Franquia estourada — cobrança de excedente de {brl(cobranca.valor)} "
                 f"gerada para {cobranca.cliente.nome} (cancele no Financeiro se não for cobrar).",
             )
     except ValidationError as erro:

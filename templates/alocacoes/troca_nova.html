@@ -11,9 +11,7 @@
 
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow">
   {% csrf_token %}
-  {% for erro in form.non_field_errors %}
-    <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{ erro }}</p>
-  {% endfor %}
+  {% include "_erros_form.html" %}
   {% for field in form %}
   <div>
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>

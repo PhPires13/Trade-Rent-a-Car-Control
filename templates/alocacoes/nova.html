@@ -3,14 +3,27 @@
 {% block titulo %}Nova alocação — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-6 text-2xl font-bold">Nova alocação</h1>
+<a href="{% url 'alocacoes:lista' %}" class="text-sm text-gray-600 underline">← Alocações</a>
+<h1 class="mb-1 mt-2 text-2xl font-bold">Nova alocação</h1>
+<p class="mb-6 text-sm text-gray-600">Entregar um carro disponível a um cliente. As cobranças semanais saem sozinhas a partir da data de início.</p>
 
+{% if sem_veiculos or sem_clientes %}
+<div class="mb-4 max-w-xl rounded border-l-4 border-yellow-500 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+  {% if sem_veiculos %}
+  <p>Nenhum carro <strong>disponível</strong> para alugar agora. <a href="{% url 'frota:hub' %}" class="font-semibold underline">Ver a frota →</a></p>
+  {% endif %}
+  {% if sem_clientes %}
+  <p>Nenhum cliente ativo cadastrado. <a href="{% url 'pessoas:novo' %}" class="font-semibold underline">Cadastrar cliente →</a></p>
+  {% endif %}
+</div>
+{% endif %}
+
+{{ referencias|json_script:"referencias-categoria" }}
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
-      x-data="{ limite: '{{ form.limite_km.value|default:'ilimitado' }}' }">
+      x-data="{ limite: '{{ form.limite_km.value|default:'ilimitado' }}', veiculo: '{{ form.veiculo.value|default:'' }}', refs: JSON.parse(document.getElementById('referencias-categoria').textContent) }"
+      @change="if ($event.target.name === 'veiculo') veiculo = $event.target.value">
   {% csrf_token %}
-  {% for erro in form.non_field_errors %}
-    <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{ erro }}</p>
-  {% endfor %}
+  {% include "_erros_form.html" %}
   {% for field in form %}
   <div {% if field.name == "franquia_km_mensal" or field.name == "taxa_km_excedido" %}x-show="limite === 'limitado'"{% endif %}>
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
@@ -22,12 +35,22 @@
     {% else %}
       {{ field }}
     {% endif %}
+    {% if field.name == "veiculo" %}
+    <template x-if="refs[veiculo]">
+      <p class="mt-1 rounded bg-yellow-50 px-2 py-1.5 text-xs text-yellow-900">
+        Categoria <strong x-text="refs[veiculo].categoria"></strong>: preço de referência
+        <strong>R$ <span x-text="refs[veiculo].valor"></span></strong>/semana.
+        <button type="button" class="ml-1 font-semibold underline"
+                @click="document.getElementById('id_valor_semanal').value = refs[veiculo].valor">Usar este valor</button>
+      </p>
+    </template>
+    {% endif %}
     {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
   </div>
   {% endfor %}
   <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Alocar</button>
+    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Alocar carro</button>
     <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
   </div>
 </form>

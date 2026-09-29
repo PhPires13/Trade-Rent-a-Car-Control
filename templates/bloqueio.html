@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block titulo %}Acesso bloqueado temporariamente — Trade Rent a Car{% endblock %}
+
+{% block conteudo %}
+<div class="mx-auto mt-16 max-w-sm">
+  <div class="overflow-hidden rounded-lg shadow-lg">
+    <div class="bg-marca-amarelo px-6 py-5 text-center">
+      <span class="text-3xl font-black tracking-tight text-marca-preto">TRADE<span class="align-middle">→</span></span>
+      <div class="bg-marca-amarelo text-sm italic text-marca-preto">Rent a Car</div>
+    </div>
+    <div class="bg-marca-preto px-6 py-6 text-sm text-gray-200">
+      <h1 class="mb-2 text-lg font-bold text-white">Acesso bloqueado por 15 minutos</h1>
+      <p class="mb-3">
+        Houve muitas tentativas de senha errada nesta conta. Por segurança, o login ficou
+        bloqueado por 15 minutos — depois disso ele libera sozinho.
+      </p>
+      <p class="mb-5 text-gray-400">
+        Se não foi você quem tentou, avise quem administra o sistema.
+      </p>
+      <a href="{% url 'login' %}"
+         class="block w-full rounded bg-marca-amarelo px-4 py-2 text-center font-bold text-marca-preto hover:brightness-95">
+        Voltar para o login
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

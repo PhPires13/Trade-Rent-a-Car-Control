@@ -1,5 +1,5 @@
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 
 from django import forms
 from django.contrib import messages
@@ -9,6 +9,7 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
+from apps.campos import FormularioBR, dinheiro_br
 from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
 
@@ -22,10 +23,12 @@ def _quem_esta_com_o_carro(veiculo):
         veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).select_related("cliente").first()
     )
     if alocacao:
+        # o dono do contrato pode estar rodando com um substituto (carro na oficina)
         return {
             "motorista": alocacao.cliente.nome,
             "valor_semanal": alocacao.valor_semanal,
             "alocacao": alocacao,
+            "substituto_em_uso": alocacao.troca_ativa,
         }
     troca = (
         veiculo.trocas_como_substituto.filter(data_devolucao__isnull=True)
@@ -132,13 +135,14 @@ def detalhe(request, veiculo_id):
     return render(request, "frota/detalhe.html", contexto)
 
 
-class VeiculoForm(forms.ModelForm):
+class VeiculoForm(FormularioBR, forms.ModelForm):
     """Cadastro do veículo — os campos de venda são geridos pelo fluxo "Vender"."""
 
     SECOES = (
         (
             "Identificação",
             [
+                "documento",
                 "placa",
                 "renavam",
                 "chassi",
@@ -147,7 +151,6 @@ class VeiculoForm(forms.ModelForm):
                 "categoria",
                 "uso",
                 "foto",
-                "documento",
             ],
         ),
         (
@@ -277,7 +280,7 @@ def veiculo_editar(request, veiculo_id):
     return _formulario_veiculo(request, get_object_or_404(Veiculo, pk=veiculo_id))
 
 
-class CategoriaForm(forms.ModelForm):
+class CategoriaForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Categoria
         fields = ["nome", "valor_semanal_referencia", "observacoes"]
@@ -302,12 +305,20 @@ def _cadastro_simples(request, form_classe, modelo, template, chave_id, contexto
         form = form_classe(request.POST, instance=instancia)
         if form.is_valid():
             salvo = form.save()
-            messages.success(request, f"{salvo.nome} salvo.")
+            acao = "atualizado" if instancia else "cadastrado"
+            messages.success(request, f"“{salvo.nome}” {acao} com sucesso.")
             return redirect(request.path)
-        messages.error(
-            request,
-            "; ".join(f"{campo}: {erros[0]}" for campo, erros in form.errors.items()),
+        detalhes = "; ".join(
+            f"{form.fields[campo].label if campo in form.fields else 'Formulário'}: {erros[0]}"
+            for campo, erros in form.errors.items()
         )
+        if instancia:
+            # erro na edição de uma linha da tabela: o formulário "Novo" volta limpo,
+            # senão ele apareceria preenchido com a linha editada (e criaria uma cópia).
+            messages.error(request, f"“{instancia.nome}” não foi salvo — {detalhes}")
+            form = form_classe()
+        else:
+            messages.error(request, f"Não foi possível cadastrar — {detalhes}")
     return render(request, template, {"form": form, **contexto_extra()})
 
 
@@ -367,14 +378,19 @@ def vender(request, veiculo_id):
             desmobilizacao.registrar_venda(
                 veiculo,
                 data=date.fromisoformat(request.POST["data"]),
-                valor=Decimal(request.POST["valor"].replace(",", ".")),
+                # aceita "45.000,00", "45000,00" ou "R$ 45.000" (apps/campos.py)
+                valor=dinheiro_br(request.POST["valor"]),
                 comprador=request.POST.get("comprador", ""),
                 custos=(
-                    Decimal(request.POST["custos"].replace(",", "."))
+                    dinheiro_br(request.POST["custos"])
                     if request.POST.get("custos", "").strip()
                     else None
                 ),
-                km=int(request.POST["km"]) if request.POST.get("km", "").strip() else None,
+                km=(
+                    int(request.POST["km"].replace(".", "").strip())
+                    if request.POST.get("km", "").strip()
+                    else None
+                ),
             )
             messages.success(
                 request,
@@ -383,9 +399,22 @@ def vender(request, veiculo_id):
             )
             return redirect("frota:ficha", veiculo.pk)
         except (ValidationError, KeyError, InvalidOperation, ValueError) as erro:
-            mensagens = getattr(erro, "messages", ["Preencha os campos corretamente."])
-            messages.error(request, "; ".join(mensagens))
-    return render(request, "frota/vender.html", {"veiculo": veiculo, "hoje": date.today()})
+            mensagens = getattr(
+                erro,
+                "messages",
+                ["Confira a data e os valores — ex.: valor 45.000,00 e KM só com números."],
+            )
+            messages.error(request, "Venda não registrada: " + "; ".join(mensagens))
+    return render(
+        request,
+        "frota/vender.html",
+        {
+            "veiculo": veiculo,
+            "hoje": date.today(),
+            "dados": request.POST if request.method == "POST" else {},
+            "ficha": desmobilizacao.montar_ficha(veiculo),
+        },
+    )
 
 
 def crlv_extrair(request):

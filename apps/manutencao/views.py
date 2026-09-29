@@ -5,6 +5,8 @@ from django.core.validators import MinValueValidator
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
+from apps.campos import FormularioBR
+from apps.formatos import brl
 from apps.frota.models import Veiculo
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
@@ -12,7 +14,7 @@ from .repasse import gerar_repasse
 from .services import StatusPreventiva, resumos_por_veiculo
 
 
-class ManutencaoForm(forms.ModelForm):
+class ManutencaoForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Manutencao
         fields = [
@@ -181,7 +183,7 @@ def registrar(request, veiculo_id):
             manutencao.responsavel == Manutencao.Responsavel.CLIENTE
             and manutencao.valor_cobrado_cliente
         ):
-            messages.info(
+            messages.warning(
                 request,
                 "Custo do cliente — gere a cobrança de repasse no histórico do veículo.",
             )
@@ -195,7 +197,7 @@ def repassar(request, manutencao_id):
         try:
             cobranca = gerar_repasse(manutencao)
             messages.success(
-                request, f"Repasse de R$ {cobranca.valor} cobrado de {cobranca.cliente.nome}."
+                request, f"Repasse de {brl(cobranca.valor)} cobrado de {cobranca.cliente.nome}."
             )
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))

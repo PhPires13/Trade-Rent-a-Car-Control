@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 
+from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
 from .models import Veiculo
@@ -22,7 +23,7 @@ def vigencias_a_vencer(hoje=None):
                 "vencido": veiculo.ipva_vencimento < hoje,
                 "descricao": f"IPVA do {veiculo.placa}"
                 + (f" ({veiculo.ipva_ano})" if veiculo.ipva_ano else "")
-                + (f" — R$ {veiculo.ipva_valor}" if veiculo.ipva_valor else ""),
+                + (f" — {brl(veiculo.ipva_valor)}" if veiculo.ipva_valor else ""),
             }
         )
     for veiculo in frota.filter(licenciamento_vencimento__lte=limite):

@@ -1,19 +1,28 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block titulo %}Preventivas — Trade Rent a Car{% endblock %}
+{% block titulo %}Manutenção — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-2 text-2xl font-bold">Plano de manutenção preventiva</h1>
-<p class="mb-6 text-sm text-gray-500">
-  Status por veículo e item do plano. Registrar uma manutenção do item zera o ciclo.
-  <a href="{% url 'manutencao:plano' %}" class="underline">Editar plano de manutenção</a>
-  (itens, intervalos padrão e exceções por veículo).
+<div class="mb-2 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Manutenção da frota</h1>
+  <a href="{% url 'manutencao:plano' %}"
+     class="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">Configurar plano</a>
+</div>
+<p class="mb-4 text-sm text-gray-500">
+  Revisões preventivas de cada carro (troca de óleo, pneus…) calculadas pelo KM. Ao registrar a manutenção de um item,
+  a contagem recomeça do zero. Para mudar itens e intervalos, use <em>Configurar plano</em>.
+</p>
+<p class="mb-6 flex flex-wrap gap-2 text-xs">
+  <span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">Vencida</span> já passou do KM
+  <span class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-800">Próxima</span> está chegando
+  <span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Em dia</span>
+  <span class="rounded bg-gray-100 px-2 py-0.5 text-gray-500">Sem registro</span> nunca foi feita no sistema
 </p>
 
 {% for veiculo, itens in quadro %}
 <div class="mb-6 rounded-lg bg-white shadow">
-  <div class="flex items-center justify-between rounded-t-lg bg-marca-preto px-4 py-2 text-white">
+  <div class="flex flex-wrap items-center justify-between gap-2 rounded-t-lg bg-marca-preto px-4 py-2 text-white">
     <div>
       <span class="font-bold">{{ veiculo.placa }}</span>
       <span class="text-sm text-gray-300">{{ veiculo.marca_modelo }} · {{ veiculo.km_atual|intcomma }} km</span>
@@ -26,13 +35,14 @@
       </a>
     </div>
   </div>
+  <div class="overflow-x-auto">
   <table class="w-full text-sm">
     <thead class="bg-gray-50 text-left">
       <tr>
         <th class="px-3 py-2">Item</th>
         <th class="px-3 py-2">Intervalo</th>
         <th class="px-3 py-2">Última execução</th>
-        <th class="px-3 py-2">Próxima aos</th>
+        <th class="px-3 py-2">Próxima com</th>
         <th class="px-3 py-2">Faltam</th>
         <th class="px-3 py-2">Status</th>
       </tr>
@@ -66,8 +76,12 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% empty %}
-<p class="text-gray-500">Nenhum veículo de locação ativo cadastrado.</p>
+<div class="rounded-lg bg-white p-6 text-center text-gray-500 shadow">
+  Nenhum carro de locação ativo para acompanhar.
+  <a href="{% url 'frota:hub' %}" class="ml-1 font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">Ir para a frota</a>
+</div>
 {% endfor %}
 {% endblock %}

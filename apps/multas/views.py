@@ -1,5 +1,5 @@
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -8,6 +8,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import urlencode
 from django.views.decorators.cache import never_cache
 
+from apps.campos import dinheiro_br
+from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
 from . import services
@@ -64,9 +66,7 @@ def registrar_nic(request, multa_id):
     if request.method == "POST":
         try:
             valor = request.POST.get("valor", "").strip()
-            nic = services.registrar_nic(
-                multa, valor=Decimal(valor.replace(",", ".")) if valor else None
-            )
+            nic = services.registrar_nic(multa, valor=dinheiro_br(valor) if valor else None)
             messages.warning(request, f"NIC registrada contra a empresa: {nic}.")
         except (ValidationError, InvalidOperation) as erro:
             messages.error(request, "; ".join(getattr(erro, "messages", ["Valor inválido."])))
@@ -96,7 +96,7 @@ def gerar_nd(request):
         selecionadas = [m for m in a_cobrar if str(m.pk) in request.POST.getlist("multa")]
         try:
             nd = services.gerar_nd_de_multas(cliente, selecionadas, date.today())
-            messages.success(request, f"ND {nd.numero:03d} emitida (R$ {nd.total}).")
+            messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")
             return redirect("financeiro:nds")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))

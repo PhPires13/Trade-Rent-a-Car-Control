@@ -14,6 +14,7 @@ from django.db.models import Q
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import Cobranca
+from apps.formatos import brl
 
 DIAS_PRAZO_COBRANCA = 7
 #: A rotina diária só gera excedente de leituras recentes — evita uma enxurrada
@@ -149,7 +150,7 @@ def gerar_cobranca_excedente(registro, hoje=None):
         descricao=(
             f"Excedente de km {registro.veiculo.placa} {registro.mes_referencia:%m/%Y} — "
             f"{excedente} km além da franquia de {franquia} km "
-            f"(R$ {alocacao.taxa_km_excedido}/km)"
+            f"({brl(alocacao.taxa_km_excedido)}/km)"
         ),
         valor=valor,
         vencimento=max(registro.data_leitura, hoje) + timedelta(days=DIAS_PRAZO_COBRANCA),

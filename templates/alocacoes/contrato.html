@@ -55,7 +55,7 @@
 
   <h3 class="mb-2 font-bold">Cláusula 3ª — Valor e pagamento</h3>
   <p class="mb-3">
-    O aluguel é de <strong>R$ {{ alocacao.valor_semanal|intcomma }} por semana</strong>,
+    O aluguel é de <strong>{{ alocacao.valor_semanal|brl }} por semana</strong>,
     pago antecipadamente a cada {{ alocacao.get_dia_vencimento_display|lower }},
     via Pix ou outro meio aceito pela LOCADORA. O atraso sujeita o(a) LOCATÁRIO(A)
     a encargos de 5% (até 4 dias) ou 10% (acima), além das medidas de cobrança cabíveis.
@@ -65,7 +65,7 @@
   <h3 class="mb-2 font-bold">Cláusula 4ª — Caução</h3>
   <p class="mb-3">
     O(A) LOCATÁRIO(A) entrega a título de caução o valor de
-    <strong>R$ {{ alocacao.caucao_valor|intcomma }}</strong>, restituível na devolução do
+    <strong>{{ alocacao.caucao_valor|brl }}</strong>, restituível na devolução do
     veículo, deduzidos débitos pendentes, avarias e multas de sua responsabilidade.
   </p>
   {% endif %}
@@ -75,7 +75,7 @@
     {% if alocacao.limite_km == "limitado" %}
     A locação inclui franquia de <strong>{{ alocacao.franquia_km_mensal|intcomma }} km por mês</strong>.
     O quilômetro excedente será cobrado a
-    <strong>R$ {{ alocacao.taxa_km_excedido|default:"____" }}/km</strong>, apurado nas leituras
+    <strong>{{ alocacao.taxa_km_excedido|brl:"R$ ____" }}/km</strong>, apurado nas leituras
     mensais de odômetro.
     {% else %}
     A locação é de quilometragem livre, permanecendo o(a) LOCATÁRIO(A) obrigado(a) a

@@ -9,7 +9,7 @@
 
 <div class="mb-4 text-right">
   <a href="{% url 'financeiro:nd_nova' %}"
-     class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">+ Emitir ND</a>
+     class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">+ Emitir nota de débito</a>
 </div>
 
 <div class="overflow-x-auto rounded-lg bg-white shadow">
@@ -28,23 +28,30 @@
       {% for nd in notas %}
       <tr>
         <td class="px-3 py-2 font-bold">ND {{ nd.numero|stringformat:"03d" }}</td>
-        <td class="px-3 py-2">{{ nd.cliente.nome }}</td>
+        <td class="px-3 py-2">
+          <a href="{% url 'financeiro:extrato_cliente' nd.cliente.pk %}" class="underline decoration-marca-amarelo decoration-2">{{ nd.cliente.nome }}</a>
+        </td>
         <td class="px-3 py-2">{{ nd.data_emissao|date:"d/m/Y" }}</td>
         <td class="px-3 py-2 text-gray-600">
           {% for item in nd.itens.all %}{{ item.descricao }}{% if not forloop.last %} · {% endif %}{% endfor %}
         </td>
-        <td class="px-3 py-2 font-semibold">R$ {{ nd.total|intcomma }}</td>
+        <td class="whitespace-nowrap px-3 py-2 font-semibold">{{ nd.total|brl }}</td>
         <td class="px-3 py-2">
           {% with c=nd.cobranca %}
             {% if c.status == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Paga</span>
             {% elif c.status == "parcial" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Parcial</span>
             {% elif c.status == "atrasado" %}<span class="rounded bg-red-100 px-2 py-0.5 text-red-700">Atrasada</span>
-            {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Emitida</span>{% endif %}
+            {% elif c.status == "judicial" %}<span class="rounded bg-purple-100 px-2 py-0.5 text-purple-800">Judicial</span>
+            {% elif c.status == "cancelada" %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-500 line-through">Cancelada</span>
+            {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600" title="Emitida e ainda não paga">A receber</span>{% endif %}
           {% endwith %}
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="6" class="px-3 py-4 text-gray-500">Nenhuma nota de débito emitida.</td></tr>
+      <tr><td colspan="6" class="px-3 py-6 text-center text-gray-500">
+        Nenhuma nota de débito emitida ainda. A nota de débito (ND) cobra do cliente valores que não são aluguel —
+        multas, avarias, franquia. <a href="{% url 'financeiro:nd_nova' %}" class="underline">Emitir a primeira</a>
+      </td></tr>
       {% endfor %}
     </tbody>
   </table>

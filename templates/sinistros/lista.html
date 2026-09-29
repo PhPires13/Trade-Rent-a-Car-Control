@@ -4,20 +4,25 @@
 {% block titulo %}Sinistros — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<div class="mb-6 flex items-center justify-between">
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
   <h1 class="text-2xl font-bold">Sinistros e eventos</h1>
   <a href="{% url 'sinistros:novo' %}"
      class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">+ Novo sinistro</a>
 </div>
 
-<form method="get" class="mb-4 flex gap-2 text-sm">
-  <select name="status" class="rounded border border-gray-300 px-2 py-1">
+<form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+  <label for="filtro-status-sinistro" class="sr-only">Status</label>
+  <select id="filtro-status-sinistro" name="status" onchange="this.form.submit()" class="rounded border border-gray-300 px-2 py-1">
     <option value="">Todos os status</option>
     {% for valor, rotulo in statuses %}
     <option value="{{ valor }}" {% if filtro == valor %}selected{% endif %}>{{ rotulo }}</option>
     {% endfor %}
   </select>
-  <button class="rounded bg-marca-preto px-3 py-1 text-white">Filtrar</button>
+  <label for="filtro-placa-sinistro" class="sr-only">Placa</label>
+  <input id="filtro-placa-sinistro" type="search" name="veiculo" value="{{ filtro_veiculo }}" placeholder="placa"
+         class="w-28 rounded border border-gray-300 px-2 py-1">
+  <button class="rounded bg-marca-preto px-3 py-1 text-white">Buscar</button>
+  {% if filtro or filtro_veiculo %}<a href="{% url 'sinistros:lista' %}" class="text-gray-500 underline">limpar filtros</a>{% endif %}
 </form>
 
 <div class="space-y-4">
@@ -35,8 +40,8 @@
       </div>
       <div class="text-sm text-gray-500">
         {% if sinistro.acionou_protecao %}
-          Evento Auto Truck {{ sinistro.data_evento|date:"d/m/Y"|default:"" }}
-          {% if sinistro.franquia_valor is not None %}· franquia R$ {{ sinistro.franquia_valor|intcomma }}{% endif %}
+          <span title="Acionou a proteção veicular (Auto Truck)">Proteção acionada {{ sinistro.data_evento|date:"d/m/Y"|default:"" }}</span>
+          {% if sinistro.franquia_valor is not None %}· franquia {{ sinistro.franquia_valor|brl }}{% endif %}
         {% endif %}
       </div>
     </div>
@@ -51,29 +56,39 @@
       {% endif %}
       {% for auxilio in sinistro.auxilios.all %}
         {% if auxilio.status == "recebido" %}
-          <span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Auxílio recebido: R$ {{ auxilio.valor|intcomma }}</span>
+          <span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Auxílio recebido: {{ auxilio.valor|brl }}</span>
         {% else %}
-          <form method="post" action="{% url 'sinistros:receber_auxilio' auxilio.pk %}" class="flex items-center gap-1">
+          <form method="post" action="{% url 'sinistros:receber_auxilio' auxilio.pk %}" class="flex flex-wrap items-center gap-1"
+                onsubmit="return confirm('Confirmar que o auxílio motorista de {{ sinistro.veiculo.placa|escapejs }} foi recebido?')">
             {% csrf_token %}
-            <span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Auxílio {{ auxilio.get_status_display|lower }}</span>
-            <input type="text" name="valor" placeholder="valor recebido" class="w-28 rounded border border-gray-300 px-1 py-0.5 text-xs">
-            <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto">Recebido</button>
+            <span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Auxílio {{ auxilio.get_status_display|lower }}{% if auxilio.valor %} ({{ auxilio.valor|brl }}){% endif %}</span>
+            <label for="aux-rec-{{ auxilio.pk }}" class="sr-only">Valor recebido</label>
+            <input id="aux-rec-{{ auxilio.pk }}" type="text" name="valor" inputmode="decimal" placeholder="valor recebido (R$)"
+                   title="Deixe em branco para manter o valor solicitado" class="w-36 rounded border border-gray-300 px-1 py-0.5 text-xs">
+            <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto hover:brightness-95">Marcar recebido</button>
           </form>
         {% endif %}
       {% empty %}
         {% if sinistro.auxilio_disponivel %}
-        <form method="post" action="{% url 'sinistros:solicitar_auxilio' sinistro.pk %}" class="flex items-center gap-1">
+        <form method="post" action="{% url 'sinistros:solicitar_auxilio' sinistro.pk %}" class="flex flex-wrap items-center gap-1">
           {% csrf_token %}
-          <span class="font-semibold text-red-700">⚠ Parado &gt;7 dias — auxílio motorista a solicitar:</span>
-          <input type="text" name="valor" placeholder="1 salário mínimo" class="w-32 rounded border border-gray-300 px-1 py-0.5 text-xs">
-          <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto">Solicitar</button>
+          <span class="font-semibold text-red-700" title="A proteção paga um auxílio ao motorista quando o carro fica mais de 7 dias parado">⚠ Parado há mais de 7 dias — dá para pedir o auxílio motorista:</span>
+          <label for="aux-sol-{{ sinistro.pk }}" class="sr-only">Valor do auxílio</label>
+          <input id="aux-sol-{{ sinistro.pk }}" type="text" name="valor" inputmode="decimal" placeholder="ex.: 1.518,00" title="Normalmente 1 salário mínimo"
+                 class="w-32 rounded border border-gray-300 px-1 py-0.5 text-xs">
+          <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto hover:brightness-95">Registrar pedido</button>
         </form>
         {% endif %}
       {% endfor %}
     </div>
   </div>
   {% empty %}
-  <p class="text-gray-500">Nenhum sinistro registrado.</p>
+  <div class="rounded-lg bg-white p-6 text-center text-gray-500 shadow">
+    {% if filtro or filtro_veiculo %}Nenhum sinistro encontrado com esses filtros.
+      <a href="{% url 'sinistros:lista' %}" class="ml-1 underline">Limpar filtros</a>
+    {% else %}Nenhum sinistro registrado — ótimo sinal!
+      <a href="{% url 'sinistros:novo' %}" class="ml-1 font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">+ Registrar sinistro</a>{% endif %}
+  </div>
   {% endfor %}
 </div>
 

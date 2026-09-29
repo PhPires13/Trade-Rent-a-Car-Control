@@ -5,7 +5,7 @@ from django.db.models import Q, Sum
 from django.shortcuts import redirect, render
 from django.views.static import serve
 
-from apps.alocacoes.models import Alocacao, TrocaTemporaria
+from apps.alocacoes.models import TrocaTemporaria
 from apps.financeiro.models import ZERO, Cobranca
 from apps.frota.models import Veiculo, normalizar_placa
 from apps.km.models import veiculos_com_leitura_pendente
@@ -53,13 +53,12 @@ def painel(request):
     alertas_preventivas = preventivas_em_alerta()
     contexto = {
         "total_veiculos": veiculos.count(),
-        "veiculos_por_status": {
-            label: veiculos.filter(status=valor).count()
+        # (valor, rótulo, quantidade) — o valor vira o filtro do card no hub da frota
+        "veiculos_por_status": [
+            (valor, label, veiculos.filter(status=valor).count())
             for valor, label in Veiculo.Status.choices
             if valor != Veiculo.Status.VENDIDO
-        },
-        "total_clientes_ativos": Cliente.objects.filter(status=Cliente.Status.ATIVO).count(),
-        "alocacoes_ativas": Alocacao.objects.filter(status=Alocacao.Status.ATIVA).count(),
+        ],
         "trocas_em_andamento": TrocaTemporaria.objects.filter(
             data_devolucao__isnull=True
         ).select_related("alocacao__cliente", "veiculo_substituto"),
@@ -87,6 +86,10 @@ def painel(request):
             .select_related("veiculo")
             .prefetch_related("manutencoes"),
         }
+    )
+    total_semana = contexto["semana_total"]
+    contexto["percentual_semana"] = (
+        min(100, round(100 * contexto["semana_recebido"] / total_semana)) if total_semana else 0
     )
     contexto["auxilios_disponiveis"] = [
         s for s in contexto["sinistros_abertos"] if s.auxilio_disponivel

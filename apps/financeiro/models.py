@@ -6,6 +6,7 @@ from django.db.models.functions import Coalesce
 from simple_history.models import HistoricalRecords
 
 from apps.alocacoes.models import Alocacao
+from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
 ZERO = Decimal("0.00")
@@ -93,7 +94,7 @@ class Cobranca(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.descricao} — {self.cliente.nome} (R$ {self.valor})"
+        return f"{self.descricao} — {self.cliente.nome} ({brl(self.valor)})"
 
     @classmethod
     def com_quitacao_anotada(cls, queryset=None):
@@ -194,7 +195,7 @@ class Recebimento(models.Model):
         ordering = ["-data", "-pk"]
 
     def __str__(self):
-        return f"R$ {self.valor} de {self.cliente.nome} em {self.data:%d/%m/%Y}"
+        return f"{brl(self.valor)} de {self.cliente.nome} em {self.data:%d/%m/%Y}"
 
     @property
     def total_aplicado(self):
@@ -215,7 +216,7 @@ class AplicacaoRecebimento(models.Model):
         verbose_name_plural = "aplicações de recebimento"
 
     def __str__(self):
-        return f"R$ {self.valor} → {self.cobranca.descricao}"
+        return f"{brl(self.valor)} → {self.cobranca.descricao}"
 
 
 class MovimentoCredito(models.Model):
@@ -244,7 +245,7 @@ class MovimentoCredito(models.Model):
         ordering = ["-data", "-pk"]
 
     def __str__(self):
-        return f"{self.get_tipo_display()}: R$ {self.valor} — {self.cliente.nome}"
+        return f"{self.get_tipo_display()}: {brl(self.valor)} — {self.cliente.nome}"
 
     @staticmethod
     def saldo_do_cliente(cliente):
@@ -309,7 +310,7 @@ class ItemNotaDebito(models.Model):
         verbose_name_plural = "itens da nota de débito"
 
     def __str__(self):
-        return f"{self.descricao} (R$ {self.valor})"
+        return f"{self.descricao} ({brl(self.valor)})"
 
 
 class Caucao(models.Model):
@@ -419,4 +420,4 @@ class MovimentacaoCaucao(models.Model):
         ordering = ["-data", "-pk"]
 
     def __str__(self):
-        return f"{self.get_tipo_display()} R$ {self.valor} — {self.caucao}"
+        return f"{self.get_tipo_display()} {brl(self.valor)} — {self.caucao}"

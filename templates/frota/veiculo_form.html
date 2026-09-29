@@ -9,18 +9,14 @@
 
 <form method="post" enctype="multipart/form-data" class="space-y-6">
   {% csrf_token %}
-  {% if form.non_field_errors %}
-  <div class="rounded border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-700">
-    {% for erro in form.non_field_errors %}<p>{{ erro }}</p>{% endfor %}
-  </div>
-  {% endif %}
+  {% include "_erros_form.html" %}
 
   {% for titulo, campos in form.secoes %}
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-4 border-b border-gray-100 pb-2 font-semibold">{{ titulo }}</h2>
     <div class="grid gap-4 sm:grid-cols-2">
       {% for field in campos %}
-      <div {% if field.name == "observacoes" %}class="sm:col-span-2"{% endif %}>
+      <div {% if field.name == "observacoes" or field.name == "documento" %}class="sm:col-span-2"{% endif %}>
         <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
         {% if field.name == "foto" and veiculo and veiculo.foto %}
           <img src="{{ veiculo.foto.url }}" alt="{{ veiculo.placa }}" class="mb-2 h-20 w-32 rounded object-cover">
@@ -31,14 +27,15 @@
         {% if field.name == "documento" %}
           {% if crlv_leitura %}
           <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-2 text-xs" id="leitor-crlv">
-            <span class="text-gray-700">📄 Ao escolher a foto ou o PDF do CRLV, placa, renavam, chassi,
-              modelo e ano são lidos e preenchidos — confira antes de salvar.</span>
+            <span class="text-gray-700">📄 <strong>Comece por aqui:</strong> escolha a foto ou o PDF do CRLV e
+              placa, renavam, chassi, modelo e ano são preenchidos sozinhos — confira antes de salvar.</span>
             <p id="status-crlv" class="mt-1 hidden"></p>
           </div>
           {% else %}
-          <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500">
-            Leitura automática do documento desligada — configure a <code>ANTHROPIC_API_KEY</code>
-            para preencher o cadastro a partir da foto/PDF do CRLV.
+          <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500"
+             title="Técnico: configurar a variável ANTHROPIC_API_KEY no servidor">
+            A leitura automática do CRLV ainda não está ativada — guarde o documento aqui e preencha os
+            campos à mão. Para ativar a leitura, fale com quem cuida do sistema.
           </p>
           {% endif %}
         {% endif %}

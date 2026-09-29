@@ -4,21 +4,22 @@
 {% block titulo %}Caução — {{ caucao.alocacao.cliente.nome }}{% endblock %}
 
 {% block conteudo %}
-<div class="mb-6 flex items-center justify-between">
+<div class="mb-6 flex flex-wrap items-center justify-between gap-2">
   <h1 class="text-2xl font-bold">{{ caucao }}</h1>
-  <a href="{% url 'financeiro:caucoes' %}" class="text-sm underline">← Cauções</a>
+  <a href="{% url 'financeiro:caucoes' %}" class="text-sm underline">← Voltar para cauções</a>
 </div>
 
 <div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">R$ {{ caucao.recebido|intcomma }}</div><div class="text-sm text-gray-500">Recebido</div></div>
-  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">R$ {{ caucao.descontado|intcomma }}</div><div class="text-sm text-gray-500">Descontos</div></div>
-  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">R$ {{ caucao.devolvido|intcomma }}</div><div class="text-sm text-gray-500">Devolvido</div></div>
-  <div class="rounded-lg bg-marca-preto p-4 text-white shadow"><div class="text-2xl font-black text-marca-amarelo">R$ {{ caucao.saldo|intcomma }}</div><div class="text-sm text-gray-300">Saldo ({{ caucao.status }})</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">{{ caucao.recebido|brl }}</div><div class="text-sm text-gray-500">Recebido</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">{{ caucao.descontado|brl }}</div><div class="text-sm text-gray-500">Descontos</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">{{ caucao.devolvido|brl }}</div><div class="text-sm text-gray-500">Devolvido</div></div>
+  <div class="rounded-lg bg-marca-preto p-4 text-white shadow"><div class="text-2xl font-black text-marca-amarelo">{{ caucao.saldo|brl }}</div><div class="text-sm text-gray-300">Saldo guardado ({{ caucao.status }})</div></div>
 </div>
 
 <div class="grid gap-6 lg:grid-cols-2">
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 font-semibold">Extrato</h2>
+    <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <tbody class="divide-y divide-gray-100">
         {% for m in caucao.movimentacoes.all %}
@@ -26,7 +27,7 @@
           <td class="px-2 py-1.5">{{ m.data|date:"d/m/Y" }}</td>
           <td class="px-2 py-1.5">{{ m.get_tipo_display }}{% if m.cobranca %} <span class="text-xs text-gray-500">({{ m.cobranca.descricao }})</span>{% endif %}</td>
           <td class="px-2 py-1.5 text-right font-medium {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}text-red-700{% else %}text-green-700{% endif %}">
-            {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}−{% else %}+{% endif %} R$ {{ m.valor|intcomma }}
+            {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}−{% else %}+{% endif %} {{ m.valor|brl }}
           </td>
         </tr>
         {% empty %}
@@ -34,25 +35,30 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 
   <div class="rounded-lg bg-white p-5 shadow" x-data="{ tipo: 'recebimento' }">
-    <h2 class="mb-3 font-semibold">Nova movimentação</h2>
-    <form method="post" class="space-y-3 text-sm">
+    <h2 class="mb-3 font-semibold">Registrar movimentação</h2>
+    <form method="post" class="space-y-3 text-sm"
+          x-on:submit="if ((tipo === 'devolucao' || tipo === 'desconto') && !confirm(tipo === 'devolucao'
+            ? 'Confirmar a DEVOLUÇÃO de R$ ' + $el.valor.value + ' ao cliente? O saldo da caução diminui.'
+            : 'Confirmar o DESCONTO de R$ ' + $el.valor.value + ' da caução para quitar a cobrança escolhida?')) $event.preventDefault()">
       {% csrf_token %}
       <div>
-        <label class="mb-1 block font-medium">Tipo</label>
+        <label class="mb-1 block font-medium">O que aconteceu?</label>
         <select name="tipo" x-model="tipo">
-          <option value="recebimento">Recebimento (depósito da caução)</option>
-          <option value="reforco">Reforço</option>
-          <option value="desconto">Desconto (quita cobrança)</option>
-          <option value="devolucao">Devolução</option>
+          <option value="recebimento">Cliente depositou a caução</option>
+          <option value="reforco">Cliente reforçou a caução (depositou mais)</option>
+          <option value="desconto">Usar a caução para pagar uma cobrança</option>
+          <option value="devolucao">Devolver a caução ao cliente</option>
         </select>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="mb-1 block font-medium">Valor (R$)</label>
-          <input type="text" name="valor" required>
+          <input type="text" name="valor" required placeholder="ex.: 1.500,00">
+          <p class="mt-1 text-xs text-gray-500" x-show="tipo === 'devolucao'">Saldo disponível: {{ caucao.saldo|brl }}</p>
         </div>
         <div>
           <label class="mb-1 block font-medium">Data</label>
@@ -60,7 +66,7 @@
         </div>
       </div>
       <div x-show="tipo === 'recebimento' || tipo === 'reforco'">
-        <label class="mb-1 block font-medium">Forma</label>
+        <label class="mb-1 block font-medium">Como pagou</label>
         <select name="forma">
           <option value="pix">Pix</option>
           <option value="dinheiro">Dinheiro</option>
@@ -71,14 +77,14 @@
         <label class="mb-1 block font-medium">Cobrança a quitar</label>
         <select name="cobranca">
           {% for cobranca in pendentes %}
-          <option value="{{ cobranca.pk }}">{{ cobranca.descricao }} — saldo R$ {{ cobranca.saldo|intcomma }}</option>
+          <option value="{{ cobranca.pk }}">{{ cobranca.descricao }} — saldo {{ cobranca.saldo|brl }}</option>
           {% empty %}
-          <option value="">— nenhuma cobrança em aberto —</option>
+          <option value="">— este cliente não tem cobrança em aberto —</option>
           {% endfor %}
         </select>
       </div>
       <div>
-        <label class="mb-1 block font-medium">Observações</label>
+        <label class="mb-1 block font-medium">Observações (opcional)</label>
         <input type="text" name="observacoes">
       </div>
       <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar</button>

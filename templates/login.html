@@ -11,16 +11,28 @@
     </div>
     <div class="bg-marca-preto px-6 py-6">
       {% if form.errors %}
-        <p class="mb-4 rounded bg-red-900/40 px-3 py-2 text-sm text-red-200">Usuário ou senha inválidos.</p>
+        <p class="mb-4 rounded bg-red-900/40 px-3 py-2 text-sm text-red-200" role="alert">
+          Usuário ou senha incorretos. Confira e tente de novo — após 6 tentativas erradas o
+          acesso fica bloqueado por 15 minutos.
+        </p>
       {% endif %}
       <form method="post">
         {% csrf_token %}
         <label class="mb-1 block text-sm text-gray-300" for="id_username">Usuário</label>
-        <input id="id_username" name="username" type="text" autofocus required
+        <input id="id_username" name="username" type="text" required
+               autocomplete="username" autocapitalize="none" spellcheck="false"
+               value="{{ form.username.value|default:'' }}"
+               {% if not form.errors %}autofocus{% endif %}
                class="mb-4 w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-white focus:border-marca-amarelo focus:outline-none">
         <label class="mb-1 block text-sm text-gray-300" for="id_password">Senha</label>
-        <input id="id_password" name="password" type="password" required
-               class="mb-6 w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-white focus:border-marca-amarelo focus:outline-none">
+        <div class="relative mb-6">
+          <input id="id_password" name="password" type="password" required
+                 autocomplete="current-password" {% if form.errors %}autofocus{% endif %}
+                 class="w-full rounded border border-gray-600 bg-gray-800 py-2 pl-3 pr-20 text-white focus:border-marca-amarelo focus:outline-none">
+          <button type="button" id="mostrar-senha"
+                  class="absolute inset-y-0 right-0 px-3 text-xs text-gray-400 hover:text-marca-amarelo"
+                  aria-controls="id_password">mostrar</button>
+        </div>
         <button type="submit"
                 class="w-full rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">
           Entrar
@@ -29,4 +41,12 @@
     </div>
   </div>
 </div>
+<script>
+  document.getElementById("mostrar-senha").addEventListener("click", function () {
+    const campo = document.getElementById("id_password");
+    const visivel = campo.type === "text";
+    campo.type = visivel ? "password" : "text";
+    this.textContent = visivel ? "mostrar" : "ocultar";
+  });
+</script>
 {% endblock %}

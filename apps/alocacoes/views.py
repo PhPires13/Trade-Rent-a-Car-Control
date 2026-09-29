@@ -8,6 +8,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
 
+from apps.campos import FormularioBR
+from apps.formatos import brl
 from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente
 
@@ -16,7 +18,7 @@ from .models import Alocacao, TrocaTemporaria, Vistoria
 from .services import linha_do_tempo
 
 
-class AlocacaoForm(forms.ModelForm):
+class AlocacaoForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Alocacao
         fields = [
@@ -50,7 +52,7 @@ class AlocacaoForm(forms.ModelForm):
         return None if valor in (None, "") else valor
 
 
-class AlocacaoEdicaoForm(forms.ModelForm):
+class AlocacaoEdicaoForm(FormularioBR, forms.ModelForm):
     """Edição do contrato em vigor (docs.md §4.2).
 
     Veículo, cliente, datas e KM não entram: trocar de carro é troca temporária
@@ -71,7 +73,7 @@ class AlocacaoEdicaoForm(forms.ModelForm):
         widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
 
 
-class TrocaForm(forms.ModelForm):
+class TrocaForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = TrocaTemporaria
         fields = [
@@ -109,6 +111,9 @@ def nova(request):
     veiculo_id = request.GET.get("veiculo")
     if veiculo_id:
         inicial["veiculo"] = veiculo_id
+    cliente_id = request.GET.get("cliente")
+    if cliente_id:
+        inicial["cliente"] = cliente_id
     form = AlocacaoForm(request.POST or None, initial=inicial)
     if request.method == "POST" and form.is_valid():
         alocacao = form.save(commit=False)
@@ -133,7 +138,25 @@ def nova(request):
             ),
         )
         return redirect("alocacoes:lista")
-    return render(request, "alocacoes/nova.html", {"form": form})
+    # Preço de referência da categoria de cada carro disponível — dica ao escolher o carro.
+    referencias = {
+        str(veiculo.pk): {
+            "categoria": veiculo.categoria.nome,
+            "valor": brl(veiculo.categoria.valor_semanal_referencia).replace("R$", "").strip(),
+        }
+        for veiculo in form.fields["veiculo"].queryset.select_related("categoria")
+        if veiculo.categoria and veiculo.categoria.valor_semanal_referencia
+    }
+    return render(
+        request,
+        "alocacoes/nova.html",
+        {
+            "form": form,
+            "referencias": referencias,
+            "sem_veiculos": not form.fields["veiculo"].queryset.exists(),
+            "sem_clientes": not form.fields["cliente"].queryset.exists(),
+        },
+    )
 
 
 def editar(request, alocacao_id):
@@ -155,7 +178,12 @@ def editar(request, alocacao_id):
 
 
 def encerrar(request, alocacao_id):
-    alocacao = get_object_or_404(Alocacao, pk=alocacao_id)
+    alocacao = get_object_or_404(
+        Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
+    )
+    if alocacao.status != Alocacao.Status.ATIVA:
+        messages.warning(request, "Esta alocação já está encerrada.")
+        return redirect("alocacoes:lista")
     if request.method == "POST":
         try:
             alocacao.encerrar(
@@ -170,7 +198,7 @@ def encerrar(request, alocacao_id):
             if caucao and caucao.saldo > 0:
                 messages.warning(
                     request,
-                    f"Faça o acerto da caução: R$ {caucao.saldo} retidos "
+                    f"Faça o acerto da caução: {brl(caucao.saldo)} retidos "
                     f"de {alocacao.cliente.nome}.",
                 )
                 return redirect("financeiro:caucao_detalhe", caucao.pk)
@@ -178,7 +206,16 @@ def encerrar(request, alocacao_id):
         except (ValidationError, KeyError, ValueError) as erro:
             mensagens = getattr(erro, "messages", ["Preencha a data e o KM corretamente."])
             messages.error(request, "; ".join(mensagens))
-    return render(request, "alocacoes/encerrar.html", {"alocacao": alocacao, "hoje": date.today()})
+    return render(
+        request,
+        "alocacoes/encerrar.html",
+        {
+            "alocacao": alocacao,
+            "hoje": date.today(),
+            "caucao": getattr(alocacao, "caucao", None),
+            "troca_ativa": alocacao.troca_ativa,
+        },
+    )
 
 
 def troca_nova(request, alocacao_id):
@@ -204,6 +241,11 @@ def troca_nova(request, alocacao_id):
 
 def troca_devolver(request, troca_id):
     troca = get_object_or_404(TrocaTemporaria, pk=troca_id)
+    if troca.data_devolucao:
+        messages.warning(
+            request, f"O substituto {troca.veiculo_substituto.placa} já foi devolvido."
+        )
+        return redirect("alocacoes:lista")
     if request.method == "POST":
         try:
             troca.devolver(

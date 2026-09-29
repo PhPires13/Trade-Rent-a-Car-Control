@@ -15,6 +15,7 @@ from django.db.models import Q, Sum
 
 from apps.alocacoes.models import TrocaTemporaria
 from apps.financeiro.models import ZERO, AplicacaoRecebimento, MovimentacaoCaucao
+from apps.formatos import brl
 
 from .models import Veiculo
 
@@ -229,8 +230,8 @@ def avaliar(ficha, media_custo_km_frota=None):
         and custo_km > media_custo_km_frota * FATOR_CUSTO_ACIMA_DA_MEDIA
     ):
         ficha.motivos.append(
-            f"Custo de manutenção/km (R$ {custo_km:.2f}) bem acima da média da frota "
-            f"(R$ {media_custo_km_frota:.2f})"
+            f"Custo de manutenção/km ({brl(custo_km)}) bem acima da média da frota "
+            f"({brl(media_custo_km_frota)})"
         )
         pontos += 1
     if ficha.dias_parado_6m > LIMIAR_DIAS_PARADO:

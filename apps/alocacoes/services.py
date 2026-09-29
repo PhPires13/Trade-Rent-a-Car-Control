@@ -2,6 +2,8 @@
 
 from django.db.models import Q
 
+from apps.formatos import brl
+
 from .models import Alocacao, TrocaTemporaria
 
 
@@ -39,7 +41,7 @@ def linha_do_tempo(veiculo):
                 "data": alocacao.data_inicio,
                 "tipo": "Alocação",
                 "descricao": f"Entregue a {alocacao.cliente.nome} "
-                f"(R$ {alocacao.valor_semanal}/semana, {alocacao.km_entrega} km)",
+                f"({brl(alocacao.valor_semanal)}/semana, {alocacao.km_entrega} km)",
             }
         )
         if alocacao.data_termino:

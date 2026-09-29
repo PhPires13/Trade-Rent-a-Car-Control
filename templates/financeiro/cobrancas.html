@@ -8,20 +8,24 @@
 {% include "financeiro/_abas.html" with aba="cobrancas" %}
 
 <form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm">
-  <select name="status" class="rounded border border-gray-300 px-2 py-1">
+  <label for="filtro-status" class="font-medium">Mostrar:</label>
+  <select name="status" id="filtro-status" class="rounded border border-gray-300 px-2 py-1" onchange="this.form.submit()"
+          aria-label="Situação da cobrança">
     <option value="abertas" {% if status == "abertas" %}selected{% endif %}>Em aberto</option>
     <option value="todas" {% if status == "todas" %}selected{% endif %}>Todas</option>
     {% for valor, rotulo in statuses %}
     <option value="{{ valor }}" {% if status == valor %}selected{% endif %}>{{ rotulo }}</option>
     {% endfor %}
   </select>
-  <select name="origem" class="rounded border border-gray-300 px-2 py-1">
+  <select name="origem" class="rounded border border-gray-300 px-2 py-1" onchange="this.form.submit()"
+          aria-label="Origem da cobrança">
     <option value="">Todas as origens</option>
     {% for valor, rotulo in origens %}
     <option value="{{ valor }}" {% if origem == valor %}selected{% endif %}>{{ rotulo }}</option>
     {% endfor %}
   </select>
-  <button class="rounded bg-marca-preto px-3 py-1 text-white">Filtrar</button>
+  <noscript><button class="rounded bg-marca-preto px-3 py-1 text-white">Filtrar</button></noscript>
+  {% if status != "abertas" or origem %}<a href="?" class="text-xs underline">limpar filtros</a>{% endif %}
   <span class="text-xs text-gray-500">Ordem: {{ ordem_rotulo }}</span>
 </form>
 
@@ -33,53 +37,55 @@
         <th class="px-3 py-2">Cliente</th>
         <th class="px-3 py-2">Descrição</th>
         <th class="px-3 py-2">Valor</th>
-        <th class="px-3 py-2">Saldo devedor</th>
-        <th class="px-3 py-2">Status</th>
-        <th class="px-3 py-2">Encargo</th>
+        <th class="px-3 py-2">Falta receber</th>
+        <th class="px-3 py-2">Situação</th>
+        <th class="px-3 py-2">Ações</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100">
       {% for cobranca, encargo in linhas %}
       <tr>
-        <td class="px-3 py-2">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
+        <td class="whitespace-nowrap px-3 py-2">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
         <td class="px-3 py-2">
           <a href="{% url 'financeiro:extrato_cliente' cobranca.cliente.pk %}" class="underline decoration-marca-amarelo decoration-2">
             {{ cobranca.cliente.nome }}</a>
         </td>
         <td class="px-3 py-2">{{ cobranca.descricao }}</td>
-        <td class="px-3 py-2">R$ {{ cobranca.valor|intcomma }}</td>
-        <td class="px-3 py-2 font-semibold">R$ {{ cobranca.saldo|intcomma }}</td>
+        <td class="whitespace-nowrap px-3 py-2">{{ cobranca.valor|brl }}</td>
+        <td class="whitespace-nowrap px-3 py-2 font-semibold">{{ cobranca.saldo|brl }}</td>
         <td class="px-3 py-2">
           {% if cobranca.status == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Pago</span>
           {% elif cobranca.status == "atrasado" %}<span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">Atrasado</span>
           {% elif cobranca.status == "parcial" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Parcial</span>
-          {% elif cobranca.status == "judicial" %}<span class="rounded bg-purple-100 px-2 py-0.5 font-semibold text-purple-800">Judicial</span>
+          {% elif cobranca.status == "judicial" %}<span class="whitespace-nowrap rounded bg-purple-100 px-2 py-0.5 font-semibold text-purple-800">Judicial</span>
           {% elif cobranca.status == "cancelada" %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-500">Cancelada</span>
           {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Pendente</span>{% endif %}
         </td>
-        <td class="px-3 py-2">
+        <td class="space-y-1 px-3 py-2">
           {% if encargo %}
-          <form method="post" action="{% url 'financeiro:aplicar_encargo' cobranca.pk %}" class="flex items-center gap-1">
+          <form method="post" action="{% url 'financeiro:aplicar_encargo' cobranca.pk %}" class="flex flex-wrap items-center gap-1"
+                onsubmit="return confirm('Cobrar do cliente um encargo por atraso de R$ ' + this.valor.value + '? Isso cria uma nova cobrança, que pode ser cancelada depois.')">
             {% csrf_token %}
-            <input type="text" name="valor" value="{{ encargo }}" class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs">
+            <span class="w-full text-xs text-gray-500" title="Sugerido: 5% até 4 dias de atraso, 10% acima — ajuste o valor se quiser">Encargo por atraso (R$):</span>
+            <input type="text" name="valor" value="{{ encargo }}" class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs" aria-label="Valor do encargo por atraso">
             <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto" title="Sugerido: 5% até 4 dias, 10% acima — ajuste ou zere">Aplicar</button>
           </form>
           {% elif cobranca.status == "atrasado" %}
           <form method="post" action="{% url 'financeiro:marcar_judicial' cobranca.pk %}"
                 onsubmit="return confirm('Marcar como cobrança judicial? O encargo automático para e o status só muda quando ela for quitada ou reaberta.')">
             {% csrf_token %}
-            <button class="text-xs text-purple-700 underline">judicial</button>
+            <button class="text-xs text-purple-700 underline" title="Passar para cobrança judicial">mandar para judicial</button>
           </form>
           {% elif cobranca.status == "judicial" %}
           <form method="post" action="{% url 'financeiro:reabrir_judicial' cobranca.pk %}"
                 onsubmit="return confirm('Tirar esta cobrança da cobrança judicial e voltar para o fluxo normal?')">
             {% csrf_token %}
-            <button class="text-xs text-purple-700 underline">reabrir</button>
+            <button class="text-xs text-purple-700 underline" title="Voltar ao fluxo normal de cobrança">tirar do judicial (reabrir)</button>
           </form>
           {% endif %}
           {% if cobranca.link_whatsapp %}
           <a href="{{ cobranca.link_whatsapp }}" target="_blank" rel="noopener"
-             class="block text-xs text-green-700 underline" title="Abre o WhatsApp com a mensagem de cobrança pronta">
+             class="block whitespace-nowrap text-xs text-green-700 underline" title="Abre o WhatsApp com a mensagem de cobrança pronta">
             💬 cobrar no WhatsApp
           </a>
           {% endif %}
@@ -95,7 +101,11 @@
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="7" class="px-3 py-4 text-gray-500">Nenhuma cobrança encontrada.</td></tr>
+      <tr><td colspan="7" class="px-3 py-6 text-center text-gray-500">
+        {% if status == "abertas" and not origem %}Nenhuma cobrança em aberto — está tudo recebido.
+        <a href="?status=todas" class="ml-1 underline">ver todas as cobranças</a>
+        {% else %}Nenhuma cobrança com esses filtros. <a href="?" class="ml-1 underline">limpar filtros</a>{% endif %}
+      </td></tr>
       {% endfor %}
     </tbody>
   </table>
