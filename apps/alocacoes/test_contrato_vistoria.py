@@ -84,6 +84,7 @@ def test_criar_alocacao_oferece_o_contrato(usuario_logado, db):
             "veiculo": veiculo.pk,
             "cliente": cliente.pk,
             "data_inicio": "2026-07-01",
+            "cobrar_a_partir_de": "2026-07-01",  # início antigo pede a data (D01)
             "valor_semanal": "650.00",
             "km_entrega": 0,
             "limite_km": "ilimitado",

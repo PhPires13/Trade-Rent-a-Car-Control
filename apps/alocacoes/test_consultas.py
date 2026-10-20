@@ -42,7 +42,8 @@ def test_encerrar_cancela_semanas_sem_consultar_cobranca_por_cobranca(
     financeiro.gerar_cobrancas_semanais(hoje=date(2026, 9, 30))  # 14 semanas
     # Cada semana cancelada custa 2 escritas (save + histórico); a quitação de
     # todas vem numa consulta só — eram mais 2 leituras por semana (54 no total).
-    with django_assert_max_num_queries(35):
+    # +3 fixas: encargos das semanas canceladas (1) e inadimplência recalculada (2).
+    with django_assert_max_num_queries(38):
         alocacao.encerrar(date(2026, 7, 20), km_devolucao=51_000)
     # Vencidas antes do término ficam; as 11 a partir de 22/07 (sem pagamento) caem.
     canceladas = alocacao.cobrancas.filter(status=Cobranca.Status.CANCELADA)

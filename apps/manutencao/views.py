@@ -14,7 +14,7 @@ from apps.formatos import brl
 from apps.frota.models import Veiculo
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
-from .repasse import gerar_repasse
+from .repasse import cliente_do_repasse, gerar_repasse
 from .services import (
     StatusPreventiva,
     frota_acompanhada,
@@ -357,6 +357,23 @@ def _carro_voltou(request, manutencao):
         messages.info(request, f"{veiculo.placa} voltou a ficar disponível para alugar.")
 
 
+def _carro_foi_para_oficina(request, manutencao):
+    """Carro livre que entra na oficina sai das listas de aluguel e troca.
+
+    Só o carro "Disponível" muda para "Em manutenção"; o alugado continua
+    "Alocado" e ganha só o selo "Na oficina". Volta sozinho no "Carro voltou".
+    """
+    if not manutencao.data_entrada or manutencao.data_saida:
+        return
+    veiculo = manutencao.veiculo
+    if veiculo.status == Veiculo.Status.DISPONIVEL:
+        veiculo.status = Veiculo.Status.EM_MANUTENCAO
+        veiculo.save(update_fields=["status"])
+        messages.info(
+            request, f"{veiculo.placa} ficou “Em manutenção” e não aparece para alugar até voltar."
+        )
+
+
 def registrar(request, veiculo_id):
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
     # "Informar última troca" (item nunca registrado): a troca foi no passado, então
@@ -387,6 +404,7 @@ def registrar(request, veiculo_id):
         manutencao.save()
         messages.success(request, f"Manutenção registrada para {veiculo.placa}.")
         _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
+        _carro_foi_para_oficina(request, manutencao)
         if manutencao.data_saida:
             _carro_voltou(request, manutencao)
         return redirect(_volta(request, reverse("manutencao:historico", args=[veiculo.pk])))
@@ -412,7 +430,10 @@ def editar(request, manutencao_id):
         manutencao = form.save()
         messages.success(request, f"Manutenção de {veiculo.placa} atualizada.")
         _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
-        if estava_aberta and manutencao.data_saida:
+        _carro_foi_para_oficina(request, manutencao)
+        segue_aberta = manutencao.data_entrada and not manutencao.data_saida
+        if estava_aberta and not segue_aberta:
+            # saída informada — ou a entrada apagada por engano: o carro não fica preso
             _carro_voltou(request, manutencao)
         return redirect(_volta(request, reverse("manutencao:historico", args=[veiculo.pk])))
     return render(
@@ -470,9 +491,18 @@ def repassar(request, manutencao_id):
 
 def historico(request, veiculo_id):
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
-    manutencoes = veiculo.manutencoes.select_related("item", "oficina", "sinistro").order_by(
-        "-data"
+    manutencoes = list(
+        veiculo.manutencoes.select_related("item", "oficina", "sinistro__cliente").order_by("-data")
     )
+    for m in manutencoes:
+        # Quem será cobrado aparece no botão antes de confirmar o repasse.
+        m.cliente_repasse = None
+        if (
+            not m.cobranca_repasse_id
+            and m.responsavel == Manutencao.Responsavel.CLIENTE
+            and m.valor_cobrado_cliente
+        ):
+            m.cliente_repasse = cliente_do_repasse(m)
     return render(
         request,
         "manutencao/historico.html",

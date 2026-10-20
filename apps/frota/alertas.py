@@ -9,7 +9,7 @@ from django.utils.formats import date_format
 from apps.formatos import brl, milhar
 from apps.pessoas.models import Cliente
 
-from .models import Veiculo
+from .models import PagamentoIpva, Veiculo
 
 DIAS_ALERTA_VIGENCIA = 30
 
@@ -25,15 +25,19 @@ def vigencias_a_vencer(hoje=None):
     alertas = []
     frota = Veiculo.objects.exclude(status=Veiculo.Status.VENDIDO)
     # IPVA em aberto (sem data de pagamento) vencendo — decisão nº 21 / tabela do §5
-    for veiculo in frota.filter(ipva_vencimento__lte=limite, ipva_pago_em__isnull=True):
+    for parcela in ipva_em_aberto(limite).select_related("veiculo"):
         alertas.append(
             _alerta(
-                veiculo.ipva_vencimento,
+                parcela.vencimento,
                 hoje,
-                f"IPVA do {veiculo.placa}"
-                + (f" ({veiculo.ipva_ano})" if veiculo.ipva_ano else "")
-                + (f" — {brl(veiculo.ipva_valor)}" if veiculo.ipva_valor else ""),
+                f"{parcela.rotulo} do {parcela.veiculo.placa}"
+                + (f" — {brl(parcela.valor)}" if parcela.valor else ""),
             )
+        )
+    # virada do ano: o carro tinha IPVA lançado em anos anteriores e o deste ano não
+    for veiculo in sem_ipva_do_ano(hoje.year):
+        alertas.append(
+            _alerta(hoje, hoje, f"IPVA {hoje.year} do {veiculo.placa} ainda não cadastrado")
         )
     for veiculo in frota.filter(licenciamento_vencimento__lte=limite):
         alertas.append(
@@ -58,6 +62,29 @@ def vigencias_a_vencer(hoje=None):
     ):
         alertas.append(_alerta(cliente.cnh_validade, hoje, f"CNH de {cliente.nome}"))
     return sorted(alertas, key=lambda a: a["data"])
+
+
+def ipva_em_aberto(limite):
+    """Parcelas de IPVA sem pagamento vencendo até `limite` (carros não vendidos)."""
+    return PagamentoIpva.objects.filter(vencimento__lte=limite, pago_em__isnull=True).exclude(
+        veiculo__status=Veiculo.Status.VENDIDO
+    )
+
+
+def sem_ipva_do_ano(ano, veiculos=None):
+    """Carros não vendidos com IPVA de anos anteriores e nenhuma linha do `ano`.
+
+    É o aviso da virada do ano: sem ele, o IPVA novo podia nunca ser lançado e
+    nenhum alerta aparecia (o do ano anterior já estava pago).
+    """
+    veiculos = veiculos if veiculos is not None else Veiculo.objects.all()
+    return (
+        veiculos.exclude(status=Veiculo.Status.VENDIDO)
+        .filter(pagamentos_ipva__ano__lt=ano)
+        .exclude(pagamentos_ipva__ano=ano)
+        .distinct()
+        .order_by("placa")
+    )
 
 
 def _dias_texto(data, hoje):
@@ -141,14 +168,30 @@ def pendencias_do_veiculo(veiculo, hoje=None):
             )
 
     url_editar = reverse("frota:veiculo_editar", args=[veiculo.pk])
-    if veiculo.ipva_vencimento and not veiculo.ipva_pago_em and veiculo.ipva_vencimento <= limite:
+    url_ipva = reverse("frota:ipva", args=[veiculo.pk])
+    # uma consulta só (ou nenhuma, se a tela já fez prefetch de pagamentos_ipva)
+    ipvas = list(veiculo.pagamentos_ipva.all())
+    em_aberto = sorted(
+        (p for p in ipvas if p.vencimento and not p.pago_em and p.vencimento <= limite),
+        key=lambda p: p.vencimento,
+    )
+    for parcela in em_aberto:
         adicionar(
-            "IPVA" + (f" {veiculo.ipva_ano}" if veiculo.ipva_ano else "") + " em aberto",
-            _dias_texto(veiculo.ipva_vencimento, hoje)
-            + (f" — {brl(veiculo.ipva_valor)}" if veiculo.ipva_valor else ""),
-            url_editar,
+            f"{parcela.rotulo} em aberto",
+            _dias_texto(parcela.vencimento, hoje)
+            + (f" — {brl(parcela.valor)}" if parcela.valor else ""),
+            url_ipva,
             "Marcar como pago",
-            veiculo.ipva_vencimento < hoje,
+            parcela.vencimento < hoje,
+        )
+    anos = {p.ano for p in ipvas}
+    if anos and min(anos) < hoje.year and hoje.year not in anos:  # mesma regra de sem_ipva_do_ano
+        adicionar(
+            f"IPVA {hoje.year} ainda não cadastrado",
+            "lance o valor e o vencimento do IPVA deste ano",
+            url_ipva,
+            "Lançar o IPVA",
+            False,
         )
     if veiculo.licenciamento_vencimento and veiculo.licenciamento_vencimento <= limite:
         adicionar(

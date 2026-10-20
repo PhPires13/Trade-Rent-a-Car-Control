@@ -8,7 +8,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 
-from apps.frota.models import Veiculo
+from apps.frota.models import PagamentoIpva, Veiculo
 from apps.frota.views import VeiculoForm
 from apps.relatorios import services
 
@@ -24,7 +24,8 @@ def veiculo(db):
     return Veiculo.objects.create(placa="QXQ6C10", marca_modelo="Gol")
 
 
-def test_form_do_veiculo_aceita_foto_e_ipva(db):
+def test_form_do_veiculo_aceita_foto(db):
+    # o IPVA saiu do cadastro do carro: agora tem tela própria, ano a ano (decisão D06)
     form = VeiculoForm(
         {
             "placa": "RNB9J66",
@@ -32,16 +33,12 @@ def test_form_do_veiculo_aceita_foto_e_ipva(db):
             "uso": Veiculo.Uso.LOCACAO,
             "km_atual": 0,
             "chave_reserva": Veiculo.ChaveReserva.DUVIDA,
-            "ipva_ano": 2026,
-            "ipva_valor": "1234.56",
-            "ipva_vencimento": "2026-03-31",
         },
         {"foto": foto()},
     )
     assert form.is_valid(), form.errors
     salvo = form.save()
     assert salvo.foto.name.startswith("veiculos/")
-    assert salvo.ipva_valor == Decimal("1234.56")
 
 
 def test_foto_aparece_no_card_do_hub(usuario_logado, veiculo, settings, tmp_path):
@@ -72,15 +69,14 @@ def test_midia_logado_serve_o_arquivo(usuario_logado, veiculo, settings, tmp_pat
 def test_ipva_em_aberto_gera_alerta_de_vigencia(veiculo, db):
     from apps.frota.alertas import vigencias_a_vencer
 
-    veiculo.ipva_ano = 2026
-    veiculo.ipva_valor = Decimal("1200.00")
-    veiculo.ipva_vencimento = date(2026, 7, 25)
-    veiculo.save()
+    ipva = PagamentoIpva.objects.create(
+        veiculo=veiculo, ano=2026, valor=Decimal("1200.00"), vencimento=date(2026, 7, 25)
+    )
     alertas = vigencias_a_vencer(hoje=date(2026, 7, 20))
-    assert any("IPVA do QXQ6C10" in a["descricao"] for a in alertas)
+    assert any("IPVA 2026 do QXQ6C10" in a["descricao"] for a in alertas)
     # pago não alerta mais
-    veiculo.ipva_pago_em = date(2026, 7, 21)
-    veiculo.save()
+    ipva.pago_em = date(2026, 7, 21)
+    ipva.save()
     alertas = vigencias_a_vencer(hoje=date(2026, 7, 22))
     assert not any("IPVA" in a["descricao"] for a in alertas)
 
@@ -95,9 +91,9 @@ def test_licenciamento_vencendo_gera_alerta(veiculo, db):
 
 
 def test_ipva_pago_entra_na_despesa_do_mes(veiculo, db):
-    veiculo.ipva_valor = Decimal("1200.00")
-    veiculo.ipva_pago_em = date(2026, 7, 10)
-    veiculo.save()
+    PagamentoIpva.objects.create(
+        veiculo=veiculo, ano=2026, valor=Decimal("1200.00"), pago_em=date(2026, 7, 10)
+    )
     despesas = services.despesas_do_mes(2026, 7)
     assert despesas["total_ipva"] == Decimal("1200.00")
     assert despesas["total_geral"] == Decimal("1200.00")

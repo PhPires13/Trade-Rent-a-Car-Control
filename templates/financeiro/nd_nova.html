@@ -84,7 +84,7 @@
     <template x-for="(item, i) in itens" x-bind:key="i">
       <div class="mb-2 flex gap-2">
         <input type="text" name="item_descricao" placeholder="descrição (ex.: multa avanço de sinal 12/04)"
-               x-model="item.d" class="flex-1">
+               x-model="item.d" class="flex-1" maxlength="200" aria-label="Descrição do item">
         <input type="text" name="item_valor" placeholder="R$ ex.: 150,00" x-model="item.v" class="w-28" aria-label="Valor do item">
         <button type="button" class="px-1 text-red-600" x-on:click="itens.splice(i, 1)" x-show="itens.length > 1"
                 title="Remover este item" aria-label="Remover este item">✕</button>

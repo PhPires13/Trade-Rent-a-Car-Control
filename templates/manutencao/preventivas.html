@@ -84,7 +84,7 @@
         </td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">A cada </span>{{ p.intervalo_km|intcomma }} km</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Última: </span>
-          {% if p.ultima %}{{ p.ultima.km|intcomma }} km em {{ p.ultima.data|date:"d/m/Y" }}{% else %}—{% endif %}
+          {% if p.ultima %}{{ p.ultima.km|intcomma }} km em {{ p.ultima.data|date:"d/m/Y" }}{% elif p.km_proximo %}<span class="text-gray-500" title="Nenhuma troca registrada: o primeiro ciclo conta do KM da compra">sem registro (conta da compra, {{ veiculo.km_compra|milhar }} km)</span>{% else %}—{% endif %}
         </td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Próxima com: </span>{% if p.km_proximo %}{{ p.km_proximo|intcomma }} km{% else %}—{% endif %}</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Faltam: </span>
@@ -98,9 +98,9 @@
         <td class="hidden sm:table-cell sm:px-3 sm:py-2">{% include "manutencao/_status_preventiva.html" %}</td>
         <td class="block pt-2 sm:table-cell sm:px-3 sm:py-2 sm:text-right">
           {% if p.status != Status.OK %}
-          <a href="{% url 'manutencao:registrar' veiculo.pk %}?item={{ p.item.pk }}{% if p.status == Status.SEM_REGISTRO %}&ultima=1{% endif %}&volta={{ request.get_full_path|urlencode }}%23veiculo-{{ veiculo.pk }}"
+          <a href="{% url 'manutencao:registrar' veiculo.pk %}?item={{ p.item.pk }}{% if p.sem_registro %}&ultima=1{% endif %}&volta={{ request.get_full_path|urlencode }}%23veiculo-{{ veiculo.pk }}"
              class="block whitespace-nowrap rounded border border-gray-300 px-3 py-2 text-center text-sm font-semibold hover:bg-gray-50 sm:inline-block sm:py-1 sm:text-xs">
-            {% if p.status == Status.SEM_REGISTRO %}Informar última troca{% else %}Registrar feita{% endif %}</a>
+            {% if p.sem_registro %}Informar última troca{% else %}Registrar feita{% endif %}</a>
           {% endif %}
         </td>
       </tr>
@@ -123,7 +123,7 @@
 
 {% if not ver_todas %}{% if total_em_dia or total_sem_registro %}
 <p class="mt-2 text-sm text-gray-500">
-  Fora desta lista: {{ total_em_dia }} item{{ total_em_dia|pluralize:"ns" }} em dia{% if total_sem_registro %} e
+  Fora desta lista: {{ total_em_dia }} ite{{ total_em_dia|pluralize:"m,ns" }} em dia{% if total_sem_registro %} e
   <strong>{{ total_sem_registro }} nunca registrado{{ total_sem_registro|pluralize }}</strong> (informe a última troca para o sistema começar a avisar){% endif %}.
   <a href="{% url 'manutencao:preventivas' %}?ver=todas" class="font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">Ver todas</a>
 </p>

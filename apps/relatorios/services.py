@@ -13,11 +13,22 @@ from apps.financeiro.models import (
     MovimentacaoCaucao,
 )
 from apps.financeiro.services import resumo_fiscal
-from apps.frota.desmobilizacao import ranking_da_frota
+from apps.frota.desmobilizacao import (
+    ipvas_pagos,
+    manutencoes_que_sao_despesa,
+    multas_que_sao_despesa,
+    ranking_da_frota,
+)
 from apps.frota.models import Veiculo
-from apps.manutencao.models import Manutencao
-from apps.multas.models import Multa
 from apps.sinistros.models import AuxilioMotorista, Sinistro
+
+# Relatório da contabilidade só com carros de locação: os carros pessoais dos
+# donos ("Fora de locação") ficam no acompanhamento de cada carro (ficha).
+LOCACAO = Veiculo.Uso.LOCACAO
+
+
+def _veiculos_da_locadora():
+    return Veiculo.objects.filter(uso=LOCACAO)
 
 
 def receitas_do_mes(ano, mes):
@@ -27,8 +38,9 @@ def receitas_do_mes(ano, mes):
         status=AuxilioMotorista.Status.RECEBIDO,
         data_recebimento__year=ano,
         data_recebimento__month=mes,
+        sinistro__veiculo__uso=LOCACAO,
     ).select_related("sinistro__veiculo")
-    vendas = Veiculo.objects.filter(data_venda__year=ano, data_venda__month=mes)
+    vendas = _veiculos_da_locadora().filter(data_venda__year=ano, data_venda__month=mes)
     total_auxilios = sum((a.valor or ZERO for a in auxilios), ZERO)
     total_vendas = sum((v.valor_venda or ZERO for v in vendas), ZERO)
     return {
@@ -63,7 +75,8 @@ def resumo_do_mes(receitas, despesas):
 def despesas_do_mes(ano, mes):
     """Despesas do mês por origem — pedido da Luciana para a contabilidade."""
     manutencoes = (
-        Manutencao.objects.filter(data__year=ano, data__month=mes, custo_real__isnull=False)
+        manutencoes_que_sao_despesa()
+        .filter(data__year=ano, data__month=mes, veiculo__uso=LOCACAO)
         .select_related("veiculo", "oficina")
         .order_by("data")
     )
@@ -80,32 +93,35 @@ def despesas_do_mes(ano, mes):
     )
     total_protecao = sum((v.mensalidade_protecao for v in frota_protegida), ZERO)
     franquias = Sinistro.objects.filter(
-        data_evento__year=ano, data_evento__month=mes, franquia_valor__isnull=False
+        data_evento__year=ano,
+        data_evento__month=mes,
+        franquia_valor__isnull=False,
+        veiculo__uso=LOCACAO,
     ).select_related("veiculo")
     total_franquias = sum((s.franquia_valor for s in franquias), ZERO)
-    vendas = Veiculo.objects.filter(
+    vendas = _veiculos_da_locadora().filter(
         data_venda__year=ano, data_venda__month=mes, custos_venda__isnull=False
     )
     total_custos_venda = sum((v.custos_venda for v in vendas), ZERO)
-    # IPVA entra como despesa no mês do pagamento (decisão nº 21)
-    ipvas = Veiculo.objects.filter(
-        ipva_pago_em__year=ano, ipva_pago_em__month=mes, ipva_valor__isnull=False
-    ).order_by("placa")
-    total_ipva = sum((v.ipva_valor for v in ipvas), ZERO)
+    # IPVA entra como despesa no mês do pagamento de cada parcela (decisão nº 21)
+    ipvas = (
+        ipvas_pagos()
+        .filter(pago_em__year=ano, pago_em__month=mes, veiculo__uso=LOCACAO)
+        .select_related("veiculo")
+        .order_by("veiculo__placa", "ano", "parcela")
+    )
+    total_ipva = sum((p.valor for p in ipvas), ZERO)
     # multa absorvida pela empresa não gera cobrança — é despesa do mês (docs.md §5),
-    # pela data da infração, como a ficha do veículo já conta (desmobilização)
+    # pela data da infração, como a ficha do veículo já conta (desmobilização);
+    # multa anulada (advertência/cancelada/não exigível) não é despesa
     multas_empresa = (
-        Multa.objects.filter(
-            responsavel=Multa.Responsavel.EMPRESA,
-            data_infracao__year=ano,
-            data_infracao__month=mes,
-            valor__isnull=False,
-        )
+        multas_que_sao_despesa()
+        .filter(data_infracao__year=ano, data_infracao__month=mes, veiculo__uso=LOCACAO)
         .select_related("veiculo")
         .order_by("data_infracao")
     )
     total_multas_empresa = sum((m.valor for m in multas_empresa), ZERO)
-    compras = Veiculo.objects.filter(
+    compras = _veiculos_da_locadora().filter(
         data_aquisicao__year=ano, data_aquisicao__month=mes, custos_entrada__isnull=False
     )
     total_custos_compra = sum((v.custos_entrada for v in compras), ZERO)
@@ -179,47 +195,51 @@ def serie_mensal(ano, mes, quantidade=6):
     )
     auxilios = _somas_por_mes(
         AuxilioMotorista.objects.filter(
-            status=AuxilioMotorista.Status.RECEBIDO, data_recebimento__range=(inicio, fim)
+            status=AuxilioMotorista.Status.RECEBIDO,
+            data_recebimento__range=(inicio, fim),
+            sinistro__veiculo__uso=LOCACAO,
         ),
         "data_recebimento",
         "valor",
     )
     vendas = _somas_por_mes(
-        Veiculo.objects.filter(data_venda__range=(inicio, fim)), "data_venda", "valor_venda"
+        _veiculos_da_locadora().filter(data_venda__range=(inicio, fim)),
+        "data_venda",
+        "valor_venda",
     )
     manutencoes = _somas_por_mes(
-        Manutencao.objects.filter(data__range=(inicio, fim), custo_real__isnull=False),
+        manutencoes_que_sao_despesa().filter(data__range=(inicio, fim), veiculo__uso=LOCACAO),
         "data",
         "custo_real",
     )
     franquias = _somas_por_mes(
-        Sinistro.objects.filter(data_evento__range=(inicio, fim), franquia_valor__isnull=False),
+        Sinistro.objects.filter(
+            data_evento__range=(inicio, fim), franquia_valor__isnull=False, veiculo__uso=LOCACAO
+        ),
         "data_evento",
         "franquia_valor",
     )
     custos_venda = _somas_por_mes(
-        Veiculo.objects.filter(data_venda__range=(inicio, fim), custos_venda__isnull=False),
+        _veiculos_da_locadora().filter(data_venda__range=(inicio, fim), custos_venda__isnull=False),
         "data_venda",
         "custos_venda",
     )
     multas_empresa = _somas_por_mes(
-        Multa.objects.filter(
-            responsavel=Multa.Responsavel.EMPRESA,
-            data_infracao__range=(inicio, fim),
-            valor__isnull=False,
-        ),
+        multas_que_sao_despesa().filter(data_infracao__range=(inicio, fim), veiculo__uso=LOCACAO),
         "data_infracao",
         "valor",
     )
     custos_compra = _somas_por_mes(
-        Veiculo.objects.filter(data_aquisicao__range=(inicio, fim), custos_entrada__isnull=False),
+        _veiculos_da_locadora().filter(
+            data_aquisicao__range=(inicio, fim), custos_entrada__isnull=False
+        ),
         "data_aquisicao",
         "custos_entrada",
     )
     ipvas = _somas_por_mes(
-        Veiculo.objects.filter(ipva_pago_em__range=(inicio, fim), ipva_valor__isnull=False),
-        "ipva_pago_em",
-        "ipva_valor",
+        ipvas_pagos().filter(pago_em__range=(inicio, fim), veiculo__uso=LOCACAO),
+        "pago_em",
+        "valor",
     )
     # candidatos à proteção uma vez; o recorte por mês (comprado até o fim dele,
     # não vendido antes dele) é o mesmo de despesas_do_mes, aplicado em memória

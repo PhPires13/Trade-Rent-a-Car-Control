@@ -7,7 +7,7 @@ import pytest
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.frota.alertas import pendencias_do_veiculo
-from apps.frota.models import Veiculo
+from apps.frota.models import PagamentoIpva, Veiculo
 from apps.km.models import RegistroKm
 from apps.manutencao.models import ItemPreventiva, Manutencao
 from apps.multas.models import Multa
@@ -72,9 +72,9 @@ def test_preventiva_vencida_vem_primeiro_e_proxima_depois(veiculo):
 
 def test_ipva_e_licenciamento_dentro_de_30_dias(veiculo):
     _km_do_mes(veiculo)
-    veiculo.ipva_ano = 2026
-    veiculo.ipva_valor = Decimal("1480.00")
-    veiculo.ipva_vencimento = HOJE + timedelta(days=10)
+    ipva = PagamentoIpva.objects.create(
+        veiculo=veiculo, ano=2026, valor=Decimal("1480.00"), vencimento=HOJE + timedelta(days=10)
+    )
     veiculo.licenciamento_vencimento = HOJE - timedelta(days=1)
     veiculo.save()
     pendencias = {p["texto"]: p for p in pendencias_do_veiculo(veiculo, hoje=HOJE)}
@@ -83,7 +83,8 @@ def test_ipva_e_licenciamento_dentro_de_30_dias(veiculo):
     assert "R$ 1.480,00" in pendencias["IPVA 2026 em aberto"]["detalhe"]
     assert pendencias["Licenciamento"]["grave"] is True
 
-    veiculo.ipva_pago_em = HOJE
+    ipva.pago_em = HOJE
+    ipva.save()
     veiculo.licenciamento_vencimento = HOJE + timedelta(days=60)
     veiculo.save()
     assert pendencias_do_veiculo(veiculo, hoje=HOJE) == []

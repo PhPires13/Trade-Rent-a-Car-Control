@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -12,32 +12,50 @@ from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 
 from .correcao import apagar_leitura, corrigir_leitura, suspeita_do_km
-from .excedente import gerar_cobranca_excedente
+from .excedente import gerar_cobrancas_excedente
 from .forms import CorrecaoLeituraForm, data_nao_futura, km_digitado
-from .models import RegistroKm, primeiro_dia_do_mes, veiculos_com_leitura_pendente
+from .models import (
+    RegistroKm,
+    leitura_cabe_no_mes,
+    mes_da_leitura,
+    mes_padrao_da_lista,
+    primeiro_dia_do_mes,
+    veiculos_com_leitura_pendente,
+)
+
+#: Anos aceitos no ?mes= — fora disso é endereço torto (9999-12 dava erro 500).
+ANO_MINIMO = 2000
 
 
-def _mes_do_valor(valor):
-    """Converte "AAAA-MM" em 1º do mês; None quando vier vazio ou torto."""
+def _mes_do_valor(valor, hoje=None):
+    """Converte "AAAA-MM" em 1º do mês; None quando vier vazio, torto ou com
+    ano fora de uma faixa razoável (de 2000 ao ano que vem)."""
     try:
         ano, mes = (valor or "").split("-")
-        return date(int(ano), int(mes), 1)
+        ano = int(ano)
+        if not ANO_MINIMO <= ano <= (hoje or date.today()).year + 1:
+            return None
+        return date(ano, int(mes), 1)
     except (ValueError, TypeError):
         return None
 
 
 def _mes_da_query(request):
-    return _mes_do_valor(request.GET.get("mes")) or primeiro_dia_do_mes(date.today())
+    hoje = date.today()
+    return _mes_do_valor(request.GET.get("mes"), hoje) or mes_padrao_da_lista(hoje)
 
 
 def _data_sugerida(mes, hoje):
     """Data que o formulário de registro propõe para o mês que está na tela.
 
-    No mês corrente é hoje; num mês já fechado é o último dia dele — senão a
-    leitura cai no mês corrente e a pendência do mês visto continua lá.
+    No mês corrente (ou num mês futuro) é hoje. No mês anterior, durante os
+    primeiros dias, também é hoje: é a leitura de fechamento dele (D21). Num
+    mês já fechado fora disso não sugere nada (D19): a tela pede o KM anotado
+    naquela data — o painel de hoje já tem o km do mês atual somado.
     """
-    ultimo_dia = primeiro_dia_do_mes(mes + timedelta(days=32)) - timedelta(days=1)
-    return min(hoje, ultimo_dia)
+    if mes >= primeiro_dia_do_mes(hoje) or leitura_cabe_no_mes(hoje, mes):
+        return hoje
+    return None
 
 
 def _volta_para_lista(mes):
@@ -120,7 +138,13 @@ def _pendentes_anotados(mes, veiculos=None):
 def _contexto_da_linha(mes):
     """O que cada linha de pendente precisa além do próprio veículo."""
     hoje = date.today()
-    return {"mes": mes, "data_sugerida": _data_sugerida(mes, hoje), "hoje": hoje}
+    return {
+        "mes": mes,
+        "data_sugerida": _data_sugerida(mes, hoje),
+        "hoje": hoje,
+        # mês anterior nos primeiros dias: a leitura de hoje fecha ele (D21)
+        "fechamento": mes < primeiro_dia_do_mes(hoje) and leitura_cabe_no_mes(hoje, mes),
+    }
 
 
 def lista_mensal(request):
@@ -135,6 +159,7 @@ def _pagina_da_lista(request, mes, estados=None):
     registros = list(
         RegistroKm.objects.filter(mes_referencia=mes)
         .select_related("veiculo", "cobranca_excedente")
+        .prefetch_related("acertos_excedente__cobranca")
         .order_by("veiculo__placa")
     )
     clientes = _clientes_das_leituras(registros)
@@ -206,7 +231,8 @@ def registrar(request, veiculo_id):
         mes_da_tela = mes_da_tela or primeiro_dia_do_mes(data_leitura)
         registro = RegistroKm(
             veiculo=veiculo,
-            mes_referencia=primeiro_dia_do_mes(data_leitura),
+            # leitura de fechamento no dia 1º vale para o mês da tela (D21)
+            mes_referencia=mes_da_leitura(data_leitura, mes_da_tela),
             data_leitura=data_nao_futura(data_leitura),
             km=km_digitado(request.POST["km"]),
             observacoes=estado["observacoes"],
@@ -251,8 +277,7 @@ def registrar(request, veiculo_id):
     if registro.km_utilizado is not None:
         sucesso += f" (rodou {milhar(registro.km_utilizado)} km desde a leitura anterior)"
     avisos = [_aviso_reencadeamento(registro)]
-    cobranca = gerar_cobranca_excedente(registro)
-    if cobranca:
+    for cobranca in gerar_cobrancas_excedente(registro):
         avisos.append(
             f"Franquia estourada — cobrança de excedente de {brl(cobranca.valor)} "
             f"gerada para {cobranca.cliente.nome} (cancele no Financeiro se não for cobrar)."

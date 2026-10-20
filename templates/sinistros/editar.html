@@ -12,10 +12,54 @@
 
 {% include "sinistros/_form_blocos.html" with rotulo_botao="Salvar alterações" %}
 
+{# Franquia paga pelo motorista: vira cobrança no financeiro (formulário à parte). #}
+{% if sinistro.responsavel_custo == "cliente" and sinistro.franquia_valor %}
+<section class="mt-6 max-w-2xl rounded-lg bg-white p-4 shadow sm:p-6">
+  <h2 class="mb-1 text-lg font-bold">Franquia paga pelo motorista</h2>
+  {% if sinistro.cobranca_franquia and sinistro.cobranca_franquia.status != "cancelada" %}
+    <p class="rounded bg-green-100 px-3 py-2 text-sm text-green-800">
+      Cobrança criada: {{ sinistro.cobranca_franquia.valor|brl }} para {{ sinistro.cobranca_franquia.cliente.nome }},
+      vence em {{ sinistro.cobranca_franquia.vencimento|date:"d/m/Y" }} ({{ sinistro.cobranca_franquia.get_status_display|lower }}).
+    </p>
+  {% elif sinistro.cliente %}
+    {% if sinistro.cobranca_franquia %}<p class="mb-2 rounded bg-yellow-50 px-3 py-2 text-sm text-yellow-900">A cobrança anterior da franquia foi cancelada no financeiro. Se ainda for para cobrar, use o botão de novo.</p>{% endif %}
+    <p class="mb-3 text-sm text-gray-500">A franquia de {{ sinistro.franquia_valor|brl }} é do motorista. O botão cria a cobrança para {{ sinistro.cliente.nome }}, vencendo no próximo dia de pagamento.</p>
+    <form method="post" action="{% url 'sinistros:cobrar_franquia' sinistro.pk %}"
+          onsubmit="return confirm('Cobrar {{ sinistro.franquia_valor|brl|escapejs }} de {{ sinistro.cliente.nome|escapejs }}?')">
+      {% csrf_token %}
+      <input type="hidden" name="volta" value="{{ request.get_full_path }}">
+      <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Cobrar do cliente</button>
+    </form>
+  {% else %}
+    <p class="text-sm text-gray-500">Nenhum motorista estava com o carro na data. Escolha o motorista acima para poder cobrar a franquia.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{# Roubo: o carro fica Inativo até voltar. #}
+{% if sinistro.tipo == "roubo" %}
+<section class="mt-6 max-w-2xl rounded-lg bg-white p-4 shadow sm:p-6">
+  <h2 class="mb-1 text-lg font-bold">Carro roubado</h2>
+  {% if sinistro.data_recuperacao %}
+    <p class="rounded bg-green-100 px-3 py-2 text-sm text-green-800">Carro recuperado em {{ sinistro.data_recuperacao|date:"d/m/Y" }}.</p>
+  {% elif sinistro.veiculo.status == "inativo" %}
+    <p class="mb-3 text-sm text-gray-500">O carro está Inativo (não aparece para alugar) até ser recuperado.</p>
+    <form method="post" action="{% url 'sinistros:carro_recuperado' sinistro.pk %}"
+          onsubmit="return confirm('Confirmar que {{ sinistro.veiculo.placa|escapejs }} foi recuperado? Ele volta a ficar Disponível.')">
+      {% csrf_token %}
+      <input type="hidden" name="volta" value="{{ request.get_full_path }}">
+      <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Carro recuperado</button>
+    </form>
+  {% else %}
+    <p class="text-sm text-gray-500">Situação do carro agora: {{ sinistro.veiculo.get_status_display }}.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {# Auxílio motorista: formulários à parte (não dá para colocar um form dentro do outro). #}
 <section class="mt-6 max-w-2xl rounded-lg bg-white p-4 shadow sm:p-6">
   <h2 class="mb-1 text-lg font-bold">Auxílio motorista</h2>
-  <p class="mb-3 text-sm text-gray-500">A proteção paga um auxílio (normalmente 1 salário mínimo) quando o conserto de colisão deixa o carro mais de 7 dias parado.
+  <p class="mb-3 text-sm text-gray-500">A proteção paga um auxílio (normalmente 1 salário mínimo) quando o conserto de colisão, com a proteção acionada, deixa o carro mais de 7 dias parado (somando todas as idas à oficina).
     {% if sinistro.dias_parado %}Este carro está com <strong>{{ sinistro.dias_parado }} dia{{ sinistro.dias_parado|pluralize }} parado</strong>.{% endif %}
   </p>
   {% for auxilio in sinistro.auxilios.all %}
@@ -34,7 +78,9 @@
       </form>
     {% endif %}
   {% empty %}
-    {% if sinistro.tipo == "colisao" %}
+    {% if sinistro.tipo == "colisao" and not sinistro.acionou_protecao %}
+    <p class="text-sm text-gray-500">Só vale com a proteção acionada (evento aberto na Auto Truck).</p>
+    {% elif sinistro.tipo == "colisao" %}
     <form method="post" action="{% url 'sinistros:solicitar_auxilio' sinistro.pk %}" class="flex flex-col gap-2 sm:flex-row sm:items-center">
       {% csrf_token %}
       <input type="hidden" name="volta" value="{{ request.get_full_path }}">

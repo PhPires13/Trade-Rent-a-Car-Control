@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Q
 
 from apps.financeiro.models import Cobranca, ItemNotaDebito, NotaDebito
+from apps.financeiro.services import proximo_dia_pagamento
 from apps.formatos import brl
 
 from .models import Multa
@@ -21,10 +22,12 @@ def registrar_nic(multa, data_infracao=None, valor=None):
         raise ValidationError("Esta multa já tem NIC registrada.")
     multa.fici_status = Multa.Fici.PRAZO_PERDIDO
     multa.save(update_fields=["fici_status"])
-    return Multa.objects.create(
+    nic = Multa.objects.create(
         veiculo=multa.veiculo,
         cliente=multa.cliente,
-        data_infracao=data_infracao or multa.data_infracao,
+        # a NIC é uma multa nova: entra na data em que foi registrada, não na da
+        # infração original — o mês dela pode já ter ido para a contabilidade
+        data_infracao=data_infracao or date.today(),
         orgao=multa.orgao,
         descricao="Multa por não indicação de condutor (NIC)",
         valor=valor,
@@ -33,6 +36,12 @@ def registrar_nic(multa, data_infracao=None, valor=None):
         fici_status=Multa.Fici.NAO_SE_APLICA,
         multa_origem_nic=multa,
     )
+    if multa.cliente_id is None and nic.cliente_id is not None:
+        # o save() buscou quem está com o carro na data da NIC (hoje) — outro
+        # motorista, sem relação com a infração original: a NIC fica sem cliente
+        Multa.objects.filter(pk=nic.pk).update(cliente=None)
+        nic.cliente = None
+    return nic
 
 
 @transaction.atomic
@@ -46,6 +55,10 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
             raise ValidationError(f"{multa} não é do cliente {cliente.nome}.")
         if multa.repasse != "A cobrar":
             raise ValidationError(f"{multa} não está 'a cobrar' (situação: {multa.repasse}).")
+    if vencimento is None:
+        # mesma regra da ND do financeiro: vence no próximo dia de pagamento do
+        # cliente — nunca no dia da emissão, senão amanhã ele já fica inadimplente
+        vencimento = proximo_dia_pagamento(cliente, data_emissao)
     nd = NotaDebito(cliente=cliente, data_emissao=data_emissao, vencimento=vencimento, numero=None)
     nd.save()
     for multa in multas:
@@ -61,20 +74,26 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
         origem=Cobranca.Origem.NOTA_DEBITO,
         descricao=f"Nota de débito ND {nd.numero:03d} (multas)",
         valor=nd.total,
-        vencimento=vencimento or data_emissao,
+        vencimento=vencimento,
         nota_debito=nd,
     )
     return nd
 
 
 def alertas_fici(hoje=None):
-    """Multas com FICI pendente vencendo em até 7 dias ou já vencido."""
+    """Multas com FICI pendente vencendo em até 7 dias, já vencido ou sem prazo.
+
+    Sem prazo informado também entra (no topo): é o caso mais arriscado — o
+    prazo real pode passar sem ninguém ver e virar NIC. O painel mostra
+    "prazo não informado" nessas.
+    """
     hoje = hoje or date.today()
     limite = hoje + timedelta(days=DIAS_ALERTA_FICI)
     return (
-        Multa.objects.filter(fici_status=Multa.Fici.PENDENTE, fici_prazo__lte=limite)
+        Multa.objects.filter(fici_status=Multa.Fici.PENDENTE)
+        .filter(Q(fici_prazo__lte=limite) | Q(fici_prazo__isnull=True))
         .select_related("veiculo", "cliente")
-        .order_by("fici_prazo")
+        .order_by(F("fici_prazo").asc(nulls_first=True), "-data_infracao")
     )
 
 
@@ -93,16 +112,19 @@ def _filtros_tarefa():
     """Q de cada tarefa — espera o queryset anotado por `com_tarefas`.
 
     "Cobrar do cliente" espelha `Multa.repasse == "A cobrar"` no banco: sem ND,
-    responsável cliente/condutor, com valor e resultado que não anulou a multa.
+    responsável cliente/condutor, com valor, resultado que não anulou a multa e
+    que não foi paga pelo próprio cliente direto ao órgão.
     "Concluídas" é o que não está em nenhuma das outras três.
     """
     anulada = Q(resultado__in=Multa.RESULTADOS_ANULADORES)
     indicar = Q(fici_status=Multa.Fici.PENDENTE) & ~anulada
     pagar = Q(pagamento=Multa.Pagamento.PENDENTE, valor__gt=0) & ~anulada
+    paga_pelo_cliente = Q(pagamento=Multa.Pagamento.PAGO, pago_por__iexact=Multa.PAGO_POR_CLIENTE)
     cobrar = (
         Q(_tem_nd=False, valor__gt=0)
         & Q(responsavel__in=[Multa.Responsavel.CLIENTE, Multa.Responsavel.CONDUTOR])
         & ~anulada
+        & ~paga_pelo_cliente
     )
     return {
         "indicar": indicar,

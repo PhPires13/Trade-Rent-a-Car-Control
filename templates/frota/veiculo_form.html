@@ -18,8 +18,14 @@
       {% for field in campos %}
       <div {% if field.name == "observacoes" or field.name == "documento" %}class="sm:col-span-2"{% endif %}>
         <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
-        {% if field.name == "foto" and veiculo and veiculo.foto %}
-          <img src="{{ veiculo.foto.url }}" alt="{{ veiculo.placa }}" class="mb-2 h-20 w-32 rounded object-cover">
+        {% if field.name == "foto" or field.name == "documento" %}
+          {# com erro no formulário, o arquivo escolhido não foi gravado: ele não pode ser mostrado #}
+          {# (a imagem sairia quebrada) e o navegador esquece a escolha — avisa para escolher de novo #}
+          {% if field.data %}
+            {% if form.errors %}<p class="mb-2 rounded bg-yellow-50 px-2 py-1 text-xs font-semibold text-yellow-800" role="alert">O arquivo “{{ field.data.name }}” não foi salvo — escolha {% if field.name == "foto" %}a foto{% else %}o documento{% endif %} de novo antes de salvar.</p>{% endif %}
+          {% elif field.name == "foto" and veiculo and veiculo.foto %}
+            <img src="{{ veiculo.foto.url }}" alt="{{ veiculo.placa }}" class="mb-2 h-20 w-32 rounded object-cover">
+          {% endif %}
         {% endif %}
         {{ field }}
         {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}

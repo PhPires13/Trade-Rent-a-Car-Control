@@ -3,6 +3,7 @@
       x-data="{ protecao: {{ form.acionou_protecao.value|yesno:'true,false' }} }">
   {% csrf_token %}
   <input type="hidden" name="volta" value="{{ volta }}">
+  {% if not form.instance.pk %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
   {% include "_erros_form.html" %}
   {% for bloco in form.blocos %}
   <fieldset class="rounded-lg bg-white p-4 shadow sm:p-6 {% if bloco.chave == 'situacao' and form.instance.pk %}border-l-4 border-marca-amarelo{% endif %}">

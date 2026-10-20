@@ -49,6 +49,7 @@
         <tr><td class="py-1.5">Manutenções (custo real)</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_manutencao|brl }}</td></tr>
         <tr><td class="py-1.5">Franquias de eventos</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_franquias|brl }}</td></tr>
         <tr><td class="py-1.5">Multas absorvidas pela empresa</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_multas_empresa|brl }}</td></tr>
+        <tr><td class="py-1.5">IPVA pago (todos os anos)</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_ipva|brl }}</td></tr>
         <tr><td class="py-1.5">Proteção Auto Truck (estimada pela mensalidade)</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_protecao_estimada|brl }}</td></tr>
         <tr class="font-semibold"><td class="py-1.5">Resultado operacional <span class="font-normal text-gray-500">(receitas − despesas)</span></td><td class="py-1.5 text-right">{{ f.resultado_operacional|brl }}</td></tr>
         {% if f.resultado_final is not None %}

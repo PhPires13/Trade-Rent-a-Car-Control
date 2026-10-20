@@ -180,6 +180,16 @@ class Multa(models.Model):
         return f"{self.veiculo.placa} — {rotulo} em {self.data_infracao:%d/%m/%Y}"
 
     def save(self, *args, **kwargs):
+        if (
+            self.pk is None
+            and self.responsavel == self.Responsavel.CLIENTE
+            and self.veiculo_id
+            and self.data_infracao
+            and self.veiculo.data_aquisicao
+            and self.data_infracao < self.veiculo.data_aquisicao
+        ):
+            # infração de antes da compra do carro: é do dono anterior (docs.md §4.9)
+            self.responsavel = self.Responsavel.VENDEDOR
         if self.cliente_id is None and self.veiculo_id and self.data_infracao:
             from apps.alocacoes.services import cliente_vigente
 
@@ -205,8 +215,9 @@ class Multa(models.Model):
                 {
                     "resultado": (
                         f"Esta multa está na ND {item.nota_debito.numero:03d}, que continua "
-                        "sendo cobrada do cliente. Ajuste ou cancele a nota de débito antes "
-                        "de registrar este resultado."
+                        "sendo cobrada do cliente. Antes de registrar este resultado, cancele "
+                        "a ND em Financeiro > Notas de débito (dá para cancelar enquanto não "
+                        "houver pagamento) e, se ainda houver o que cobrar, emita uma ND nova."
                     )
                 }
             )
@@ -241,4 +252,21 @@ class Multa(models.Model):
             return "Não se aplica"
         if self.resultado in self.RESULTADOS_ANULADORES or not self.valor:
             return "Não se aplica"
+        if self.paga_pelo_cliente:
+            # o motorista pagou o boleto direto ao órgão: cobrar de novo seria em dobro
+            return "Não se aplica (pago pelo cliente)"
+        if self.responsavel == self.Responsavel.CLIENTE and self.cliente_id is None:
+            # ninguém estava com o carro na data: não há de quem cobrar — o dono decide
+            # (condutor identificado, empresa absorve ou vendedor anterior)
+            return "Sem cliente: definir responsável"
         return "A cobrar"
+
+    #: valor de `pago_por` gravado pelo botão "Cliente" de "Marcar paga"
+    PAGO_POR_CLIENTE = "Cliente"
+
+    @property
+    def paga_pelo_cliente(self):
+        return (
+            self.pagamento == self.Pagamento.PAGO
+            and self.pago_por.strip().lower() == self.PAGO_POR_CLIENTE.lower()
+        )

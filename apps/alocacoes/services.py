@@ -2,9 +2,9 @@
 
 from django.db.models import Q
 
-from apps.formatos import brl
+from apps.formatos import brl, milhar
 
-from .models import Alocacao, TrocaTemporaria
+from .models import Alocacao, TrocaTemporaria, Vistoria
 
 
 def cliente_vigente(veiculo, data):
@@ -83,6 +83,27 @@ def linha_do_tempo(veiculo):
                 "descricao": f"{troca.alocacao.cliente.nome} ficou com o substituto "
                 f"{troca.veiculo_substituto.placa}"
                 + (f" — {troca.motivo}" if troca.motivo else ""),
+            }
+        )
+    # C27: a vistoria registrada aparece na linha do tempo para onde a tela leva
+    vistorias = Vistoria.objects.filter(
+        Q(veiculo=veiculo) | Q(veiculo__isnull=True, alocacao__veiculo=veiculo)
+    ).select_related("alocacao__cliente")
+    for vistoria in vistorias:
+        detalhes = [vistoria.alocacao.cliente.nome]
+        if vistoria.km:
+            detalhes.append(f"{milhar(vistoria.km)} km")
+        if vistoria.combustivel:
+            detalhes.append(f"combustível {vistoria.get_combustivel_display()}")
+        descricao = " · ".join(detalhes)
+        if vistoria.avarias:
+            descricao += f" — marcas: {vistoria.avarias}"
+        eventos.append(
+            {
+                "data": vistoria.data,
+                "tipo": f"Vistoria ({vistoria.get_tipo_display().lower()})",
+                "descricao": descricao,
+                "url": vistoria.foto.url if vistoria.foto else "",
             }
         )
     for manutencao in veiculo.manutencoes.select_related("item"):

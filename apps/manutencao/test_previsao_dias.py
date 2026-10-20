@@ -38,7 +38,8 @@ def test_previsao_em_dias_usa_a_media_do_proprio_carro(oleo, db):
     leitura(veiculo, date(2026, 6, 30), 53_000)
     leitura(veiculo, date(2026, 7, 30), 56_000)  # 3.000 km em 30 dias → 100 km/dia
     veiculo.refresh_from_db()
-    (p,) = resumo_preventivas(veiculo)
+    # no dia da leitura (depois dela a previsão desconta os dias passados — C05)
+    (p,) = resumo_preventivas(veiculo, hoje=date(2026, 7, 30))
     assert p.faltam_km == 4_000  # próximo aos 60.000, odômetro em 56.000
     assert p.dias_restantes == 40  # 4.000 km ÷ 100 km/dia
 
@@ -52,11 +53,15 @@ def test_carro_intenso_entra_em_alerta_pelos_dias(oleo, db):
     leitura(veiculo, date(2026, 6, 30), 51_400)
     leitura(veiculo, date(2026, 7, 10), 54_400)  # 3.000 km em 10 dias = 300 km/dia
     veiculo.refresh_from_db()
-    (p,) = resumo_preventivas(veiculo)
+    (p,) = resumo_preventivas(veiculo, hoje=date(2026, 7, 10))
     assert p.km_proximo == 60_000
     assert p.faltam_km == 5_600  # margem de km (1.000) nem chega perto
     assert p.dias_restantes == 19  # mas no ritmo de 300 km/dia são ~19 dias
-    assert p.status == StatusPreventiva.OK  # 19 > 14: ainda ok, alerta vem na próxima leitura
+    assert p.status == StatusPreventiva.OK  # 19 > 14: ainda ok no dia da leitura…
+    # …e 6 dias depois, sem nova leitura, a projeção já avisa (C05)
+    (p,) = resumo_preventivas(veiculo, hoje=date(2026, 7, 16))
+    assert p.dias_restantes == 13
+    assert p.status == StatusPreventiva.PROXIMA
 
 
 def test_alerta_antecipado_por_dias_sem_estourar_km(oleo, db):
@@ -67,14 +72,14 @@ def test_alerta_antecipado_por_dias_sem_estourar_km(oleo, db):
     leitura(veiculo, date(2026, 6, 30), 53_000)
     leitura(veiculo, date(2026, 7, 31), 57_000)  # 4.000 km em 31 dias ≈ 129 km/dia
     veiculo.refresh_from_db()
-    (p,) = resumo_preventivas(veiculo)
+    (p,) = resumo_preventivas(veiculo, hoje=date(2026, 7, 31))
     # faltam 3.000 km (bem acima da margem de 1.000), mas ≈ 23 dias — ainda OK…
     assert p.dias_restantes == 23
     assert p.status == StatusPreventiva.OK
     # …roda mais uma semana forte e o alerta chega ANTES da margem de km
     leitura(veiculo, date(2026, 8, 10), 58_400)  # 1.400 km em 10 dias = 140 km/dia
     veiculo.refresh_from_db()
-    (p,) = resumo_preventivas(veiculo)
+    (p,) = resumo_preventivas(veiculo, hoje=date(2026, 8, 10))
     assert p.faltam_km == 1_600  # ainda acima da margem de 1.000 km
     assert p.dias_restantes == 11  # mas menos de 14 dias no ritmo atual
     assert p.status == StatusPreventiva.PROXIMA

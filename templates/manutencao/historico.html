@@ -37,7 +37,7 @@
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Data: </span>{{ m.data|date:"d/m/Y" }}</td>
         <td class="block py-0.5 font-medium sm:table-cell sm:px-3 sm:py-2"><span class="font-normal text-gray-500 sm:hidden">Item: </span>{{ m.item|default:"—" }}</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Tipo: </span>{{ m.get_tipo_display }}{% if m.sinistro %} <span class="text-xs text-red-600">(sinistro)</span>{% endif %}</td>
-        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">KM: </span>{{ m.km|intcomma|default:"—" }}</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">KM: </span>{{ m.km|milhar }}</td>
         <td class="block py-0.5 text-gray-600 sm:table-cell sm:px-3 sm:py-2">{{ m.descricao }}{% if m.oficina %} <span class="text-xs text-gray-600">· {{ m.oficina }}</span>{% endif %}</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Custo real: </span>{% if m.custo_real is not None %}{{ m.custo_real|brl }}{% else %}—{% endif %}</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Pago à oficina: </span>
@@ -58,9 +58,12 @@
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2">
           {% if m.cobranca_repasse_id %}
             <span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Cobrado</span>
+          {% elif m.responsavel == "cliente" and m.valor_cobrado_cliente and not m.cliente_repasse %}
+            <span class="text-xs text-gray-600" title="Ninguém estava com o carro na data">Sem cliente na data — cobrar pelo Financeiro</span>
           {% elif m.responsavel == "cliente" and m.valor_cobrado_cliente %}
+            <span class="block text-xs text-gray-600 sm:whitespace-nowrap">Cliente: <strong>{{ m.cliente_repasse.nome }}</strong></span>
             <form method="post" action="{% url 'manutencao:repassar' m.pk %}"
-                  onsubmit="return confirm('Gerar cobrança de {{ m.valor_cobrado_cliente|brl|escapejs }} para o cliente? Ela entra no Financeiro como conta a receber.')">
+                  onsubmit="return confirm('Gerar cobrança de {{ m.valor_cobrado_cliente|brl|escapejs }} para {{ m.cliente_repasse.nome|escapejs }}? Ela entra no Financeiro como conta a receber e vence no próximo dia de pagamento dele.')">
               {% csrf_token %}
               <button class="mt-1 w-full whitespace-nowrap rounded bg-marca-amarelo px-3 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:mt-0 sm:w-auto sm:px-2 sm:py-1 sm:text-xs"
                       title="Cria a cobrança deste custo para o cliente no Financeiro">Cobrar do cliente</button>

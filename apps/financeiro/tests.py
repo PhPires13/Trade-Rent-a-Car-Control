@@ -217,8 +217,8 @@ def test_aplicar_encargo_cria_cobranca_diversa(alocacao):
     encargo = services.aplicar_encargo(cobranca, Decimal("32.50"), hoje=date(2026, 7, 4))
     assert encargo.origem == Cobranca.Origem.ENCARGO
     assert encargo.classificacao_fiscal == "diverso"  # fora da base do DAS (decisão nº 13)
-    with pytest.raises(ValidationError):  # não duplica
-        services.aplicar_encargo(cobranca, Decimal("10.00"))
+    with pytest.raises(ValidationError):  # não duplica dentro dos 4 dias
+        services.aplicar_encargo(cobranca, Decimal("10.00"), hoje=date(2026, 7, 5))
 
 
 # ---------- recebimento com travas ----------

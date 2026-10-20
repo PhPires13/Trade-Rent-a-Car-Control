@@ -156,7 +156,7 @@
         {% include "relatorios/_exportar.html" with tipo="despesas" %}
       </span>
     </h2>
-    <p class="mb-3 text-xs text-gray-500">Manutenções, franquias, mensalidades da proteção, multas absorvidas e custos de compra/venda.</p>
+    <p class="mb-3 text-xs text-gray-500">Manutenções, franquias, mensalidades da proteção, multas absorvidas, IPVA e custos de compra/venda. Só os carros de locação — os gastos dos carros pessoais (“Fora de locação”) ficam na ficha de cada carro.</p>
     <table class="w-full text-sm">
       <tbody class="divide-y divide-gray-100">
         <tr><td class="px-2 py-1.5">Manutenções (custo real) — {{ despesas.manutencoes|length }} serviço{{ despesas.manutencoes|length|pluralize }}</td><td class="px-2 py-1.5 text-right">{{ despesas.total_manutencao|brl }}</td></tr>

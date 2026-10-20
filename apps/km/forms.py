@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 
 from apps.formatos import milhar
 
-from .models import RegistroKm, primeiro_dia_do_mes
+from .models import DIAS_DE_FECHAMENTO, RegistroKm, leitura_cabe_no_mes
 
 CLASSE_CAMPO = "w-full rounded border border-gray-300 px-3 py-3 text-lg sm:py-2 sm:text-base"
 
@@ -79,10 +79,11 @@ class CorrecaoLeituraForm(forms.ModelForm):
 
     def clean_data_leitura(self):
         data = data_nao_futura(self.cleaned_data["data_leitura"])
-        if primeiro_dia_do_mes(data) != self.instance.mes_referencia:
+        if not leitura_cabe_no_mes(data, self.instance.mes_referencia):
             raise forms.ValidationError(
-                f"A data precisa ficar em {self.instance.mes_referencia:%m/%Y}. Para mudar o "
-                f"mês, apague esta leitura e registre de novo no mês certo."
+                f"A data precisa ficar em {self.instance.mes_referencia:%m/%Y} (ou nos "
+                f"{DIAS_DE_FECHAMENTO} primeiros dias do mês seguinte, para fechar o mês). "
+                f"Para mudar o mês, apague esta leitura e registre de novo no mês certo."
             )
         return data
 

@@ -117,14 +117,20 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# Bloqueio de força bruta no login (django-axes). Trava por usuário, não por IP:
-# atrás do proxy do Railway o IP ou colapsa num só (um bot travaria os donos) ou
-# vem do X-Forwarded-For, que é falsificável. O AxesStandaloneBackend vem primeiro.
+# Bloqueio de força bruta no login (django-axes). Trava pela combinação usuário +
+# IP (decisão D29): um bot que erra a senha de "luciana" trava só a si mesmo, e a
+# Luciana, de outro endereço, continua entrando. Atrás do proxy do Railway o IP
+# real vem do X-Forwarded-For — config.seguranca.ip_do_cliente só confia na
+# entrada acrescentada pelo proxy (PROXIES_CONFIAVEIS), não no que o cliente manda.
+# O AxesStandaloneBackend vem primeiro.
 AUTHENTICATION_BACKENDS = [
     "axes.backends.AxesStandaloneBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
-AXES_LOCKOUT_PARAMETERS = ["username"]
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_CLIENT_IP_CALLABLE = "config.seguranca.ip_do_cliente"
+# Quantos proxies confiáveis ficam na frente do Django: 1 no Railway, 0 rodando local.
+PROXIES_CONFIAVEIS = env.int("PROXIES_CONFIAVEIS", default=0 if DEBUG else 1)
 AXES_FAILURE_LIMIT = 6
 AXES_COOLOFF_TIME = timedelta(minutes=15)  # destrava sozinho, nunca bloqueio permanente
 AXES_RESET_ON_SUCCESS = True
@@ -133,8 +139,6 @@ AXES_COOLOFF_MESSAGE = (
     "Muitas tentativas de senha erradas. Por segurança, o acesso a esta conta ficou "
     "bloqueado por 15 minutos — tente de novo mais tarde."
 )
-# W006 sugere travar também por IP; aqui é decisão contrária deliberada (ver acima).
-SILENCED_SYSTEM_CHECKS = ["axes.W006"]
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "painel"

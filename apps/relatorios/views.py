@@ -143,13 +143,13 @@ def _planilha_despesas(ano, mes):
     ]
     linhas += [
         [
-            v.ipva_pago_em.strftime("%d/%m/%Y"),
-            v.placa,
+            p.pago_em.strftime("%d/%m/%Y"),
+            p.veiculo.placa,
             "IPVA",
-            f"IPVA {v.ipva_ano}" if v.ipva_ano else "IPVA",
-            float(v.ipva_valor),
+            p.rotulo,
+            float(p.valor),
         ]
-        for v in d["ipvas"]
+        for p in d["ipvas"]
     ]
     linhas += [
         [

@@ -1,6 +1,7 @@
 """Cálculo do status das preventivas por veículo (docs.md §4.5)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 
 from apps.frota.models import Veiculo
 from apps.km.models import RegistroKm
@@ -30,6 +31,10 @@ class StatusPreventiva:
     km_proximo: int | None
     faltam_km: int | None
     media_km_dia: float | None = None
+    #: última leitura mensal (km, data): base da projeção do KM de hoje
+    km_leitura: int | None = None
+    data_leitura: date | None = None
+    hoje: date = field(default_factory=date.today)
 
     # Impede o Django template de tentar instanciar a classe ao resolver Status.X
     do_not_call_in_templates = True
@@ -40,13 +45,36 @@ class StatusPreventiva:
     VENCIDA = "vencida"
 
     @property
+    def sem_registro(self):
+        """Nunca houve troca registrada: o 1º ciclo conta do KM da compra (se houver)."""
+        return self.ultima is None
+
+    @property
+    def km_projetado(self):
+        """KM de hoje estimado no ritmo do carro desde a última leitura.
+
+        Entre uma leitura mensal e outra o km_atual fica parado; sem projetar,
+        um carro de 300 km/dia vence sem o aviso antecipado aparecer.
+        """
+        if self.km_proximo is None or self.faltam_km is None:
+            return None
+        base = self.km_proximo - self.faltam_km  # o KM atual do carro
+        if not self.media_km_dia or self.km_leitura is None or self.data_leitura is None:
+            return base
+        dias = max((self.hoje - self.data_leitura).days, 0)
+        return max(base, round(self.km_leitura + self.media_km_dia * dias))
+
+    @property
     def dias_restantes(self):
-        """Previsão em dias no ritmo do próprio carro (última leitura mensal)."""
+        """Previsão em dias no ritmo do próprio carro, descontados os dias desde a leitura."""
         if self.faltam_km is None or not self.media_km_dia:
             return None
         if self.faltam_km <= 0:
             return 0
-        return round(self.faltam_km / self.media_km_dia)
+        faltam_hoje = self.km_proximo - self.km_projetado
+        if faltam_hoje <= 0:
+            return 0
+        return round(faltam_hoje / self.media_km_dia)
 
     @property
     def status(self):
@@ -57,6 +85,8 @@ class StatusPreventiva:
         dias = self.dias_restantes
         if self.faltam_km <= MARGEM_ALERTA_KM or (dias is not None and dias <= MARGEM_ALERTA_DIAS):
             return self.PROXIMA
+        if self.sem_registro:
+            return self.SEM_REGISTRO  # pelo KM da compra ainda falta, mas não há troca confirmada
         return self.OK
 
     @property
@@ -94,28 +124,34 @@ def _ultimas_manutencoes(ids, itens):
 
 
 def _medias_km_dia(ids):
-    """{veiculo_id: km/dia da leitura mensal mais recente} numa query só."""
+    """{veiculo_id: (km/dia, km, data) da leitura mensal mais recente} numa query só."""
     medias = {}
     leituras = RegistroKm.objects.filter(
         veiculo_id__in=ids, dias__isnull=False, km_anterior__isnull=False
     ).order_by("mes_referencia")
-    for veiculo_id, km, km_anterior, dias in leituras.values_list(
-        "veiculo_id", "km", "km_anterior", "dias"
+    for veiculo_id, km, km_anterior, dias, data_leitura in leituras.values_list(
+        "veiculo_id", "km", "km_anterior", "dias", "data_leitura"
     ):
         if dias and km >= km_anterior:
-            medias[veiculo_id] = (km - km_anterior) / dias  # sobrescreve: fica a mais recente
+            # sobrescreve: fica a mais recente
+            medias[veiculo_id] = ((km - km_anterior) / dias, km, data_leitura)
     return medias
 
 
-def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias):
-    """Regra dos intervalos — única fonte da aritmética das preventivas."""
-    media = medias.get(veiculo.pk)
+def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias, hoje=None):
+    """Regra dos intervalos — única fonte da aritmética das preventivas.
+
+    Item nunca registrado: o primeiro ciclo conta do KM da compra; sem ele,
+    fica "Sem registro" (não há como saber quando vence).
+    """
+    media, km_leitura, data_leitura = medias.get(veiculo.pk, (None, None, None))
     resultado = []
     for item in itens:
         intervalo = personalizados.get((veiculo.pk, item.pk)) or item.intervalo_km_padrao
         ultima = ultimas.get((veiculo.pk, item.pk))
-        if ultima:
-            km_proximo = ultima.km + intervalo
+        base = ultima.km if ultima else veiculo.km_compra
+        if base is not None:
+            km_proximo = base + intervalo
             faltam = km_proximo - veiculo.km_atual
         else:
             km_proximo = None
@@ -128,12 +164,15 @@ def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias):
                 km_proximo=km_proximo,
                 faltam_km=faltam,
                 media_km_dia=media,
+                km_leitura=km_leitura,
+                data_leitura=data_leitura,
+                hoje=hoje or date.today(),
             )
         )
     return resultado
 
 
-def resumos_por_veiculo(veiculos):
+def resumos_por_veiculo(veiculos, hoje=None):
     """{veiculo_id: [StatusPreventiva]} em 4 queries fixas, seja qual for a frota."""
     ids = [v.pk for v in veiculos]
     if not ids:
@@ -143,14 +182,14 @@ def resumos_por_veiculo(veiculos):
     ultimas = _ultimas_manutencoes(ids, itens)
     medias = _medias_km_dia(ids)
     return {
-        veiculo.pk: _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias)
+        veiculo.pk: _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias, hoje)
         for veiculo in veiculos
     }
 
 
-def resumo_preventivas(veiculo):
+def resumo_preventivas(veiculo, hoje=None):
     """Status de cada item preventivo do plano para um veículo só."""
-    return resumos_por_veiculo([veiculo])[veiculo.pk]
+    return resumos_por_veiculo([veiculo], hoje)[veiculo.pk]
 
 
 def preventivas_em_alerta():
@@ -163,6 +202,21 @@ def preventivas_em_alerta():
         if criticas:
             alertas.append((veiculo, criticas))
     return alertas
+
+
+def preventivas_sem_registro():
+    """(veiculo, [StatusPreventiva]) dos itens nunca registrados e fora do alerta.
+
+    Pendência para o painel: "informe quando foi feita a última troca".
+    """
+    veiculos = list(frota_acompanhada())
+    resumos = resumos_por_veiculo(veiculos)
+    pendentes = []
+    for veiculo in veiculos:
+        itens = [p for p in resumos[veiculo.pk] if p.status == StatusPreventiva.SEM_REGISTRO]
+        if itens:
+            pendentes.append((veiculo, itens))
+    return pendentes
 
 
 def contagem_alertas_por_veiculo(veiculos):

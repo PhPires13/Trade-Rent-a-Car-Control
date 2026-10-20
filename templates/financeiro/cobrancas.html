@@ -71,20 +71,25 @@
           <form method="post" action="{% url 'financeiro:aplicar_encargo' cobranca.pk %}" class="flex flex-wrap items-center gap-1"
                 onsubmit="return confirm('Cobrar do cliente um encargo por atraso de R$ ' + this.valor.value + '? Isso cria uma nova cobrança, que pode ser cancelada depois.')">
             {% csrf_token %}
+            <input type="hidden" name="voltar" value="{{ voltar }}">
             <span class="w-full text-xs text-gray-500" title="Sugerido: 5% até 4 dias de atraso, 10% acima — ajuste o valor se quiser">Encargo por atraso (R$):</span>
             <input type="text" name="valor" value="{{ encargo }}" class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs" aria-label="Valor do encargo por atraso">
             <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto" title="Sugerido: 5% até 4 dias, 10% acima — ajuste ou zere">Aplicar</button>
           </form>
-          {% elif cobranca.status == "atrasado" %}
+          {% endif %}
+          {# encargo e judicial são decisões independentes (C20): os dois aparecem #}
+          {% if cobranca.status == "atrasado" %}
           <form method="post" action="{% url 'financeiro:marcar_judicial' cobranca.pk %}"
                 onsubmit="return confirm('Marcar como cobrança judicial? O encargo automático para e o status só muda quando ela for quitada ou reaberta.')">
             {% csrf_token %}
+            <input type="hidden" name="voltar" value="{{ voltar }}">
             <button class="text-xs text-purple-700 underline" title="Passar para cobrança judicial">mandar para judicial</button>
           </form>
           {% elif cobranca.status == "judicial" %}
           <form method="post" action="{% url 'financeiro:reabrir_judicial' cobranca.pk %}"
                 onsubmit="return confirm('Tirar esta cobrança da cobrança judicial e voltar para o fluxo normal?')">
             {% csrf_token %}
+            <input type="hidden" name="voltar" value="{{ voltar }}">
             <button class="text-xs text-purple-700 underline" title="Voltar ao fluxo normal de cobrança">tirar do judicial (reabrir)</button>
           </form>
           {% endif %}
@@ -109,7 +114,8 @@
             <form method="post" action="{% url 'financeiro:cancelar' cobranca.pk %}"
                   onsubmit="return confirm('Cancelar esta cobrança? Ela não será cobrada do cliente.')">
               {% csrf_token %}
-              <button class="text-xs text-gray-500 underline">não cobrar</button>
+              <input type="hidden" name="voltar" value="{{ voltar }}">
+              <button class="text-xs text-gray-500 underline">{% if cobranca.origem == "nota_debito" %}cancelar a ND{% else %}não cobrar{% endif %}</button>
             </form>
             {% endif %}
           {% endif %}

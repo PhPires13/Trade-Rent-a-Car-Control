@@ -6,8 +6,10 @@ Entrega: depois de alocar, a ficha do cliente mostra um cartão com os passos
 mostra os passos (vistoria de devolução → KM final → caução → confirmar).
 """
 
+from datetime import date
 from urllib.parse import urlencode
 
+from django.db.models import Q
 from django.urls import reverse
 
 from apps.formatos import brl, milhar
@@ -24,6 +26,11 @@ def _caucao(alocacao):
     from apps.financeiro.models import Caucao  # import local evita ciclo de import
 
     return Caucao.com_saldos_anotados(Caucao.objects.filter(alocacao=alocacao)).first()
+
+
+def _vistorias_do_carro_da_locacao(alocacao):
+    """D10: vistoria do substituto não conta como entrega/devolução do carro da locação."""
+    return alocacao.vistorias.filter(Q(veiculo_id=alocacao.veiculo_id) | Q(veiculo__isnull=True))
 
 
 def passos_da_entrega(alocacao):
@@ -58,7 +65,10 @@ def passos_da_entrega(alocacao):
     )
 
     vistoria = (
-        alocacao.vistorias.filter(tipo=Vistoria.Tipo.ENTRADA).order_by("-data", "-pk").first()
+        _vistorias_do_carro_da_locacao(alocacao)
+        .filter(tipo=Vistoria.Tipo.ENTRADA)
+        .order_by("-data", "-pk")
+        .first()
     )
     passos.append(
         {
@@ -144,17 +154,36 @@ def situacao_da_devolucao(alocacao):
     """O que a tela de encerrar mostra em passos: vistorias, débitos e caução."""
     from apps.financeiro.models import Cobranca  # import local evita ciclo de import
 
-    vistorias = list(alocacao.vistorias.order_by("-data", "-pk"))
+    vistorias = list(_vistorias_do_carro_da_locacao(alocacao).order_by("-data", "-pk"))
     entrega = next((v for v in vistorias if v.tipo == Vistoria.Tipo.ENTRADA), None)
     devolucao = next((v for v in vistorias if v.tipo == Vistoria.Tipo.SAIDA), None)
+    # D03: semanas que começam no dia da devolução (ou depois) são canceladas ao
+    # encerrar — não são dívida, e mandar receber agora faria pagar o que não usou
+    data_devolucao = devolucao.data if devolucao else date.today()
     devidas = Cobranca.com_quitacao_anotada(
         Cobranca.objects.filter(cliente_id=alocacao.cliente_id, status__in=Cobranca.STATUS_DEVIDOS)
     )
-    debitos = sum((cobranca.saldo for cobranca in devidas), start=0)
+    debitos = 0
+    semanas_a_cancelar = []
+    for cobranca in devidas:
+        if (
+            cobranca.alocacao_id == alocacao.pk
+            and cobranca.origem == Cobranca.Origem.ALUGUEL
+            and cobranca.status != Cobranca.Status.JUDICIAL
+            and (
+                cobranca.vencimento >= data_devolucao
+                # semana de transição (D04): mesma regra do encerrar
+                or (cobranca.periodo_inicio and cobranca.periodo_inicio >= data_devolucao)
+            )
+        ):
+            semanas_a_cancelar.append(cobranca)
+        else:
+            debitos += cobranca.saldo
     return {
         "vistoria_entrega": entrega,
         "vistoria_devolucao": devolucao,
         "debitos": debitos,
+        "semanas_a_cancelar": semanas_a_cancelar,
         "url_vistoria_devolucao": _url(
             "alocacoes:vistoria_nova",
             alocacao.pk,

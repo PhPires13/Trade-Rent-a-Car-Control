@@ -41,7 +41,11 @@ def test_sinistro_atribui_motorista_vigente(alocacao, veiculo, cliente):
 
 def test_auxilio_disponivel_apos_7_dias_parado(alocacao, veiculo):
     sinistro = Sinistro.objects.create(
-        veiculo=veiculo, data=date(2026, 7, 1), envolvido="associado", tipo="colisao"
+        veiculo=veiculo,
+        data=date(2026, 7, 1),
+        envolvido="associado",
+        tipo="colisao",
+        acionou_protecao=True,  # auxílio só com evento aberto (D26)
     )
     hoje = date.today()
     Manutencao.objects.create(

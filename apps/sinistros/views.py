@@ -1,19 +1,24 @@
 from datetime import date
+from uuid import uuid4
 
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.core.validators import MinValueValidator
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
 from apps.alocacoes.services import cliente_vigente
+from apps.alocacoes.views import _avisar_acerto_das_semanas
 from apps.campos import CampoDinheiro, FormularioBR
+from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
-from apps.frota.models import Veiculo
+from apps.frota.models import Veiculo, normalizar_placa
 
+from . import services
 from .models import AuxilioMotorista, Sinistro
 
 # input type="date" só entende AAAA-MM-DD; no formato pt-BR (01/07/2026) a data
@@ -212,7 +217,8 @@ def lista(request):
         sinistros = sinistros.filter(status=status)
     placa = request.GET.get("veiculo", "").strip()
     if placa:
-        sinistros = sinistros.filter(veiculo__placa__icontains=placa)
+        # o banco grava a placa sem hífen/espaço: "ABC-1D23" precisa achar "ABC1D23"
+        sinistros = sinistros.filter(veiculo__placa__icontains=normalizar_placa(placa))
     pagina = Paginator(sinistros, 25).get_page(request.GET.get("pagina"))
     return render(
         request,
@@ -233,32 +239,87 @@ def _mensagem_motorista(sinistro):
     return sinistro.cliente.nome if sinistro.cliente else "nenhum cliente na data"
 
 
+def _aplicar_roubo(request, sinistro):
+    """Roubo: encerra a locação na data e deixa o carro Inativo (com aviso na tela)."""
+    try:
+        alocacao = services.registrar_roubo(sinistro)
+    except ValidationError as erro:
+        messages.warning(
+            request,
+            "O sinistro foi salvo, mas a locação não foi encerrada sozinha: "
+            + "; ".join(erro.messages),
+        )
+        return
+    sinistro.veiculo.refresh_from_db(fields=["status"])
+    if sinistro.veiculo.status == Veiculo.Status.INATIVO:
+        texto = f"Roubo registrado: {sinistro.veiculo.placa} ficou Inativo até ser recuperado."
+    else:
+        texto = (
+            f"Roubo registrado. {sinistro.veiculo.placa} continua como "
+            f"{sinistro.veiculo.get_status_display()}."
+        )
+    if alocacao is not None:
+        texto += (
+            f" A locação de {alocacao.cliente.nome} foi encerrada em "
+            f"{alocacao.data_termino:%d/%m/%Y} — o aluguel para de ser cobrado."
+        )
+    messages.warning(request, texto)
+    if alocacao is not None:
+        # o que já tinha sido pago por semanas depois do roubo (crédito/caução)
+        _avisar_acerto_das_semanas(request, alocacao)
+
+
+#: chave da sessão com os códigos de formulário de "Novo sinistro" já gravados
+SESSAO_TOKENS_SINISTRO = "sinistro_tokens_usados"
+
+
 def novo(request):
+    # código único por formulário (como na ND): reenviar não grava em dobro
+    token = request.POST.get("token", "") if request.method == "POST" else ""
     form = SinistroForm(request.POST or None, initial={"data": date.today()})
     if request.method == "POST" and form.is_valid():
-        sinistro = form.save()
+        # linha da sessão travada até gravar: o 2º envio de um clique duplo espera
+        with _envio_unico(request, SESSAO_TOKENS_SINISTRO, token) as repetido:
+            if repetido:
+                messages.warning(
+                    request,
+                    "Este sinistro já tinha sido registrado — o envio repetido foi ignorado.",
+                )
+                return redirect("sinistros:lista")
+            sinistro = form.save()
         messages.success(
             request, f"Sinistro registrado — motorista: {_mensagem_motorista(sinistro)}."
         )
+        if sinistro.tipo == Sinistro.Tipo.ROUBO:
+            _aplicar_roubo(request, sinistro)
         return redirect("sinistros:lista")
-    return render(request, "sinistros/novo.html", {"form": form, "volta": _volta(request)})
+    return render(
+        request,
+        "sinistros/novo.html",
+        {"form": form, "volta": _volta(request), "token": token or uuid4().hex},
+    )
 
 
 def editar(request, sinistro_id):
     sinistro = get_object_or_404(
-        Sinistro.objects.select_related("veiculo", "cliente").prefetch_related(
-            "manutencoes", "auxilios"
-        ),
+        Sinistro.objects.select_related(
+            "veiculo", "cliente", "cobranca_franquia__cliente"
+        ).prefetch_related("manutencoes", "auxilios"),
         pk=sinistro_id,
     )
     form = SinistroForm(request.POST or None, instance=sinistro)
     if request.method == "POST" and form.is_valid():
+        virou_roubo = (
+            "tipo" in form.changed_data and form.cleaned_data["tipo"] == Sinistro.Tipo.ROUBO
+        )
         sinistro = form.save()
         messages.success(
             request,
             f"Sinistro de {sinistro.veiculo.placa} salvo — situação: "
             f"{sinistro.get_status_display().lower()}, motorista: {_mensagem_motorista(sinistro)}.",
         )
+        if virou_roubo:
+            _aplicar_roubo(request, sinistro)
         return redirect(_volta(request))
     return render(
         request,
@@ -287,25 +348,40 @@ def quem_estava(request):
 def solicitar_auxilio(request, sinistro_id):
     sinistro = get_object_or_404(Sinistro, pk=sinistro_id)
     if request.method == "POST":
-        # clique duplo / F5 no POST criava dois pedidos para o mesmo sinistro
-        if sinistro.auxilios.exists():
-            messages.info(request, "O auxílio deste sinistro já estava registrado.")
-            return redirect(_volta(request))
-        if sinistro.tipo != Sinistro.Tipo.COLISAO:
-            messages.error(request, "O auxílio motorista só vale para colisão/avaria.")
-            return redirect(_volta(request))
-        try:
-            valor = _valor_digitado(request)
-        except ValidationError as erro:
-            messages.error(request, "; ".join(erro.messages))
-            return redirect(_volta(request))
-        AuxilioMotorista.objects.create(
-            sinistro=sinistro,
-            valor=valor,
-            status=AuxilioMotorista.Status.SOLICITADO,
-            data_solicitacao=date.today(),
+        with transaction.atomic():
+            # trava o sinistro: dois envios ao mesmo tempo não criam dois auxílios
+            sinistro = Sinistro.objects.select_for_update().get(pk=sinistro.pk)
+            return _solicitar_auxilio(request, sinistro)
+    return redirect(_volta(request))
+
+
+def _solicitar_auxilio(request, sinistro):
+    # clique duplo / F5 no POST criava dois pedidos para o mesmo sinistro
+    if sinistro.auxilios.exists():
+        messages.info(request, "O auxílio deste sinistro já estava registrado.")
+        return redirect(_volta(request))
+    if sinistro.tipo != Sinistro.Tipo.COLISAO:
+        messages.error(request, "O auxílio motorista só vale para colisão/avaria.")
+        return redirect(_volta(request))
+    if not sinistro.acionou_protecao:
+        messages.error(
+            request,
+            "O auxílio motorista só é pago com a proteção acionada (evento aberto na "
+            "Auto Truck). Marque isso no sinistro antes de pedir.",
         )
-        messages.success(request, "Auxílio motorista registrado como solicitado.")
+        return redirect(_volta(request))
+    try:
+        valor = _valor_digitado(request)
+    except ValidationError as erro:
+        messages.error(request, "; ".join(erro.messages))
+        return redirect(_volta(request))
+    AuxilioMotorista.objects.create(
+        sinistro=sinistro,
+        valor=valor,
+        status=AuxilioMotorista.Status.SOLICITADO,
+        data_solicitacao=date.today(),
+    )
+    messages.success(request, "Auxílio motorista registrado como solicitado.")
     return redirect(_volta(request))
 
 
@@ -333,4 +409,42 @@ def receber_auxilio(request, auxilio_id):
             request,
             f"Auxílio de {brl(auxilio.valor)} recebido — outro crédito, fora da base do DAS.",
         )
+    return redirect(_volta(request))
+
+
+def cobrar_franquia(request, sinistro_id):
+    """Botão "Cobrar do cliente": a franquia vira cobrança para o motorista."""
+    sinistro = get_object_or_404(Sinistro, pk=sinistro_id)
+    if request.method == "POST":
+        try:
+            cobranca = services.cobrar_franquia(sinistro)
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+        else:
+            messages.success(
+                request,
+                f"Franquia de {brl(cobranca.valor)} cobrada de {cobranca.cliente.nome} — "
+                f"vence em {cobranca.vencimento:%d/%m/%Y} (próximo dia de pagamento).",
+            )
+    return redirect(_volta(request))
+
+
+def carro_recuperado(request, sinistro_id):
+    """Botão "Carro recuperado" do roubo: o carro volta a ficar Disponível."""
+    sinistro = get_object_or_404(Sinistro.objects.select_related("veiculo"), pk=sinistro_id)
+    if request.method == "POST":
+        try:
+            services.carro_recuperado(sinistro)
+        except ValidationError as erro:
+            messages.info(request, "; ".join(erro.messages))
+        else:
+            sinistro.veiculo.refresh_from_db(fields=["status"])
+            if sinistro.veiculo.status == Veiculo.Status.DISPONIVEL:
+                texto = f"{sinistro.veiculo.placa} recuperado — já está Disponível para alugar."
+            else:
+                texto = (
+                    f"{sinistro.veiculo.placa} recuperado em {date.today():%d/%m/%Y}. A situação "
+                    f"do carro continua {sinistro.veiculo.get_status_display()}."
+                )
+            messages.success(request, texto)
     return redirect(_volta(request))

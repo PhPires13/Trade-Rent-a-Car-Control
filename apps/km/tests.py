@@ -27,6 +27,10 @@ def registrar(veiculo, data_leitura, km):
 
 
 def test_primeiro_registro_usa_km_da_compra(veiculo):
+    # D20: o km de compra só vira KM ANT se a compra foi recente (mês da leitura
+    # ou o anterior) — ver test_bugs_km.py para a compra antiga
+    veiculo.data_aquisicao = date(2026, 6, 20)
+    veiculo.save()
     registro = registrar(veiculo, date(2026, 7, 15), 52_000)
     assert registro.km_anterior == 50_000
     assert registro.km_utilizado == 2_000
@@ -102,6 +106,8 @@ def test_leitura_retroativa_maior_que_a_do_mes_seguinte_e_bloqueada(veiculo):
 
 def test_leitura_retroativa_reencadeia_o_mes_seguinte(veiculo):
     """Julho lançado depois de agosto: agosto passa a apoiar em julho."""
+    veiculo.data_aquisicao = date(2026, 7, 1)  # compra recente (D20)
+    veiculo.save()
     agosto = registrar(veiculo, date(2026, 8, 10), 62_000)
     assert agosto.km_anterior == 50_000  # sem julho, a cadeia começa na compra
 
@@ -147,14 +153,19 @@ def test_registro_retroativo_avisa_que_o_mes_seguinte_mudou(usuario_logado, veic
 
 
 def test_data_sugerida_nunca_cai_fora_do_mes_visto():
-    assert _data_sugerida(date(2026, 7, 1), date(2026, 8, 11)) == date(2026, 7, 31)
-    assert _data_sugerida(date(2026, 2, 1), date(2026, 8, 11)) == date(2026, 2, 28)
+    # D19: mês já fechado não sugere data (antes sugeria o último dia dele, mas a
+    # tela pedia o KM do painel de hoje) — a pessoa digita a data do KM anotado
+    assert _data_sugerida(date(2026, 7, 1), date(2026, 8, 11)) is None
+    assert _data_sugerida(date(2026, 2, 1), date(2026, 8, 11)) is None
     assert _data_sugerida(date(2026, 8, 1), date(2026, 8, 11)) == date(2026, 8, 11)  # mês corrente
+    # D21: nos primeiros dias, a leitura de hoje fecha o mês anterior
+    assert _data_sugerida(date(2026, 7, 1), date(2026, 8, 2)) == date(2026, 8, 2)
 
 
-def test_tela_de_mes_passado_sugere_data_do_proprio_mes(usuario_logado, veiculo):
+def test_tela_de_mes_passado_pede_a_data_do_km_anotado(usuario_logado, veiculo):
     conteudo = usuario_logado.get("/km/?mes=2024-02").content.decode()
-    assert 'value="2024-02-29"' in conteudo  # e não a data de hoje
+    assert 'value="" required' in conteudo  # data em branco, sem sugestão
+    assert "KM anotado naquela data" in conteudo
     assert 'name="mes" value="2024-02"' in conteudo
 
 

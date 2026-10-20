@@ -174,7 +174,8 @@ def test_htmx_erro_fica_na_linha_sem_virar_mensagem_solta(usuario_logado, veicul
 
 
 def test_lista_tem_pendentes_com_htmx_e_cartoes_no_celular(usuario_logado, veiculo):
-    conteudo = usuario_logado.get("/km/?mes=2024-02").content.decode()
+    # mês corrente: "outra data?" só aparece quando há data sugerida (D19)
+    conteudo = usuario_logado.get(f"/km/?mes={date.today():%Y-%m}").content.decode()
     assert f'hx-post="/km/registrar/{veiculo.pk}/"' in conteudo
     assert "faltam 1" in conteudo
     assert "outra data?" in conteudo

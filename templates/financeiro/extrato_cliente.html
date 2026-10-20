@@ -65,8 +65,14 @@
         {% for recebimento in recebimentos %}
         <tr class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 sm:table-row sm:py-0">
           <td class="sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.data|date:"d/m/y" }}</td>
+          {% if recebimento.forma == "credito" %}
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell text-gray-600">Abatimento com crédito do cliente
+            <div class="text-xs text-gray-500">não é dinheiro novo — usa a sobra de um pagamento anterior</div></td>
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell font-medium text-gray-600 sm:text-right">{{ recebimento.valor|brl }}</td>
+          {% else %}
           <td class="sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.get_forma_display }}</td>
           <td class="sm:px-2 sm:py-1.5 sm:table-cell font-medium text-green-700 sm:text-right">{{ recebimento.valor|brl }}</td>
+          {% endif %}
           <td class="basis-full sm:px-2 sm:py-1.5 sm:table-cell text-xs text-gray-500">
             {% for aplicacao in recebimento.aplicacoes.all %}{{ aplicacao.cobranca.descricao }} ({{ aplicacao.valor|brl }}){% if not forloop.last %}; {% endif %}{% endfor %}
             {% if recebimento.pode_desfazer %}

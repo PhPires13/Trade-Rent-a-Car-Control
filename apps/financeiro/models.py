@@ -60,6 +60,11 @@ class Cobranca(models.Model):
     descricao = models.CharField("descrição", max_length=200)
     valor = models.DecimalField("valor (R$)", max_digits=10, decimal_places=2)
     vencimento = models.DateField("vencimento")
+    # Dias de aluguel que a cobrança paga. Quase sempre [vencimento, vencimento+6];
+    # muda na 1ª semana proporcional (entrega fora do dia de pagar) e na troca do
+    # dia de vencimento. Vazio (cobranças antigas) = a semana a partir do vencimento.
+    periodo_inicio = models.DateField("aluguel de", null=True, blank=True)
+    periodo_fim = models.DateField("aluguel até", null=True, blank=True)
     status = models.CharField(
         "status", max_length=12, choices=Status.choices, default=Status.PENDENTE
     )

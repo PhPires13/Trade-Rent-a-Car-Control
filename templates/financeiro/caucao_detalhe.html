@@ -38,13 +38,15 @@
     </div>
   </div>
 
-  <div class="rounded-lg bg-white p-5 shadow" x-data="{ tipo: 'recebimento' }">
+  <div class="rounded-lg bg-white p-5 shadow" x-data="{ tipo: 'recebimento', enviando: false }">
     <h2 class="mb-3 font-semibold">Registrar movimentação</h2>
     <form method="post" class="space-y-3 text-sm"
           x-on:submit="if ((tipo === 'devolucao' || tipo === 'desconto') && !confirm(tipo === 'devolucao'
             ? 'Confirmar a DEVOLUÇÃO de R$ ' + $el.valor.value + ' ao cliente? O saldo da caução diminui.'
-            : 'Confirmar o DESCONTO de R$ ' + $el.valor.value + ' da caução para quitar a cobrança escolhida?')) $event.preventDefault()">
+            : 'Confirmar o DESCONTO de R$ ' + $el.valor.value + ' da caução para quitar a cobrança escolhida?')) { $event.preventDefault(); } else { enviando = true; }">
       {% csrf_token %}
+      {# token único: o clique duplo não grava a movimentação duas vezes (C06) #}
+      <input type="hidden" name="token" value="{{ token }}">
       <div>
         <label class="mb-1 block font-medium">O que aconteceu?</label>
         <select name="tipo" x-model="tipo">
@@ -87,7 +89,10 @@
         <label class="mb-1 block font-medium">Observações (opcional)</label>
         <input type="text" name="observacoes">
       </div>
-      <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar</button>
+      <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95"
+              x-bind:disabled="enviando" x-bind:class="enviando ? 'cursor-wait opacity-50' : ''">
+        <span x-show="!enviando">Registrar</span><span x-show="enviando" x-cloak>Registrando…</span>
+      </button>
     </form>
   </div>
 </div>

@@ -101,4 +101,4 @@ def test_formulario_do_veiculo_exibe_todos_os_campos_nas_secoes(db):
     form = VeiculoForm()
     assert list(form.fields) == nas_secoes
     assert "status" not in form.fields
-    assert form.fields["ipva_vencimento"].widget.input_type == "date"
+    assert form.fields["licenciamento_vencimento"].widget.input_type == "date"

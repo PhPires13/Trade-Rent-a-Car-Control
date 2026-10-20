@@ -145,6 +145,14 @@ def _frota_de_teste(quantidade, item_preventiva=None):
             descricao="Serviço",
             custo_real=Decimal("300.00"),
         )
+        # Carro comprado há tempos: a 1ª leitura é só o ponto de partida (D20),
+        # o km rodado sai da segunda.
+        RegistroKm.objects.create(
+            veiculo=veiculo,
+            mes_referencia=date(2026, 6, 1),
+            data_leitura=date(2026, 6, 10),
+            km=60_000,
+        )
         RegistroKm.objects.create(
             veiculo=veiculo,
             mes_referencia=date(2026, 7, 1),

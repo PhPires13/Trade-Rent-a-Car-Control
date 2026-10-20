@@ -9,10 +9,26 @@ from decimal import Decimal, InvalidOperation
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import UploadedFile
 
 from apps.formatos import numero_br
 
 _MILHAR = re.compile(r"^[1-9]\d{0,2}(\.\d{3})+$")
+
+#: Limite de todo upload (foto, CNH, CRLV, checklist) — um vídeo escolhido por
+#: engano no celular não pode ir parar no disco do servidor (C17).
+TAMANHO_MAXIMO_UPLOAD = 10 * 1024 * 1024
+
+
+def validar_tamanho_arquivo(arquivo):
+    """Recusa arquivo novo acima de 10 MB; arquivo já gravado não é relido."""
+    # FieldFile ainda não gravado (validação do modelo) também é arquivo novo
+    novo = isinstance(arquivo, UploadedFile) or getattr(arquivo, "_committed", True) is False
+    if novo and arquivo.size > TAMANHO_MAXIMO_UPLOAD:
+        raise ValidationError(
+            "Arquivo muito grande (máximo 10 MB) — tire uma foto menor ou reexporte o PDF.",
+            code="arquivo_grande",
+        )
 
 
 def dinheiro_br(texto):
@@ -50,9 +66,15 @@ def exibir_dinheiro(valor):
 
 
 class CampoDinheiro(forms.DecimalField):
-    """DecimalField que aceita e exibe o formato brasileiro."""
+    """DecimalField que aceita e exibe o formato brasileiro.
 
-    def __init__(self, *args, **kwargs):
+    Valor negativo é recusado (D28): aluguel, caução, taxa e custos são sempre
+    positivos — negativo virava cobrança negativa e abatia dívida de verdade.
+    Use `permitir_negativo=True` só onde o negativo tiver sentido.
+    """
+
+    def __init__(self, *args, permitir_negativo=False, **kwargs):
+        self.permitir_negativo = permitir_negativo
         kwargs.setdefault(
             "widget",
             forms.TextInput(attrs={"inputmode": "decimal", "placeholder": "0,00"}),
@@ -72,6 +94,11 @@ class CampoDinheiro(forms.DecimalField):
                 ) from None
         return super().to_python(value)
 
+    def validate(self, value):
+        super().validate(value)
+        if not self.permitir_negativo and value is not None and value < 0:
+            raise ValidationError("O valor não pode ser negativo.", code="negativo")
+
     def prepare_value(self, value):
         if isinstance(value, (Decimal, int, float)):
             return exibir_dinheiro(value)
@@ -81,12 +108,17 @@ class CampoDinheiro(forms.DecimalField):
 class FormularioBR:
     """Mixin: troca todo DecimalField do formulário por CampoDinheiro.
 
+    Também limita o tamanho de todo campo de arquivo (C17).
     Uso: `class VeiculoForm(FormularioBR, forms.ModelForm)`.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for nome, campo in list(self.fields.items()):
+            if isinstance(campo, forms.FileField) and (
+                validar_tamanho_arquivo not in campo.validators
+            ):
+                campo.validators.append(validar_tamanho_arquivo)
             if isinstance(campo, forms.DecimalField) and not isinstance(campo, CampoDinheiro):
                 novo = CampoDinheiro(
                     required=campo.required,

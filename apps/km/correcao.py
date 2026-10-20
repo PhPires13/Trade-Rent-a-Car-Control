@@ -14,7 +14,7 @@ from django.db.models import Max
 from apps.financeiro.models import ZERO, Cobranca
 from apps.formatos import brl, milhar
 
-from .excedente import gerar_cobranca_excedente
+from .excedente import gerar_cobrancas_excedente
 from .models import RegistroKm
 
 #: Ninguém roda mais que isso por dia com carro de aplicativo — acima, é erro de digitação.
@@ -129,7 +129,8 @@ def km_atual_recalculado(veiculo):
     )
     for consulta in (
         RegistroKm.objects.filter(veiculo=veiculo),
-        Vistoria.objects.filter(alocacao__veiculo=veiculo),
+        # D10: a vistoria diz o carro vistoriado (o substituto, durante a troca)
+        Vistoria.objects.filter(veiculo=veiculo),
         Manutencao.objects.filter(veiculo=veiculo),
     ):
         candidatos.append(consulta.aggregate(m=Max("km"))["m"])
@@ -171,18 +172,83 @@ def _cancelar(cobranca, motivo):
     cobranca.save(update_fields=["status", "observacoes"])
 
 
+def _desfazer_acertos(registro, rotulo):
+    """Cancela os acertos de excedente (cliente que devolveu antes) em aberto
+    para serem refeitos. Devolve (avisos, {alocacao_id: cobrança cancelada}, pks
+    de alocação que ficam como estão)."""
+    avisos, cancelados, mantidos = [], {}, set()
+    for acerto in registro.acertos_excedente.select_related("cobranca__cliente"):
+        cobranca = acerto.cobranca
+        mantidos.add(acerto.alocacao_id)
+        if cobranca.status == Cobranca.Status.CANCELADA:
+            continue  # o dono decidiu não cobrar
+        if _cobranca_intocavel(cobranca):
+            avisos.append(
+                f"O excedente de {brl(cobranca.valor)} de {cobranca.cliente.nome} ({rotulo}) "
+                f"já tem pagamento (ou está em cobrança judicial) — não foi mexido. Confira "
+                f"no Financeiro se o valor ainda está certo."
+            )
+            continue
+        _cancelar(cobranca, "Cancelada: a leitura de KM que a gerou foi corrigida.")
+        acerto.delete()
+        mantidos.discard(acerto.alocacao_id)
+        cancelados[acerto.alocacao_id] = cobranca
+    return avisos, cancelados, mantidos
+
+
+def _avisos_dos_acertos(registro, rotulo, cancelados, mantidos):
+    """Compara os acertos refeitos com os cancelados — texto do que mudou."""
+    avisos = []
+    novos = {
+        acerto.alocacao_id: acerto.cobranca
+        for acerto in registro.acertos_excedente.select_related("cobranca__cliente")
+        if acerto.alocacao_id not in mantidos
+    }
+    for alocacao_id, antiga in cancelados.items():
+        nova = novos.pop(alocacao_id, None)
+        nome = antiga.cliente.nome
+        if nova is None:
+            avisos.append(
+                f"A cobrança de excedente de {brl(antiga.valor)} de {nome} ({rotulo}) foi "
+                f"cancelada: com o KM corrigido não há excedente."
+            )
+        elif nova.valor != antiga.valor:
+            avisos.append(
+                f"O excedente de {nome} ({rotulo}) foi refeito: era {brl(antiga.valor)}, "
+                f"agora é {brl(nova.valor)}."
+            )
+    for nova in novos.values():
+        avisos.append(
+            f"Com o KM corrigido, {nova.cliente.nome} passou da franquia em {rotulo} — "
+            f"cobrança de excedente de {brl(nova.valor)} gerada."
+        )
+    return avisos
+
+
 def refazer_excedente(registro):
     """Recalcula a cobrança de excedente da leitura depois de uma correção.
 
     Em aberto e sem pagamento: cancela e gera de novo com o KM certo. Com
     pagamento ou em judicial: não mexe e avisa. Cancelada pelo dono: respeita
-    a decisão de não cobrar. Devolve o aviso para a tela (ou None).
+    a decisão de não cobrar. Devolve o aviso para a tela (ou None). Os
+    acertos de quem devolveu o carro antes (C15) seguem a mesma regra; o
+    aviso deles vai junto no mesmo texto.
     """
     rotulo = f"{registro.veiculo.placa} {registro.mes_referencia:%m/%Y}"
+    avisos, cancelados, mantidos = _desfazer_acertos(registro, rotulo)
+    principal = _refazer_principal(registro, rotulo)
+    avisos += _avisos_dos_acertos(registro, rotulo, cancelados, mantidos)
+    textos = [texto for texto in [principal, *avisos] if texto]
+    return " ".join(textos) or None
+
+
+def _refazer_principal(registro, rotulo):
     cobranca = registro.cobranca_excedente
     if cobranca is not None and cobranca.status == Cobranca.Status.CANCELADA:
+        gerar_cobrancas_excedente(registro)  # refaz só os acertos
         return None
     if cobranca is not None and _cobranca_intocavel(cobranca):
+        gerar_cobrancas_excedente(registro)  # refaz só os acertos
         return (
             f"A leitura {rotulo} tem cobrança de excedente de {brl(cobranca.valor)} já paga "
             f"(ou em cobrança judicial) — ela não foi mexida. Confira no Financeiro se o "
@@ -192,7 +258,8 @@ def refazer_excedente(registro):
         _cancelar(cobranca, "Cancelada: a leitura de KM que a gerou foi corrigida.")
         registro.cobranca_excedente = None
         registro.save(update_fields=["cobranca_excedente"])
-    nova = gerar_cobranca_excedente(registro)
+    gerar_cobrancas_excedente(registro)
+    nova = registro.cobranca_excedente
     if cobranca is None:
         if nova is None:
             return None
@@ -240,6 +307,16 @@ def corrigir_leitura(registro, km_errado):
 def apagar_leitura(registro):
     """Apaga a leitura, reapoia o mês seguinte e refaz excedente e KM atual."""
     cobranca = registro.cobranca_excedente
+    acertos = [
+        acerto.cobranca
+        for acerto in registro.acertos_excedente.select_related("cobranca")
+        if acerto.cobranca.status != Cobranca.Status.CANCELADA
+    ]
+    if any(_cobranca_intocavel(acerto) for acerto in acertos):
+        raise ValidationError(
+            "Esta leitura gerou cobrança de excedente que já tem pagamento (ou está em "
+            "cobrança judicial) — não dá para apagar. Corrija o número em vez de apagar."
+        )
     if (
         cobranca is not None
         and cobranca.status != Cobranca.Status.CANCELADA
@@ -257,6 +334,12 @@ def apagar_leitura(registro):
         if cobranca is not None and cobranca.status != Cobranca.Status.CANCELADA:
             _cancelar(cobranca, "Cancelada: a leitura de KM que a gerou foi apagada.")
             avisos.append(f"A cobrança de excedente de {brl(cobranca.valor)} foi cancelada.")
+        for acerto in acertos:
+            _cancelar(acerto, "Cancelada: a leitura de KM que a gerou foi apagada.")
+            avisos.append(
+                f"A cobrança de excedente de {brl(acerto.valor)} de {acerto.cliente.nome} "
+                f"foi cancelada."
+            )
         registro.delete()
         if seguinte is not None:
             seguinte.save()  # recalcula KM ANT/dias a partir da leitura que sobrou antes

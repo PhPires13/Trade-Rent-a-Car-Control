@@ -70,6 +70,9 @@
         <option value="ilimitado">Ilimitado</option>
         <option value="limitado">Limitado</option>
       </select>
+    {% elif field.name == "confirmar_divida" %}
+      <p class="mb-1 text-sm text-red-900">{{ form.texto_divida }}</p>
+      <input type="checkbox" name="confirmar_divida" id="{{ field.id_for_label }}" style="width:auto"{% if field.value %} checked{% endif %}>
     {% else %}
       {{ field }}
     {% endif %}
@@ -88,6 +91,13 @@
       Este carro está <strong>na oficina</strong> desde <span x-text="oficina[veiculo]"></span>.
       Confira se ele já voltou antes de entregar ao motorista.
     </p>
+    {% elif field.name == "cliente" %}
+    <p x-show="clientes[cliente] && clientes[cliente].divida" x-cloak role="alert"
+       class="mt-1 rounded border-l-4 border-red-400 bg-red-50 px-2 py-1.5 text-sm text-red-900">
+      <span x-text="clientes[cliente] && clientes[cliente].divida"></span>
+      Para alocar mesmo assim, você vai precisar confirmar.
+    </p>
+    {% elif field.name == "confirmar_divida" %}
     {% elif field.name == "km_entrega" %}
     <p x-show="veiculos[veiculo]" x-cloak class="mt-1 text-xs text-gray-600">Preenchido com o KM que o sistema já tem deste carro — confira no painel.</p>
     {% elif field.name == "dia_vencimento" %}

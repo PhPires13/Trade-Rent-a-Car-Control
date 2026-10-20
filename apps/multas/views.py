@@ -1,4 +1,5 @@
 from datetime import date
+from uuid import uuid4
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -12,8 +13,9 @@ from django.views.decorators.cache import never_cache
 from apps.alocacoes.services import cliente_vigente
 from apps.campos import CampoDinheiro
 from apps.financeiro import services as financeiro_services
+from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
-from apps.frota.models import Veiculo
+from apps.frota.models import Veiculo, normalizar_placa
 from apps.pessoas.models import Cliente
 
 from . import services
@@ -56,7 +58,8 @@ def lista(request):
     )
     veiculo = request.GET.get("veiculo", "").strip()
     if veiculo:
-        multas = multas.filter(veiculo__placa__icontains=veiculo)
+        # o banco grava a placa sem hífen/espaço: "ABC-1D23" precisa achar "ABC1D23"
+        multas = multas.filter(veiculo__placa__icontains=normalizar_placa(veiculo))
     cliente = None
     cliente_id = request.GET.get("cliente", "")
     if cliente_id.isdigit():
@@ -110,14 +113,36 @@ def lista(request):
     )
 
 
+#: chave da sessão com os códigos de formulário de "Nova multa" já gravados
+SESSAO_TOKENS_MULTA = "multa_tokens_usados"
+
+
 def nova(request):
+    """Cadastro de multa. Cada formulário leva um código único (como a ND):
+    reenviar o mesmo formulário (internet lenta, Voltar, duas abas) não grava
+    a multa duas vezes — senão o cliente acabava cobrado em dobro."""
+    token = request.POST.get("token", "") if request.method == "POST" else ""
     form = MultaForm(request.POST or None, initial={"data_infracao": date.today()})
     if request.method == "POST" and form.is_valid():
-        multa = form.save()
+        # mesma trava da ND: a linha da sessão fica travada até gravar, então o 2º
+        # envio de um clique duplo com internet lenta espera e vê o código já usado
+        with _envio_unico(request, SESSAO_TOKENS_MULTA, token) as repetido:
+            if repetido:
+                messages.warning(
+                    request,
+                    "Esta multa já tinha sido registrada — o envio repetido foi ignorado e "
+                    "nada foi gravado em dobro.",
+                )
+                return redirect("multas:lista")
+            multa = form.save()
         nome = multa.cliente.nome if multa.cliente else "nenhum cliente na data"
         messages.success(request, f"Multa registrada — atribuída a: {nome}.")
         return redirect("multas:lista")
-    return render(request, "multas/nova.html", {"form": form, "multa": None})
+    return render(
+        request,
+        "multas/nova.html",
+        {"form": form, "multa": None, "token": token or uuid4().hex},
+    )
 
 
 def editar(request, multa_id):
@@ -225,7 +250,17 @@ def marcar_paga(request, multa_id):
         multa.pago_por = request.POST.get("pago_por", "").strip()[:60]
         multa.save(update_fields=["pagamento", "pago_por"])
         quem = {"Empresa": " pela empresa", "Cliente": " pelo cliente"}.get(multa.pago_por, "")
-        messages.success(request, f"Multa marcada como paga{quem}.")
+        aviso = ""
+        if multa.paga_pelo_cliente:
+            item = multa.itens_nd.select_related("nota_debito").first()
+            if item is None:
+                aviso = " Ela não entra mais na nota de débito: o cliente já pagou ao órgão."
+            else:
+                aviso = (
+                    f" Atenção: ela já está na ND {item.nota_debito.numero:03d} — se o cliente "
+                    "pagou direto ao órgão, ajuste a nota para não cobrar duas vezes."
+                )
+        messages.success(request, f"Multa marcada como paga{quem}.{aviso}")
     return _voltar_para_lista(request)
 
 

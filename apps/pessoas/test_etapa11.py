@@ -123,7 +123,7 @@ def test_extrair_dados_monta_a_chamada_certa(settings):
     with mock.patch("anthropic.Anthropic", return_value=cliente_api) as construtor:
         dados = cnh.extrair_dados([foto_cnh()])
     assert dados == DADOS_LIDOS
-    construtor.assert_called_once_with(api_key="chave-de-teste")
+    construtor.assert_called_once_with(api_key="chave-de-teste", timeout=50, max_retries=1)
     chamada = cliente_api.messages.create.call_args.kwargs
     assert chamada["model"] == settings.CNH_MODELO
     assert chamada["output_config"]["format"]["type"] == "json_schema"

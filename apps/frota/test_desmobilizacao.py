@@ -76,8 +76,9 @@ def test_ficha_soma_receitas_e_despesas(alocacao, veiculo, cliente):
     assert ficha.receita_auxilios == Decimal("1518.00")
     assert ficha.despesa_manutencao == Decimal("400.00")
     assert ficha.despesa_franquias == Decimal("1500.00")
-    # proteção estimada: 24 meses × 304
-    assert ficha.despesa_protecao_estimada == Decimal("7296.00")
+    # proteção estimada: 25 meses × 304 — de jul/2024 a jul/2026 com os dois meses
+    # inclusive, igual à soma das Despesas do mês nos relatórios (correção C09)
+    assert ficha.despesa_protecao_estimada == Decimal("7600.00")
     assert ficha.resultado_operacional == ficha.receita_total - ficha.despesa_total
 
 

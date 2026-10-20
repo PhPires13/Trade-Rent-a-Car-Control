@@ -52,7 +52,10 @@ def alocacoes(veiculo, outro_veiculo, arlen, bruna):
 
 @pytest.fixture
 def sinistro(alocacoes, veiculo):
-    return Sinistro.objects.create(veiculo=veiculo, data=date(2026, 7, 10), envolvido="terceiro")
+    # proteção acionada: o auxílio motorista só vale com evento aberto (D26)
+    return Sinistro.objects.create(
+        veiculo=veiculo, data=date(2026, 7, 10), envolvido="terceiro", acionou_protecao=True
+    )
 
 
 def _dados(sinistro, **mudancas):

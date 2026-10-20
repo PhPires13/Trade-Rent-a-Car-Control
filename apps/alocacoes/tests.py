@@ -304,6 +304,7 @@ def test_criar_alocacao_pela_tela(usuario_logado, veiculo, cliente):
             "veiculo": veiculo.pk,
             "cliente": cliente.pk,
             "data_inicio": "2026-07-01",
+            "cobrar_a_partir_de": "2026-07-01",  # início antigo pede a data (D01)
             "valor_semanal": "650",
             "km_entrega": "50000",
             "limite_km": "ilimitado",

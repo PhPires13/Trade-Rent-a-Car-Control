@@ -24,7 +24,10 @@ def _sinistros(veiculo, quantidade):
     criados = []
     for i in range(quantidade):
         sinistro = Sinistro.objects.create(
-            veiculo=veiculo, data=hoje - timedelta(days=20 + i), envolvido="associado"
+            veiculo=veiculo,
+            data=hoje - timedelta(days=20 + i),
+            envolvido="associado",
+            acionou_protecao=True,  # auxílio só com evento aberto (D26)
         )
         Manutencao.objects.create(
             veiculo=veiculo,

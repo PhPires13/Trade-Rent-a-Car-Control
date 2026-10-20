@@ -1,12 +1,14 @@
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
 from django.views.static import serve
 
-from apps.alocacoes.models import TrocaTemporaria
+from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.busca import (
     MINIMO_DIGITOS,
     nome_casa,
@@ -18,10 +20,11 @@ from apps.busca import (
 )
 from apps.financeiro.devedores import resumo_do_dia
 from apps.financeiro.models import ZERO, Cobranca
+from apps.financeiro.services import _proximo_dia
 from apps.frota.alertas import vigencias_a_vencer
 from apps.frota.desmobilizacao import ranking_da_frota
 from apps.frota.models import Veiculo, normalizar_placa
-from apps.km.models import veiculos_com_leitura_pendente
+from apps.km.models import pendencias_de_leitura
 from apps.manutencao.services import preventivas_em_alerta
 from apps.multas.models import Multa
 from apps.multas.services import alertas_fici
@@ -29,13 +32,34 @@ from apps.pessoas.models import Cliente, CondutorAutorizado
 from apps.sinistros.models import Sinistro
 
 
+@never_cache
 def midia(request, caminho):
     """Serve fotos e documentos enviados — SEMPRE atrás do login.
 
+    Sem cache no navegador (never_cache): depois de "Sair", quem usar o mesmo
+    computador não pode reabrir a CNH pelo histórico ou pelo botão voltar.
+
     O LoginRequiredMiddleware cobre esta view como qualquer outra; CNH e fotos
     de clientes nunca podem virar URL pública (por isso não usamos static()).
+
+    Só foto e PDF abrem no navegador. Qualquer outro tipo (.html, .svg...) é
+    entregue como download e numa caixa isolada: aberto aqui, rodaria script
+    com o login do dono (C17).
     """
-    return serve(request, caminho, document_root=settings.MEDIA_ROOT)
+    resposta = serve(request, caminho, document_root=settings.MEDIA_ROOT)
+    tipo = resposta.get("Content-Type", "").split(";")[0].strip().lower()
+    # 304 (sem corpo) não tem tipo: não trocar os cabeçalhos da cópia em cache
+    if resposta.status_code == 200 and tipo not in TIPOS_SEGUROS_NA_MIDIA:
+        nome = caminho.rsplit("/", 1)[-1].replace('"', "")
+        resposta["Content-Type"] = "application/octet-stream"
+        resposta["Content-Disposition"] = f'attachment; filename="{nome}"'
+        resposta["Content-Security-Policy"] = "sandbox"
+    resposta["X-Content-Type-Options"] = "nosniff"
+    return resposta
+
+
+#: Tipos que /midia/ pode mostrar dentro do navegador (fotos e PDF).
+TIPOS_SEGUROS_NA_MIDIA = {"image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"}
 
 
 #: Por grupo; com mais que isso a tela pede para refinar a busca.
@@ -144,6 +168,69 @@ def buscar(request):
     )
 
 
+def _alugueis_da_semana(semana, hoje):
+    """Aluguéis que vencem na semana e ainda não foram lançados (decisão D32).
+
+    O aluguel só nasce no dia do vencimento de cada cliente; sem isto o
+    "previstos" do painel começava a semana pequeno e crescia dia a dia.
+    Devolve (valor, alocações com semana vencida e não lançada há mais de 1 dia
+    — sinal de rotina parada). Uma query só; usa o valor semanal da alocação
+    (troca temporária com valor ajustado entra quando a cobrança for lançada).
+    """
+    inicio, fim = semana
+    alocacoes = Alocacao.objects.filter(
+        status=Alocacao.Status.ATIVA, data_inicio__lte=fim
+    ).annotate(
+        ultima=Max("cobrancas__vencimento", filter=Q(cobrancas__origem=Cobranca.Origem.ALUGUEL))
+    )
+    previsto, atrasadas = ZERO, 0
+    for alocacao in alocacoes:
+        # mesma conta de financeiro.services._proximo_vencimento e
+        # gerar_cobrancas_semanais, sem 1 query por carro
+        dia = alocacao.dia_vencimento
+        if alocacao.ultima:
+            data = _proximo_dia(alocacao.ultima + timedelta(days=1), dia)
+        else:
+            # 1ª cobrança: no "cobrar a partir de" (contrato antigo, D01) ou na
+            # entrega, proporcional até o 1º dia de pagar (D12)
+            data = alocacao.cobrar_a_partir_de or alocacao.data_inicio
+        # pré-paga: semana que começa no dia do término (ou depois) não é devida
+        termino = alocacao.data_termino and alocacao.data_termino - timedelta(days=1)
+        if data < hoje - timedelta(days=1) and (not termino or data <= termino):
+            atrasadas += 1
+        limite = min(fim, termino) if termino else fim
+        while data <= limite:
+            proximo = _proximo_dia(data + timedelta(days=1), dia)
+            if data >= inicio:
+                dias = (proximo - data).days
+                previsto += (
+                    alocacao.valor_semanal
+                    if dias == 7
+                    else (alocacao.valor_semanal * dias / 7).quantize(
+                        Decimal("0.01"), ROUND_HALF_UP
+                    )
+                )
+            data = proximo
+    return previsto, atrasadas
+
+
+def rotina_atrasada(hoje, vencidas, semanas_nao_lancadas=0):
+    """True se a rotina diária parece parada (C08).
+
+    A rotina roda de madrugada: cobrança que venceu antes de ontem e ainda
+    está como pendente/parcial (não virou "atrasado"), ou semana de aluguel
+    vencida há mais de 1 dia sem lançamento, quer dizer que ela não roda há
+    mais de ~36 horas ou deu erro. `vencidas`: as cobranças do card de atraso.
+    """
+    if semanas_nao_lancadas:
+        return True
+    return any(
+        c.status in (Cobranca.Status.PENDENTE, Cobranca.Status.PARCIAL)
+        and c.vencimento < hoje - timedelta(days=1)
+        for c in vencidas
+    )
+
+
 def painel(request):
     """Painel inicial — dinheiro, frota e alertas do dia (docs.md §5).
 
@@ -173,10 +260,21 @@ def painel(request):
             )
         )
     )
-    atrasadas = Cobranca.com_quitacao_anotada(
-        Cobranca.objects.filter(status=Cobranca.Status.ATRASADO)
+    # pelo vencimento também, não só pelo status gravado pela rotina: se ela
+    # não rodou, o atraso aparece mesmo assim (C08)
+    atrasadas = list(
+        Cobranca.com_quitacao_anotada(
+            Cobranca.objects.filter(
+                Q(status=Cobranca.Status.ATRASADO)
+                | Q(
+                    status__in=[Cobranca.Status.PENDENTE, Cobranca.Status.PARCIAL],
+                    vencimento__lt=hoje,
+                )
+            )
+        )
     )
-    semana_total = sum((c.valor for c in da_semana), ZERO)
+    a_lancar, semanas_nao_lancadas = _alugueis_da_semana(semana, hoje)
+    semana_total = sum((c.valor for c in da_semana), ZERO) + a_lancar
     semana_recebido = sum((c.total_quitado for c in da_semana), ZERO)
 
     # prefetch das manutenções: auxilio_disponivel lê dias_parado de cada
@@ -200,9 +298,12 @@ def painel(request):
         "trocas_em_andamento": TrocaTemporaria.objects.filter(
             data_devolucao__isnull=True
         ).select_related("alocacao__cliente", "veiculo_substituto"),
-        "leituras_pendentes": veiculos_com_leitura_pendente(hoje),
+        # mês atual e meses anteriores esquecidos (D21), esquecidos primeiro
+        "leituras_pendentes": pendencias_de_leitura(hoje),
         "alertas_preventivas": preventivas_em_alerta(),
         "semana_total": semana_total,
+        "semana_a_lancar": a_lancar,
+        "rotina_atrasada": rotina_atrasada(hoje, atrasadas, semanas_nao_lancadas),
         "semana_recebido": semana_recebido,
         "percentual_semana": (
             min(100, round(100 * semana_recebido / semana_total)) if semana_total else 0

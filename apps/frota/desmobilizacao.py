@@ -21,7 +21,7 @@ from apps.manutencao.models import Manutencao
 from apps.multas.models import Multa
 from apps.sinistros.models import AuxilioMotorista
 
-from .models import Veiculo
+from .models import PagamentoIpva, Veiculo
 
 # Limites configuráveis da recomendação (docs.md §8, ponto em aberto nº 4)
 FAIXA_ALVO_RECUPERACAO = Decimal("0.75")  # ~70–80% confirmado pelos donos
@@ -34,6 +34,54 @@ FATOR_CUSTO_ACIMA_DA_MEDIA = Decimal("1.5")
 NIVEIS = {0: "manter", 1: "observar", 2: "preparar", 3: "vender"}
 
 
+# Critérios de despesa — fonte única da ficha do carro e dos relatórios do mês
+# (apps/relatorios/services.py), para os dois fecharem entre si.
+
+
+def manutencoes_que_sao_despesa():
+    """Manutenções com custo real, menos o conserto pago pela cota da proteção.
+
+    Quando a proteção é acionada, a cota paga à associação já é despesa no
+    sinistro (franquia_valor). O conserto ligado a esse sinistro com origem
+    "Evento da proteção" repetiria o mesmo dinheiro — só conta o que foi pago
+    por fora (origem "Particular").
+    """
+    return Manutencao.objects.filter(custo_real__isnull=False).exclude(
+        origem_custo=Manutencao.OrigemCusto.PROTECAO, sinistro__franquia_valor__isnull=False
+    )
+
+
+def multas_que_sao_despesa():
+    """Multas que a empresa assumiu e que continuam devidas.
+
+    Advertência, cancelada ou não exigível: não há o que pagar, então não é
+    despesa (mesma regra do atalho "Pagar" da lista de multas).
+    """
+    return Multa.objects.filter(responsavel=Multa.Responsavel.EMPRESA, valor__isnull=False).exclude(
+        resultado__in=Multa.RESULTADOS_ANULADORES
+    )
+
+
+def ipvas_pagos():
+    """Parcelas de IPVA pagas — despesa no mês do pagamento (decisão nº 21)."""
+    return PagamentoIpva.objects.filter(pago_em__isnull=False, valor__isnull=False)
+
+
+def meses_de_protecao(veiculo, hoje):
+    """Mensalidades da proteção do mês da compra ao da venda (ou até hoje), os dois inclusive.
+
+    Mesmo recorte do relatório mensal: cada mês em que o carro esteve na frota
+    paga uma mensalidade; depois de vendido, não paga mais.
+    """
+    if not veiculo.data_aquisicao:
+        return 0
+    fim = min(veiculo.data_venda, hoje) if veiculo.data_venda else hoje
+    meses = (
+        (fim.year - veiculo.data_aquisicao.year) * 12 + fim.month - veiculo.data_aquisicao.month + 1
+    )
+    return max(meses, 0)
+
+
 @dataclass
 class FichaFinanceira:
     veiculo: Veiculo
@@ -44,6 +92,7 @@ class FichaFinanceira:
     despesa_manutencao: Decimal = ZERO
     despesa_franquias: Decimal = ZERO
     despesa_multas_empresa: Decimal = ZERO
+    despesa_ipva: Decimal = ZERO
     despesa_protecao_estimada: Decimal = ZERO
     custo_manutencao_6m: Decimal = ZERO
     km_rodado_6m: int = 0
@@ -64,6 +113,7 @@ class FichaFinanceira:
             self.despesa_manutencao
             + self.despesa_franquias
             + self.despesa_multas_empresa
+            + self.despesa_ipva
             + self.despesa_protecao_estimada
         )
 
@@ -153,7 +203,7 @@ def _km_rodado_na_janela(ids, inicio_janela):
 
 
 def montar_fichas_em_lote(veiculos, hoje=None):
-    """Fichas de vários veículos em 9 queries fixas — na ordem em que vieram.
+    """Fichas de vários veículos em 10 queries fixas — na ordem em que vieram.
 
     Mesmos números de montar_ficha: o painel e o ranking liam a frota inteira a
     ~10 queries por carro, o que crescia linear com a frota (revisão de performance).
@@ -189,11 +239,12 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         "sinistros__auxilios__valor",
         sinistros__auxilios__status=AuxilioMotorista.Status.RECEBIDO,
     )
-    manutencoes = _somas_da_frota(ids, "manutencoes__custo_real")
-    franquias = _somas_da_frota(ids, "sinistros__franquia_valor")
-    multas_empresa = _somas_da_frota(
-        ids, "multas__valor", multas__responsavel=Multa.Responsavel.EMPRESA
+    manutencoes = _somas(
+        manutencoes_que_sao_despesa().filter(veiculo_id__in=ids), "veiculo", "custo_real"
     )
+    franquias = _somas_da_frota(ids, "sinistros__franquia_valor")
+    multas_empresa = _somas(multas_que_sao_despesa().filter(veiculo_id__in=ids), "veiculo", "valor")
+    ipvas = _somas(ipvas_pagos().filter(veiculo_id__in=ids), "veiculo", "valor")
     janela = _janela_de_manutencoes(ids, inicio_janela)
     km_rodado = _km_rodado_na_janela(ids, inicio_janela)
 
@@ -208,14 +259,11 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         ficha.despesa_manutencao = manutencoes.get(veiculo.pk, ZERO)
         ficha.despesa_franquias = franquias.get(veiculo.pk, ZERO)
         ficha.despesa_multas_empresa = multas_empresa.get(veiculo.pk, ZERO)
-        if veiculo.mensalidade_protecao and veiculo.data_aquisicao:
-            meses = max(
-                1,
-                (hoje.year - veiculo.data_aquisicao.year) * 12
-                + hoje.month
-                - veiculo.data_aquisicao.month,
+        ficha.despesa_ipva = ipvas.get(veiculo.pk, ZERO)
+        if veiculo.mensalidade_protecao:
+            ficha.despesa_protecao_estimada = veiculo.mensalidade_protecao * meses_de_protecao(
+                veiculo, hoje
             )
-            ficha.despesa_protecao_estimada = veiculo.mensalidade_protecao * meses
         custo, dias, esporadicas = janela.get(veiculo.pk, (ZERO, 0, 0))
         ficha.custo_manutencao_6m = custo
         ficha.dias_parado_6m = dias

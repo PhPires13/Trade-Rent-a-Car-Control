@@ -8,7 +8,7 @@
     Vistoria — {{ alocacao.veiculo.placa }} <span class="text-gray-500">({{ alocacao.cliente.nome }})</span>
   </h1>
   <div class="flex flex-wrap items-center gap-3 text-sm">
-    <a href="{% url 'alocacoes:vistoria_imprimir' alocacao.pk %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-medium">🖨 Checklist em branco</a>
+    <a href="{% url 'alocacoes:vistoria_imprimir' alocacao.pk %}{% if form.veiculo.value %}?veiculo={{ form.veiculo.value }}{% endif %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-medium">🖨 Checklist em branco</a>
     <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
   </div>
 </div>
@@ -20,6 +20,8 @@
   <div>
     <label class="mb-1 block text-sm font-medium" for="{{ form.foto.id_for_label }}">{{ form.foto.label }}</label>
     {{ form.foto }}
+    <p class="mt-1 text-xs text-gray-500">Foto (JPG, PNG, WebP) ou PDF, até 10 MB.</p>
+    {% for erro in form.foto.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
     {% if checklist_leitura %}
     <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-2 text-xs" id="leitor-checklist">
       <span class="text-gray-700">📷 Ao escolher a foto do checklist preenchido, os campos abaixo são
@@ -36,10 +38,19 @@
   </div>
 
   {% for field in form %}
-    {% if field.name != "foto" %}
+    {% if field.name == "confirmar_km" %}
+    {% if form.km.errors %}
+    <label class="flex items-center gap-2 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-900">
+      <input type="checkbox" name="confirmar_km" id="{{ field.id_for_label }}" value="on" style="width:auto"> {{ field.label }}
+    </label>
+    {% endif %}
+    {% elif field.name != "foto" %}
     <div>
       <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
       {{ field }}
+      {% if field.name == "veiculo" and form.fields.veiculo.queryset.count > 1 %}
+      <p class="mt-1 text-xs text-gray-500">Com carro substituto, vistorie o carro que está com o motorista.</p>
+      {% endif %}
       {% if field.name == "tipo" %}
       <p class="mt-1 text-xs text-gray-500">
         <strong>Entrega ao motorista</strong>: o carro sai da locadora com ele.
@@ -66,6 +77,7 @@
     <li class="flex flex-wrap items-center justify-between gap-2 py-2">
       <span>
         {{ vistoria.get_tipo_display }} — {{ vistoria.data|date:"d/m/Y" }}
+        {% if vistoria.veiculo and vistoria.veiculo_id != alocacao.veiculo_id %}· substituto {{ vistoria.veiculo.placa }}{% endif %}
         {% if vistoria.km %}· {{ vistoria.km|milhar }} km{% endif %}
         {% if vistoria.combustivel %}· ⛽ {{ vistoria.get_combustivel_display }}{% endif %}
       </span>

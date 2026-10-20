@@ -7,7 +7,7 @@
       hx-post="{% url 'km:registrar' veiculo.pk %}" hx-target="this" hx-swap="outerHTML"
       hx-disabled-elt="find button[type=submit]"
       {% if estado and request.htmx %}data-focar{% endif %}
-      x-data="{ outraData: {% if estado.data_leitura and estado.data_leitura != data_sugerida|date:'Y-m-d' %}true{% else %}false{% endif %} }"
+      x-data="{ outraData: {% if not data_sugerida or estado.data_leitura and estado.data_leitura != data_sugerida|date:'Y-m-d' %}true{% else %}false{% endif %} }"
       class="scroll-mt-24 sm:grid sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_11rem_10rem_9rem] p-4 target:bg-yellow-50 target:ring-2 target:ring-inset target:ring-marca-amarelo sm:items-center sm:gap-3 sm:px-3 sm:py-2
              {% if estado.aviso %}bg-amber-50{% elif estado.erro %}bg-red-50{% endif %}">
   {% csrf_token %}
@@ -31,14 +31,16 @@
   </div>
 
   <div class="mt-3 sm:mt-0">
+    {% if data_sugerida %}
     <p class="text-sm text-gray-600 sm:hidden" x-show="!outraData">
       Data: <strong>{% if data_sugerida == hoje %}hoje{% else %}{{ data_sugerida|date:"d/m/Y" }}{% endif %}</strong> ·
       <button type="button" class="py-2 underline" @click="outraData = true; $nextTick(() => $refs.data.focus())">outra data?</button>
     </p>
+    {% endif %}
     <div class="sm:block" :class="outraData ? 'block' : 'hidden'">
-      <label for="data-{{ veiculo.pk }}" class="mb-1 block text-sm text-gray-600 sm:sr-only">Data da leitura de {{ veiculo.placa }}</label>
+      <label for="data-{{ veiculo.pk }}" class="mb-1 block text-sm text-gray-600 sm:sr-only">{% if data_sugerida %}Data da leitura{% else %}Data em que o KM foi anotado{% endif %} de {{ veiculo.placa }}</label>
       <input id="data-{{ veiculo.pk }}" x-ref="data" type="date" name="data_leitura"
-             value="{% if estado.data_leitura %}{{ estado.data_leitura }}{% else %}{{ data_sugerida|date:'Y-m-d' }}{% endif %}" required
+             value="{% if estado.data_leitura %}{{ estado.data_leitura }}{% elif data_sugerida %}{{ data_sugerida|date:'Y-m-d' }}{% endif %}" required
              class="w-full rounded border border-gray-300 px-3 py-3 sm:px-2 sm:py-1">
     </div>
   </div>

@@ -22,7 +22,7 @@
       x-data="{ tipo: '{{ form.tipo_condutor.value|default:'cliente'|escapejs }}' }">
   {% csrf_token %}
   {% include "_erros_form.html" %}
-  {% if multa %}<input type="hidden" name="volta" value="{{ volta }}">{% endif %}
+  {% if multa %}<input type="hidden" name="volta" value="{{ volta }}">{% else %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
 
   {% if multa %}
   <fieldset class="rounded-lg border-l-4 border-marca-amarelo bg-white p-5 shadow">

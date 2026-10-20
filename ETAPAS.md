@@ -50,7 +50,7 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Painel**: recebido/a receber na semana, total em atraso, inadimplentes
 - [x] 61 testes passando; fluxo completo verificado no navegador
 
-**Pendente do usuário (deploy):** configurar o cron do Railway para rodar `python manage.py rotina_diaria` 1×/dia.
+**Pendente do usuário (deploy):** configurar o cron do Railway para rodar `python manage.py rotina_diaria` 1×/dia. **O cron do Railway usa o horário UTC** (3 horas à frente de Brasília): use `5 3 * * *`, que roda às 00:05 de Brasília. Um `0 0 * * *` rodaria às 21h e o aluguel do dia só apareceria à noite.
 
 ### Etapa 5 — Multas e Sinistros (19/07/2026)
 - [x] **Órgãos autuadores**: cadastro com portal, procedimento/documentos e **credenciais criptografadas no banco** (Fernet derivado da SECRET_KEY), ocultas na tela com botão "revelar"
@@ -182,9 +182,51 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - Ficha do carro com faixa de pendências; multas e sinistros editáveis, com "o carro estava com: Fulano" ao vivo e atalhos com contador; NIC só após o prazo.
 - Relatórios com navegação por mês e "Quanto sobrou este mês"; Painel "Hoje" + tela "Quem deve"; busca sem acentos por CPF, telefone, condutor, AIT e BO.
 
+### Etapa 15 — Caça a bugs: 63 problemas corrigidos
+91 suspeitas levantadas por 12 lentes; 84 confirmadas com teste de reprodução (7 já resolvidas pela etapa 14), consolidadas em 30 correções claras e 33 decisões. Dono autorizou aplicar a opção recomendada em todas. Cada frente teve revisão adversarial.
+
+**Correções claras (destaques):** caução aberta também quando combinada depois; data futura recusada no encerramento/devolução; repasse cobrado do cliente do sinistro; repasse/encargo/ND de multas vencem no próximo dia de pagamento; preventiva projeta o KM desde a última leitura; clique duplo não grava caução/multa/sinistro duas vezes; valores absurdos/negativos recusados; aviso no painel quando a rotina diária para; ficha do carro com proteção e IPVA iguais ao relatório; multa anulada sai das despesas; DAS em .xlsx; uploads restritos a jpg/png/webp/pdf ≤10 MB; leitura de documento com timeout e foto grande reduzida.
+
+**Regras de negócio adotadas (revisar com os donos):**
+- Nova alocação tem "cobrar a partir de" (carga de contratos antigos não gera semanas passadas).
+- 1ª semana fora do dia de pagamento sai proporcional (valor × dias/7); mudança de dia de vencimento idem.
+- Troca com outro preço recalcula a semana em aberto pelos dias de cada carro.
+- Devolução cancela semanas não usadas e o que já foi pago vira crédito do cliente.
+- Multa anulada no recurso dentro de ND → cancela a ND inteira (sem pagamento) e reemite.
+- IPVA ganhou histórico próprio por ano (PagamentoIpva), migrado do campo antigo.
+- Cota da proteção é despesa só no sinistro; conserto pago pela cota não soma de novo.
+- Carro livre que entra na oficina vira "Em manutenção" e volta a "Disponível" na saída.
+- Franquia do sinistro por culpa do motorista: botão "Cobrar do cliente".
+- Vistoria indica o carro (substituto durante troca).
+- Admin: valores financeiros, alocações e trocas só leitura (corrigir pelas telas).
+- Relatórios da contabilidade só com carros de locação.
+- Roubo encerra a locação na data e deixa o carro Inativo.
+- Cliente inadimplente pode pegar carro, com o valor em aberto exibido e confirmação.
+- KM: primeira leitura é ponto de partida (salvo compra recente); mês completo usa franquia cheia; mudança de limite vale só para leituras posteriores; painel cobra até 2 meses sem leitura; KM fora do normal pede confirmação também na vistoria/devolução.
+- Multa paga direto pelo cliente → "Não se aplica"; multa sem prazo FICI aparece no alerta como "prazo não informado"; NIC sem cliente não herda o motorista atual.
+- Auxílio: soma os dias de todas as oficinas do sinistro.
+- Negativos proibidos em todo valor; valor semanal > 0.
+- Login bloqueia por usuário + IP (estranho não tranca a conta dos donos).
+- Encargo só em aluguel: 1 encargo + 1 complemento até 10% após 4 dias.
+- Card "previstos" do painel inclui aluguéis a vencer na semana.
+
+**⚠️ Confirmar com o contador:** sobra de pagamento que vira crédito (base do DAS continua no uso do crédito; tela mostra o adiantamento), cota da proteção como despesa, exclusão dos carros pessoais dos relatórios.
+
+**Pendente (próxima rodada):**
+- 121 observações deixadas pelas frentes de UX da etapa 14 (lista em pendências da etapa 14; ex.: teclado numérico/rótulos em caução, ND e encargo; botões "Recebi" no painel/alocações; hora de lançamento própria no pagamento).
+- Ficha do carro (frota/alertas.py): KM pendente ainda olha só o mês atual; preventivas "Sem registro" ainda não aparecem no painel; link "Informar última troca" só no quadro de preventivas.
+- Botão do DAS ainda aponta para CSV (o .xlsx já funciona).
+- Roubo de carro substituto em troca aberta; mudar sinistro de roubo para outro tipo não devolve o carro a Disponível.
+- Registrar manutenção ainda sem trava de envio duplicado; "quem pagou" da multa ainda é texto livre.
+- Encargos de ND cancelada não são cancelados automaticamente (usar "não cobrar").
+- Troca editada no Admin não desfaz recálculo; telas de troca não mostram o novo valor da semana.
+- C14 (fora de locação com alocação ativa) bloqueado só na tela, não no Admin; AcertoExcedenteKm sem registro no Admin.
+- Mensagem de WhatsApp diz "aluguel da semana" também nas semanas proporcionais.
+- Deploy Railway/Neon e carga de dados reais.
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:
-1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY` (**obrigatória**), `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` e, de preferência, `CREDENCIAIS_KEY` antes de cadastrar credenciais de portais; opcionais `ANTHROPIC_API_KEY` (leitura de CNH), `CHAVE_PIX` (mensagem de cobrança) e volume persistente com `MEDIA_ROOT` para as fotos; cron diário `python manage.py rotina_diaria`.
+1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY` (**obrigatória**), `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` e, de preferência, `CREDENCIAIS_KEY` antes de cadastrar credenciais de portais; opcionais `ANTHROPIC_API_KEY` (leitura de CNH), `CHAVE_PIX` (mensagem de cobrança) e volume persistente com `MEDIA_ROOT` para as fotos; cron diário `python manage.py rotina_diaria` com o agendamento `5 3 * * *` (o cron do Railway é em UTC; isso dá 00:05 em Brasília). Se a rotina ficar parada, o painel mostra um aviso. Atrás do proxy do Railway, deixe `PROXIES_CONFIAVEIS` no padrão (1) para o bloqueio de login usar o IP real.
 2. **Carga inicial**: cadastrar frota/clientes reais (ou preparar os "outros dados organizados" — decisão nº 9).
 3. **Fase 2 do roadmap** (docs.md §7): anexos, notificações WhatsApp/e-mail, emissão de fatura/ND, importação de planilhas.

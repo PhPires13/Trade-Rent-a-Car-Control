@@ -156,19 +156,8 @@ class Veiculo(models.Model):
         blank=True,
         validators=[FileExtensionValidator(EXTENSOES_DOCUMENTO)],
     )
-    # IPVA e licenciamento do ciclo vigente (docs.md §4.1 e §5; decisão nº 21).
-    # O histórico dos anos anteriores fica no simple-history e na despesa do mês do pagamento.
-    ipva_ano = models.PositiveIntegerField("IPVA — ano", null=True, blank=True)
-    ipva_valor = models.DecimalField(
-        "IPVA — valor (R$)", max_digits=10, decimal_places=2, null=True, blank=True
-    )
-    ipva_vencimento = models.DateField("IPVA — vencimento", null=True, blank=True)
-    ipva_pago_em = models.DateField(
-        "IPVA — pago em",
-        null=True,
-        blank=True,
-        help_text="Preencha ao pagar — a data define o mês da despesa nos relatórios",
-    )
+    # IPVA fica em PagamentoIpva (um registro por ano e parcela) — assim o IPVA dos
+    # anos anteriores continua nos relatórios já enviados à contabilidade (decisão nº 21).
     licenciamento_vencimento = models.DateField("licenciamento — vencimento", null=True, blank=True)
     rastreador_vigencia_fim = models.DateField(
         "rastreador — fim da vigência", null=True, blank=True
@@ -191,3 +180,52 @@ class Veiculo(models.Model):
     def save(self, *args, **kwargs):
         self.placa = normalizar_placa(self.placa)
         super().save(*args, **kwargs)
+
+
+class PagamentoIpva(models.Model):
+    """IPVA de um carro — uma linha por ano e parcela (decisão nº 21).
+
+    Cada parcela paga é despesa do mês em que foi paga. Lançar o IPVA do ano
+    novo não mexe nos anos anteriores: os relatórios de meses passados ficam
+    como foram enviados à contabilidade.
+    """
+
+    veiculo = models.ForeignKey(
+        Veiculo, verbose_name="veículo", on_delete=models.PROTECT, related_name="pagamentos_ipva"
+    )
+    ano = models.PositiveIntegerField("ano do IPVA")
+    parcela = models.PositiveSmallIntegerField(
+        "parcela", default=1, help_text="1 para cota única; 1, 2, 3… quando parcelado"
+    )
+    valor = models.DecimalField(
+        "valor (R$)", max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    vencimento = models.DateField("vencimento", null=True, blank=True)
+    pago_em = models.DateField(
+        "pago em",
+        null=True,
+        blank=True,
+        help_text="Preencha ao pagar: a data é o mês da despesa nos relatórios",
+    )
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "pagamento de IPVA"
+        verbose_name_plural = "pagamentos de IPVA"
+        ordering = ["-ano", "parcela"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["veiculo", "ano", "parcela"], name="ipva_unico_por_veiculo_ano_parcela"
+            )
+        ]
+
+    def __str__(self):
+        return f"IPVA {self.ano} ({self.parcela}ª) — {self.veiculo.placa}"
+
+    @property
+    def rotulo(self):
+        """ "IPVA 2026" (cota única/1ª parcela) ou "IPVA 2026 — parcela 2" (planilhas e alertas)."""
+        if self.parcela and self.parcela > 1:
+            return f"IPVA {self.ano} — parcela {self.parcela}"
+        return f"IPVA {self.ano}"

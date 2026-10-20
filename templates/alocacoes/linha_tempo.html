@@ -14,7 +14,8 @@
     <span class="absolute -left-[7px] mt-1.5 h-3 w-3 rounded-full bg-marca-preto"></span>
     <div class="text-xs text-gray-500">{{ evento.data|date:"d/m/Y" }}</div>
     <div class="text-sm">
-      <span class="font-semibold">{{ evento.tipo }}:</span> {{ evento.descricao }}
+      <span class="font-semibold">{{ evento.tipo }}:</span> <span class="whitespace-pre-line">{{ evento.descricao }}</span>
+      {% if evento.url %}<a href="{{ evento.url }}" target="_blank" rel="noopener" class="ml-1 text-xs underline">ver checklist</a>{% endif %}
     </div>
   </li>
   {% empty %}

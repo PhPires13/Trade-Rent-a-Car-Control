@@ -12,7 +12,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery, Sum
+from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
@@ -50,41 +50,57 @@ class RecebimentoRepetido(ValidationError):
         self.recebimento = recebimento
 
 
+def _proximo_dia(data, dia_semana):
+    """Primeiro dia >= data que cai no dia da semana pedido (0 = segunda)."""
+    return data + timedelta(days=(dia_semana - data.weekday()) % 7)
+
+
+def periodo_da_cobranca(cobranca):
+    """Dias de aluguel pagos pela cobrança (antigas, sem período: a semana do vencimento)."""
+    inicio = cobranca.periodo_inicio or cobranca.vencimento
+    fim = cobranca.periodo_fim or cobranca.vencimento + timedelta(days=6)
+    return inicio, fim
+
+
 def _proximo_vencimento(alocacao):
-    """Vencimento da próxima cobrança de aluguel a gerar.
+    """(vencimento, primeiro dia ainda não cobrado) da próxima cobrança de aluguel.
 
     Ancorado na última cobrança existente (inclusive cancelada), para que uma
     mudança de dia_vencimento em contrato ativo valha só para frente — sem
-    regenerar semanas já cobradas nem semanas canceladas.
+    regenerar semanas já cobradas nem semanas canceladas. Sem cobrança ainda,
+    começa no "cobrar a partir de" (carga de contrato antigo, decisão D01) ou
+    no início da locação.
     """
     ultima = (
         Cobranca.objects.filter(alocacao=alocacao, origem=Cobranca.Origem.ALUGUEL)
         .order_by("-vencimento")
         .first()
     )
-    data = ultima.vencimento + timedelta(days=1) if ultima else alocacao.data_inicio
-    while data.weekday() != alocacao.dia_vencimento:
-        data += timedelta(days=1)
-    return data
+    if ultima is None:
+        inicio = alocacao.cobrar_a_partir_de or alocacao.data_inicio
+        return inicio, inicio
+    vencimento = _proximo_dia(ultima.vencimento + timedelta(days=1), alocacao.dia_vencimento)
+    return vencimento, periodo_da_cobranca(ultima)[1] + timedelta(days=1)
 
 
-def _valor_da_semana(alocacao, vencimento):
-    """Valor da semana [vencimento, vencimento+6], rateado por dia (docs.md §4.2).
+def _valor_do_periodo(alocacao, inicio, fim):
+    """Valor dos dias [inicio, fim] pelo preço semanal ÷ 7 de cada dia (docs.md §4.2).
 
     Troca temporária com valor ajustado vale pelos dias em que está em curso;
-    o restante da semana sai pelo valor da alocação (decisão nº 1).
+    o restante sai pelo valor da alocação (decisão nº 1). Semana cheia sem
+    troca = valor semanal exato.
     """
-    fim_da_semana = vencimento + timedelta(days=6)
+    dias = (fim - inicio).days + 1
     trocas = list(
-        alocacao.trocas.filter(
-            valor_semanal_ajustado__isnull=False, data_retirada__lte=fim_da_semana
-        ).filter(Q(data_devolucao__isnull=True) | Q(data_devolucao__gte=vencimento))
+        alocacao.trocas.filter(valor_semanal_ajustado__isnull=False, data_retirada__lte=fim).filter(
+            Q(data_devolucao__isnull=True) | Q(data_devolucao__gte=inicio)
+        )
     )
-    if not trocas:
+    if not trocas and dias == 7:
         return alocacao.valor_semanal
     total = ZERO
-    for i in range(7):
-        dia = vencimento + timedelta(days=i)
+    for i in range(dias):
+        dia = inicio + timedelta(days=i)
         vigente = next(
             (
                 troca.valor_semanal_ajustado
@@ -98,36 +114,103 @@ def _valor_da_semana(alocacao, vencimento):
     return (total / 7).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _valor_da_semana(alocacao, vencimento):
+    """Valor da semana [vencimento, vencimento+6], rateado por dia (docs.md §4.2)."""
+    return _valor_do_periodo(alocacao, vencimento, vencimento + timedelta(days=6))
+
+
+def _descricao_do_aluguel(alocacao, vencimento, inicio, fim):
+    placa = alocacao.veiculo.placa
+    if inicio == vencimento and fim == vencimento + timedelta(days=6):
+        return f"Aluguel semanal {placa} — venc. {vencimento:%d/%m/%Y}"
+    dias = (fim - inicio).days + 1
+    rotulo = "1 dia" if dias == 1 else f"{dias} dias"
+    return f"Aluguel proporcional {placa} — {rotulo} ({inicio:%d/%m} a {fim:%d/%m/%Y})"
+
+
 def gerar_cobrancas_semanais(hoje=None):
-    """Gera as cobranças de aluguel vencidas até hoje (idempotente; recupera dias perdidos)."""
+    """Gera as cobranças de aluguel vencidas até hoje (idempotente; recupera dias perdidos).
+
+    Cada cobrança paga os dias ainda não cobertos até a véspera do próximo
+    vencimento — sem dia de graça nem dia em dobro:
+    - 1ª cobrança no dia da entrega; se o dia de pagar é outro, ela sai
+      proporcional, só pelos dias até o 1º vencimento (decisão D12);
+    - mudou o dia de vencimento: a 1ª cobrança no dia novo sai proporcional,
+      só pelos dias que a semana anterior não cobriu (decisão D04).
+    """
     hoje = hoje or date.today()
     criadas = []
     alocacoes = Alocacao.objects.filter(
         Q(status=Alocacao.Status.ATIVA) | Q(data_termino__gte=hoje - timedelta(days=60))
     ).select_related("cliente", "veiculo")
     for alocacao in alocacoes:
-        vencimento = _proximo_vencimento(alocacao)
+        vencimento, inicio = _proximo_vencimento(alocacao)
         # Cobrança pré-paga: a semana só é devida se começa ANTES da devolução.
         if alocacao.data_termino:
             limite = min(hoje, alocacao.data_termino - timedelta(days=1))
         else:
             limite = hoje
         while vencimento <= limite:
-            cobranca, criada = Cobranca.objects.get_or_create(
-                alocacao=alocacao,
-                vencimento=vencimento,
-                origem=Cobranca.Origem.ALUGUEL,
-                defaults={
-                    "cliente": alocacao.cliente,
-                    "descricao": f"Aluguel semanal {alocacao.veiculo.placa} "
-                    f"— venc. {vencimento:%d/%m/%Y}",
-                    "valor": _valor_da_semana(alocacao, vencimento),
-                },
-            )
-            if criada:
-                criadas.append(cobranca)
-            vencimento += timedelta(days=7)
+            if alocacao.data_termino and inicio >= alocacao.data_termino:
+                break  # transição do dia (D04) que só pagaria dias depois da devolução
+            proximo = _proximo_dia(vencimento + timedelta(days=1), alocacao.dia_vencimento)
+            fim = proximo - timedelta(days=1)
+            if fim >= inicio:
+                cobranca, criada = Cobranca.objects.get_or_create(
+                    alocacao=alocacao,
+                    vencimento=vencimento,
+                    origem=Cobranca.Origem.ALUGUEL,
+                    defaults={
+                        "cliente": alocacao.cliente,
+                        "descricao": _descricao_do_aluguel(alocacao, vencimento, inicio, fim),
+                        "valor": _valor_do_periodo(alocacao, inicio, fim),
+                        "periodo_inicio": inicio,
+                        "periodo_fim": fim,
+                    },
+                )
+                if criada:
+                    criadas.append(cobranca)
+                inicio = periodo_da_cobranca(cobranca)[1] + timedelta(days=1)
+            vencimento = proximo
     return criadas
+
+
+@transaction.atomic
+def reajustar_aluguel_pela_troca(troca, hoje=None):
+    """Refaz o valor das semanas de aluguel em aberto que a troca alcança (decisão D02).
+
+    Carro substituto com outro preço pego ou devolvido no meio de uma semana
+    já lançada: a semana passa a dividir os dias entre cada carro. Só mexe em
+    cobrança ainda em aberto e quando o novo valor não fica abaixo do que já
+    foi pago — semana paga, cancelada ou judicial fica como está.
+    Devolve as cobranças alteradas.
+    """
+    if troca.valor_semanal_ajustado is None:
+        return []
+    alocacao = troca.alocacao
+    abertas = Cobranca.com_quitacao_anotada(
+        Cobranca.objects.filter(
+            alocacao=alocacao,
+            origem=Cobranca.Origem.ALUGUEL,
+            status__in=Cobranca.STATUS_EM_ABERTO,
+            vencimento__gte=troca.data_retirada - timedelta(days=6),
+        )
+    )
+    alteradas = []
+    for cobranca in abertas:
+        inicio, fim = periodo_da_cobranca(cobranca)
+        if fim < troca.data_retirada:
+            continue
+        novo = _valor_do_periodo(alocacao, inicio, fim)
+        if novo == cobranca.valor or novo < cobranca.total_quitado:
+            continue
+        cobranca.valor = novo
+        cobranca.save(update_fields=["valor"])
+        cobranca.atualizar_status(hoje)
+        alteradas.append(cobranca)
+    if alteradas:
+        atualizar_inadimplencia(alocacao.cliente)  # semana pode ter ficado quitada
+    return alteradas
 
 
 def _filtro_devedor(limite):
@@ -179,31 +262,63 @@ def atualizar_inadimplencia(cliente, hoje=None):
         cliente.save(update_fields=["status"])
 
 
-def sugerir_encargo(cobranca, hoje=None):
-    """5% até ~4 dias de atraso, 10% acima — sempre ajustável pelo dono (decisão nº 13)."""
+def sugerir_encargo(cobranca, hoje=None, ja_aplicado=None, ativos=None):
+    """5% até ~4 dias de atraso, 10% acima — sempre ajustável pelo dono (decisão nº 13).
+
+    Só para aluguel (ponto em aberto nº 3: ND, repasse, excedente e o próprio
+    encargo não têm encargo). Já aplicados os 5% e o atraso passou de 4 dias,
+    sugere o complemento até 10% (um só). `ja_aplicado`/`ativos` (soma e
+    quantidade de encargos não cancelados) evitam as consultas na listagem.
+    """
     hoje = hoje or date.today()
+    if cobranca.origem != Cobranca.Origem.ALUGUEL:
+        return ZERO
     dias = (hoje - cobranca.vencimento).days
     if dias <= 0 or cobranca.saldo <= ZERO:
         return ZERO
+    if ja_aplicado is None or ativos is None:
+        somas = cobranca.encargos.exclude(status=Cobranca.Status.CANCELADA).aggregate(
+            t=Sum("valor"), n=Count("pk")
+        )
+        ja_aplicado, ativos = somas["t"] or ZERO, somas["n"]
+    if ativos >= 2 or (ativos and dias <= ENCARGO_DIAS_CORTE):
+        return ZERO
     taxa = ENCARGO_CURTO if dias <= ENCARGO_DIAS_CORTE else ENCARGO_LONGO
-    return (cobranca.saldo * taxa).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total = (cobranca.saldo * taxa).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return max(total - ja_aplicado, ZERO)
 
 
 @transaction.atomic
 def aplicar_encargo(cobranca, valor, hoje=None):
-    """Cria a cobrança de encargo vinculada à atrasada (fora da base do DAS)."""
+    """Cria a cobrança de encargo vinculada à atrasada (fora da base do DAS).
+
+    Só sobre aluguel (nunca encargo sobre encargo). Um encargo por aluguel,
+    mais um complemento depois de 4 dias de atraso (5% → 10%). Vence no
+    próximo dia de pagamento do cliente — vencer hoje deixaria o motorista
+    inadimplente amanhã sem ninguém decidir.
+    """
     hoje = hoje or date.today()
     if valor <= ZERO:
         raise ValidationError("O valor do encargo deve ser maior que zero.")
-    if cobranca.encargos.exclude(status=Cobranca.Status.CANCELADA).exists():
+    if cobranca.origem != Cobranca.Origem.ALUGUEL:
+        raise ValidationError("Encargo por atraso só pode ser cobrado sobre aluguel.")
+    # trava a cobrança: clique duplo no "Aplicar" não vira dois encargos
+    Cobranca.objects.select_for_update().filter(pk=cobranca.pk).first()
+    ativos = cobranca.encargos.exclude(status=Cobranca.Status.CANCELADA).count()
+    dias = (hoje - cobranca.vencimento).days
+    if ativos >= 2 or (ativos == 1 and dias <= ENCARGO_DIAS_CORTE):
         raise ValidationError("Esta cobrança já tem encargo aplicado.")
+    if ativos == 1 and sugerir_encargo(cobranca, hoje) <= ZERO:
+        # o encargo já lançado cobre os 10%: complemento seria cobrar em dobro
+        raise ValidationError("O encargo já aplicado nesta cobrança já chega aos 10%.")
+    rotulo = "Complemento do encargo por atraso" if ativos else "Encargo por atraso"
     return Cobranca.objects.create(
         cliente=cobranca.cliente,
         alocacao=cobranca.alocacao,
         origem=Cobranca.Origem.ENCARGO,
-        descricao=f"Encargo por atraso — {cobranca.descricao}",
+        descricao=f"{rotulo} — {cobranca.descricao}",
         valor=valor,
-        vencimento=hoje,
+        vencimento=proximo_dia_pagamento(cobranca.cliente, hoje),
         cobranca_origem=cobranca,
     )
 
@@ -301,7 +416,9 @@ def registrar_recebimento(
                 recebimento=recebimento,
                 observacoes="Sobra de recebimento",
             )
-    atualizar_inadimplencia(cliente, hoje=data)
+    # inadimplência pela data de hoje: um pagamento lançado com data antiga não
+    # pode esconder as semanas que atrasaram depois dela (a data vale p/ caixa/DAS)
+    atualizar_inadimplencia(cliente)
     return recebimento
 
 
@@ -586,7 +703,7 @@ def descontar_da_caucao(caucao, cobranca, valor, data, observacoes=""):
         observacoes=observacoes,
     )
     cobranca.atualizar_status()
-    atualizar_inadimplencia(cobranca.cliente, hoje=data)
+    atualizar_inadimplencia(cobranca.cliente)  # hoje, não a data do desconto
     return movimentacao
 
 
@@ -596,6 +713,12 @@ def resumo_fiscal(ano, mes):
     Regime de caixa: aplicações pela data do recebimento e descontos de
     caução pela data da movimentação — abater da caução tem o mesmo efeito
     de quitação (docs.md §4.3).
+
+    Sobra de pagamento que vira crédito do cliente (decisão D13): continua
+    entrando na base só quando o crédito é usado, mas aparece no mês em que o
+    dinheiro entrou como "adiantamentos recebidos" (fora da base), para a
+    conta bater com o banco. `pago_com_credito` é a parte do mês quitada com
+    crédito — já está nas linhas de cima, mas não é dinheiro novo no banco.
     """
     locacao = ZERO
     diversos = {}
@@ -619,8 +742,10 @@ def resumo_fiscal(ano, mes):
         data__month=mes,
         cobranca__isnull=False,
     ).select_related("cobranca")
+    descontado_da_caucao = ZERO
     for movimentacao in descontos:
         somar(movimentacao.cobranca, movimentacao.valor)
+        descontado_da_caucao += movimentacao.valor
     caucao_recebida = (
         MovimentacaoCaucao.objects.filter(
             data__year=ano,
@@ -628,9 +753,52 @@ def resumo_fiscal(ano, mes):
             tipo__in=[MovimentacaoCaucao.Tipo.RECEBIMENTO, MovimentacaoCaucao.Tipo.REFORCO],
         ).aggregate(t=Sum("valor"))
     )["t"] or ZERO
+    adiantamentos = (
+        MovimentoCredito.objects.filter(
+            tipo=MovimentoCredito.Tipo.ENTRADA, data__year=ano, data__month=mes
+        )
+        # sobra de um pagamento feito com crédito não é dinheiro novo
+        .exclude(recebimento__forma=Recebimento.Forma.CREDITO)
+        .aggregate(t=Sum("valor"))
+    )["t"] or ZERO
+    pago_com_credito = (
+        AplicacaoRecebimento.objects.filter(
+            recebimento__forma=Recebimento.Forma.CREDITO,
+            recebimento__data__year=ano,
+            recebimento__data__month=mes,
+        ).aggregate(t=Sum("valor"))
+    )["t"] or ZERO
+    # sobra de pagamento feito com crédito que foi para a caução: está em
+    # "caução recebida", mas não entrou dinheiro novo
+    marcas_credito = [
+        _marca_reforco(r)
+        for r in Recebimento.objects.filter(
+            forma=Recebimento.Forma.CREDITO, data__year=ano, data__month=mes
+        ).only("pk")
+    ]
+    reforco_de_credito = (
+        MovimentacaoCaucao.objects.filter(
+            tipo=MovimentacaoCaucao.Tipo.REFORCO, observacoes__in=marcas_credito
+        ).aggregate(t=Sum("valor"))["t"]
+        or ZERO
+        if marcas_credito
+        else ZERO
+    )
+    total_diversos = sum(diversos.values(), ZERO)
     return {
         "locacao": locacao,
         "diversos": diversos,
-        "total_diversos": sum(diversos.values(), ZERO),
+        "total_diversos": total_diversos,
         "caucao_recebida": caucao_recebida,
+        "adiantamentos": adiantamentos,
+        "pago_com_credito": pago_com_credito,
+        # o que deve bater com o banco/caixa: sem o uso de crédito nem o desconto
+        # de caução (dinheiro que já tinha entrado antes)
+        "entrou_no_caixa": locacao
+        + total_diversos
+        - pago_com_credito
+        - descontado_da_caucao
+        + adiantamentos
+        + caucao_recebida
+        - reforco_de_credito,
     }

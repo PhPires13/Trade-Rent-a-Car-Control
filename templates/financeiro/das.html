@@ -47,6 +47,23 @@
         <td class="px-4 py-2 text-gray-600">Caução recebida no mês (fora da base)</td>
         <td class="px-4 py-2 text-right">{{ resumo.caucao_recebida|brl }}</td>
       </tr>
+      <tr>
+        <td class="px-4 py-2 text-gray-600">Adiantamentos recebidos no mês — sobra de pagamento que virou crédito do cliente (fora da base)
+          <div class="text-xs text-gray-500">Entra na base do DAS só no mês em que o crédito for usado para pagar o aluguel.</div></td>
+        <td class="px-4 py-2 text-right">{{ resumo.adiantamentos|brl }}</td>
+      </tr>
+      {% if resumo.pago_com_credito %}
+      <tr>
+        <td class="px-4 py-2 text-gray-600">Dos valores acima, pagos com crédito do cliente
+          <div class="text-xs text-gray-500">Não é dinheiro novo: esse dinheiro entrou no banco num mês anterior, como adiantamento.</div></td>
+        <td class="px-4 py-2 text-right">{{ resumo.pago_com_credito|brl }}</td>
+      </tr>
+      {% endif %}
+      <tr class="bg-gray-50">
+        <td class="px-4 py-2 font-semibold">Total que entrou no caixa no mês
+          <div class="text-xs font-normal text-gray-500">Para conferir com o extrato do banco (Pix, dinheiro, transferência). Não conta o uso de crédito nem o desconto na caução.</div></td>
+        <td class="px-4 py-2 text-right font-semibold">{{ resumo.entrou_no_caixa|brl }}</td>
+      </tr>
     </tbody>
   </table>
 </div>

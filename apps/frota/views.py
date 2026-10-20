@@ -4,7 +4,7 @@ from decimal import InvalidOperation
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -15,7 +15,7 @@ from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
 
 from . import alertas, crlv, desmobilizacao
-from .models import Categoria, Fornecedor, Veiculo, normalizar_placa
+from .models import Categoria, Fornecedor, PagamentoIpva, Veiculo, normalizar_placa
 
 
 def _motorista_e_valor(alocacao, troca):
@@ -128,7 +128,10 @@ def hub(request):
 
 def detalhe(request, veiculo_id):
     """Página-hub de um veículo — cadastro, situação atual e atalhos (docs.md §4.1)."""
-    veiculo = get_object_or_404(Veiculo.objects.select_related("categoria"), pk=veiculo_id)
+    veiculo = get_object_or_404(
+        Veiculo.objects.select_related("categoria").prefetch_related("pagamentos_ipva"),
+        pk=veiculo_id,
+    )
     contexto = {
         "veiculo": veiculo,
         "total_alocacoes": veiculo.alocacoes.count(),
@@ -139,6 +142,12 @@ def detalhe(request, veiculo_id):
     }
     contexto.update(_quem_esta_com_o_carro(veiculo))
     contexto["pendencias"] = alertas.pendencias_do_veiculo(veiculo)
+    # IPVA do ano mais recente lançado (todas as parcelas dele), do prefetch
+    ipvas = list(veiculo.pagamentos_ipva.all())
+    ultimo_ano = max((p.ano for p in ipvas), default=None)
+    contexto["ipva_recente"] = sorted(
+        (p for p in ipvas if p.ano == ultimo_ano), key=lambda p: p.parcela
+    )
     return render(request, "frota/detalhe.html", contexto)
 
 
@@ -184,16 +193,8 @@ SECOES_VEICULO = (
             "foto",
         ],
     ),
-    (
-        "IPVA e licenciamento",
-        [
-            "ipva_ano",
-            "ipva_valor",
-            "ipva_vencimento",
-            "ipva_pago_em",
-            "licenciamento_vencimento",
-        ],
-    ),
+    # o IPVA (ano a ano, com parcelas) é lançado na tela "IPVA" do carro
+    ("Licenciamento", ["licenciamento_vencimento"]),
     (
         "Aquisição",
         [
@@ -222,8 +223,6 @@ SECOES_VEICULO = (
 
 _CAMPOS_DE_DATA_VEICULO = (
     "data_aquisicao",
-    "ipva_vencimento",
-    "ipva_pago_em",
     "licenciamento_vencimento",
     "rastreador_vigencia_fim",
     "bateria_data_troca",
@@ -264,6 +263,30 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
             )
         return km
 
+    def clean_uso(self):
+        """Carro alugado não pode virar "Fora de locação".
+
+        Ele continuaria sendo cobrado, mas sairia das preventivas, do controle de
+        KM e do ranking de venda enquanto o motorista roda com ele.
+        """
+        uso = self.cleaned_data["uso"]
+        if not self.instance.pk or uso != Veiculo.Uso.FORA_LOCACAO:
+            return uso
+        if self.instance.alocacoes.filter(status=Alocacao.Status.ATIVA).exists():
+            raise ValidationError(
+                "Este carro está alugado. Encerre a alocação antes de marcar como "
+                "“Fora de locação”."
+            )
+        if TrocaTemporaria.objects.filter(
+            Q(veiculo_substituto=self.instance) | Q(alocacao__veiculo=self.instance),
+            data_devolucao__isnull=True,
+        ).exists():
+            raise ValidationError(
+                "Este carro está numa troca (carro reserva) em aberto. Registre a devolução "
+                "da troca antes de marcar como “Fora de locação”."
+            )
+        return uso
+
     @property
     def secoes(self):
         return [(titulo, [self[nome] for nome in nomes]) for titulo, nomes in SECOES_VEICULO]
@@ -288,6 +311,50 @@ def veiculo_novo(request):
 
 def veiculo_editar(request, veiculo_id):
     return _formulario_veiculo(request, get_object_or_404(Veiculo, pk=veiculo_id))
+
+
+class PagamentoIpvaForm(FormularioBR, forms.ModelForm):
+    class Meta:
+        model = PagamentoIpva
+        fields = ["ano", "parcela", "valor", "vencimento", "pago_em"]
+        widgets = {
+            "ano": forms.NumberInput(attrs={"inputmode": "numeric", "min": 2000}),
+            "parcela": forms.NumberInput(attrs={"inputmode": "numeric", "min": 1}),
+            "vencimento": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+            "pago_em": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+        }
+
+    def clean(self):
+        dados = super().clean()
+        if dados.get("pago_em") and dados.get("valor") is None:
+            self.add_error("valor", "Informe quanto foi pago — sem valor não entra na despesa.")
+        return dados
+
+
+IpvaFormSet = forms.inlineformset_factory(
+    Veiculo, PagamentoIpva, form=PagamentoIpvaForm, extra=1, can_delete=True
+)
+
+
+def ipva(request, veiculo_id):
+    """IPVA do carro ano a ano (e parcela a parcela) — decisão nº 21.
+
+    Cada parcela paga vira despesa no mês do pagamento; lançar o ano novo não
+    apaga os anteriores, então os relatórios já enviados continuam iguais.
+    """
+    veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
+    formset = IpvaFormSet(
+        request.POST or None,
+        instance=veiculo,
+        queryset=veiculo.pagamentos_ipva.all(),
+        # só a linha em branco nova vem com o ano atual
+        initial=[{"ano": date.today().year, "parcela": 1}],
+    )
+    if request.method == "POST" and formset.is_valid():
+        formset.save()
+        messages.success(request, f"IPVA do {veiculo.placa} salvo.")
+        return redirect("frota:detalhe", veiculo.pk)
+    return render(request, "frota/ipva.html", {"veiculo": veiculo, "formset": formset})
 
 
 class CategoriaForm(FormularioBR, forms.ModelForm):

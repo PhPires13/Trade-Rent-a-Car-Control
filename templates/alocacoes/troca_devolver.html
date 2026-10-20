@@ -31,7 +31,8 @@
       <label class="mb-1 block text-sm font-medium" for="data_devolucao">Data em que o substituto voltou</label>
       <input type="date" name="data_devolucao" id="data_devolucao"
              value="{% firstof request.POST.data_devolucao hoje|date:'Y-m-d' %}"
-             min="{{ troca.data_retirada|date:'Y-m-d' }}" required>
+             min="{{ troca.data_retirada|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required>
+      <p class="mt-1 text-xs text-gray-500">Não pode ser no futuro.</p>
     </div>
     <div>
       <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM do substituto na devolução</label>
@@ -40,6 +41,14 @@
              placeholder="saiu com {{ troca.km_retirada|milhar }}" required>
       <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da retirada ({{ troca.km_retirada|milhar }} km).</p>
     </div>
+    {% if aviso_km %}
+          <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
+            <p>{{ aviso_km }}</p>
+            <label class="mt-2 flex items-center gap-2 font-semibold">
+              <input type="checkbox" name="confirmar_km" value="1" style="width:auto"> Confirmo o KM
+            </label>
+          </div>
+          {% endif %}
     <div class="flex items-center gap-3 pt-2">
       <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar devolução</button>
       <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>

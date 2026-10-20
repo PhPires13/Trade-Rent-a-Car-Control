@@ -87,7 +87,8 @@
             <label class="mb-1 block text-sm font-medium" for="data_termino">Data em que o carro voltou</label>
             <input type="date" name="data_termino" id="data_termino"
                    value="{% firstof request.POST.data_termino data_sugerida|date:'Y-m-d' %}"
-                   min="{{ alocacao.data_inicio|date:'Y-m-d' }}" required>
+                   min="{{ alocacao.data_inicio|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required>
+            <p class="mt-1 text-xs text-gray-500">Não pode ser no futuro: as semanas são cobradas até esta data.</p>
           </div>
           <div>
             <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM no painel na devolução</label>
@@ -99,6 +100,14 @@
             {% endif %}
             <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da entrega ({{ alocacao.km_entrega|milhar }} km).</p>
           </div>
+          {% if aviso_km %}
+          <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
+            <p>{{ aviso_km }}</p>
+            <label class="mt-2 flex items-center gap-2 font-semibold">
+              <input type="checkbox" name="confirmar_km" value="1" style="width:auto"> Confirmo o KM
+            </label>
+          </div>
+          {% endif %}
         </div>
       </div>
     </section>
@@ -117,6 +126,11 @@
           {% else %}
           <p class="mt-1 text-gray-700">Sem débitos em aberto hoje.</p>
           {% endif %}
+          {% if semanas_a_cancelar %}
+          <p class="mt-2 rounded bg-blue-50 px-2 py-1.5 text-blue-900">Não cobre agora:
+            {% for semana in semanas_a_cancelar %}a semana de {{ semana.vencimento|date:"d/m" }} ({{ semana.valor|brl }}){% if not forloop.last %}, {% endif %}{% endfor %}
+            começa depois da devolução e <strong>será cancelada ao encerrar</strong>.</p>
+          {% endif %}
           {% if caucao and caucao.saldo > 0 %}
           <p class="mt-2 text-gray-700">Há <strong>{{ caucao.saldo|brl }}</strong> de caução retida. Ao confirmar, você vai direto para a tela da caução para <strong>descontar</strong> o que o cliente deve e <strong>devolver</strong> o restante.</p>
           {% else %}
@@ -134,7 +148,7 @@
           <h2 class="text-base font-semibold">Confirmar a devolução</h2>
           <ul class="mt-1 list-inside list-disc space-y-1 text-gray-700">
             <li>O carro volta a ficar <strong>disponível</strong> para alugar.</li>
-            <li>Semanas com vencimento a partir da data de devolução que <strong>ainda não foram pagas</strong> são canceladas.</li>
+            <li>Semanas com vencimento a partir da data de devolução são <strong>canceladas</strong>. O que já tinha sido pago nelas vira <strong>crédito do cliente</strong> (ou volta para a caução, se foi descontado dela).</li>
             <li>Não dá para desfazer — confira a data e o KM antes.</li>
           </ul>
           {% if not vistoria_devolucao %}
