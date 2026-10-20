@@ -7,9 +7,69 @@
 <h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
 {% include "financeiro/_abas.html" with aba="receber" %}
 
+{% if resumo %}
+{# Resumo pós-lançamento: o que o pagamento quitou, para onde foi a sobra e como ficou o cliente #}
+<section class="mb-6 rounded-lg border-l-4 border-green-600 bg-green-50 p-4 text-sm sm:p-5" aria-label="Resumo do pagamento lançado">
+  <h2 class="mb-2 text-base font-bold text-green-900">
+    {% if resumo.recebimento.forma == "credito" %}
+    ✓ Crédito usado: {{ resumo.recebimento.valor|brl }}
+    <span class="font-normal">({{ resumo.recebimento.data|date:"d/m/Y" }})</span>
+    {% else %}
+    ✓ Pagamento lançado: {{ resumo.recebimento.valor|brl }}
+    <span class="font-normal">({{ resumo.recebimento.get_forma_display }}, {{ resumo.recebimento.data|date:"d/m/Y" }})</span>
+    {% endif %}
+  </h2>
+  <ul class="mb-3 space-y-1 text-green-950">
+    {% for cobranca, valor in resumo.quitadas %}
+    <li><strong>Quitou:</strong> {{ cobranca.descricao }} ({{ valor|brl }})</li>
+    {% endfor %}
+    {% for cobranca, valor in resumo.parciais %}
+    <li><strong>Abateu</strong> {{ valor|brl }} de {{ cobranca.descricao }} — ainda falta {{ cobranca.saldo|brl }}</li>
+    {% endfor %}
+    {% if resumo.sobra %}
+    <li><strong>Sobrou {{ resumo.sobra.0|brl }}</strong> →
+      {% if resumo.sobra.1 == "caucao" %}reforço da caução{% else %}guardado como crédito de {{ cliente.nome }}{% endif %}</li>
+    {% endif %}
+  </ul>
+  <p class="mb-4 font-semibold">
+    {% if resumo.devido > 0 %}
+      {% if cliente.status == "inadimplente" %}
+      <span class="text-red-700">⚠ {{ cliente.nome }} continua inadimplente: ainda deve {{ resumo.devido|brl }}.</span>
+      {% else %}
+      <span class="text-yellow-800">{{ cliente.nome }} ainda tem {{ resumo.devido|brl }} em aberto (ainda não atrasado).</span>
+      {% endif %}
+    {% else %}
+      <span class="text-green-800">{{ cliente.nome }} está em dia ✓</span>
+    {% endif %}
+  </p>
+  <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+    {% if resumo.link_whatsapp %}
+    <a href="{{ resumo.link_whatsapp }}" target="_blank" rel="noopener"
+       class="rounded bg-green-700 px-4 py-3 text-center font-semibold text-white hover:bg-green-800 sm:py-2">
+      💬 Enviar recibo no WhatsApp
+    </a>
+    {% else %}
+    <span class="text-xs text-gray-600">Sem telefone no cadastro de {{ cliente.nome }} — não dá para mandar o recibo pelo WhatsApp.</span>
+    {% endif %}
+    {% if resumo.pode_desfazer %}
+    <form method="post" action="{% url 'financeiro:desfazer_recebimento' resumo.recebimento.pk %}"
+          onsubmit="if (!confirm('Desfazer este lançamento de {{ resumo.recebimento.valor|brl }}? As cobranças voltam a ficar em aberto e o crédito ou reforço de caução gerado por ele é removido.')) return false; this.querySelector('button').disabled = true; return true;">
+      {% csrf_token %}
+      <button class="w-full rounded border border-red-300 bg-white px-4 py-3 font-semibold text-red-700 hover:bg-red-50 sm:w-auto sm:py-2">
+        ↩ Desfazer este lançamento
+      </button>
+    </form>
+    {% endif %}
+  </div>
+  {% if resumo.pode_desfazer %}
+  <p class="mt-2 text-xs text-gray-600">Errou o cliente ou o valor? Dá para desfazer só hoje, no mesmo dia do lançamento.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <form method="get" class="mb-6 flex flex-wrap items-center gap-2 text-sm">
   <label for="cliente" class="font-medium">De qual cliente você recebeu?</label>
-  <select name="cliente" id="cliente" class="rounded border border-gray-300 px-2 py-1" onchange="this.form.submit()">
+  <select name="cliente" id="cliente" class="w-full rounded border border-gray-300 px-2 py-2 sm:w-auto sm:py-1" onchange="this.form.submit()">
     <option value="">— escolha —</option>
     {% for c in clientes %}
     <option value="{{ c.pk }}" {% if cliente and cliente.pk == c.pk %}selected{% endif %}>{{ c.nome }}</option>
@@ -26,12 +86,20 @@
 
 {% if cliente %}
 <div class="mb-4 text-sm text-gray-600">
-  Crédito disponível de {{ cliente.nome }}: <strong>{{ credito|brl }}</strong>
+  {% if devido > 0 %}{{ cliente.nome }} deve <strong class="text-red-700">{{ devido|brl }}</strong> · {% endif %}
+  Crédito guardado: <strong>{{ credito|brl }}</strong>
   · <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="underline">ver extrato</a>
 </div>
 
+{# Distribuição automática (decisão do dono, proposta nº 1-A): ao digitar o valor, ele vai da #}
+{# cobrança mais antiga para a mais nova; a pessoa ainda pode ajustar cada linha à mão. #}
 <form method="post"
-      x-data='{ valor: 0, aplicado: 0,
+      data-credito="{{ credito|stringformat:'.2f' }}"
+      data-devido="{{ devido|stringformat:'.2f' }}"
+      data-nome="{{ cliente.nome }}"
+      data-cobrancas="{{ linhas|length }}"
+      x-data='{ valor: 0, aplicado: 0, destino: "credito", usandoCredito: false, enviando: false,
+                credito: 0, devido: 0, nome: "", temCobrancas: false,
                 br(texto) {
                   let t = String(texto || "").replace(/R\$|\s/g, "");
                   if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
@@ -46,50 +114,98 @@
                   document.querySelectorAll(".aplicacao").forEach((el) => {
                     const saldo = parseFloat(el.dataset.saldo) || 0;
                     const usar = Math.min(resta, saldo);
-                    el.value = usar > 0 ? usar.toFixed(2).replace(".", ",") : "";
-                    resta = Math.max(resta - usar, 0);
+                    el.value = usar > 0.004 ? usar.toFixed(2).replace(".", ",") : "";
+                    resta = Math.max(Math.round((resta - usar) * 100) / 100, 0);
                   });
                   this.recalc();
+                },
+                digitouValor(texto) { this.valor = this.br(texto); this.distribuir(); },
+                usarCredito() {
+                  const v = this.devido > 0 ? Math.min(this.credito, this.devido) : this.credito;
+                  this.usandoCredito = true;
+                  document.getElementById("valor").value = v.toFixed(2).replace(".", ",");
+                  this.digitouValor(document.getElementById("valor").value);
+                },
+                pararCredito() {
+                  this.usandoCredito = false;
+                  document.getElementById("valor").value = "";
+                  this.digitouValor("");
+                },
+                enviar(ev) {
+                  if (this.enviando) { ev.preventDefault(); return; }
+                  if (this.temCobrancas && this.valor > 0 && this.aplicado < 0.005 &&
+                      !confirm("Nada deste pagamento foi colocado nas cobranças em aberto. " +
+                               "O valor inteiro vai ficar guardado como " +
+                               (this.destino === "caucao" ? "reforço da caução" : "crédito") +
+                               " e as cobranças continuam em aberto. Lançar assim mesmo?")) {
+                    ev.preventDefault(); return;
+                  }
+                  this.enviando = true;
                 } }'
-      x-init="valor = br($el.querySelector('[name=valor]').value); recalc()"
-      class="rounded-lg bg-white p-6 shadow">
+      x-init="credito = parseFloat($el.dataset.credito) || 0; devido = parseFloat($el.dataset.devido) || 0;
+              nome = $el.dataset.nome; temCobrancas = parseInt($el.dataset.cobrancas) > 0;
+              destino = document.getElementById('sobra_destino').value;
+              usandoCredito = {% if post.forma == 'credito' %}true{% else %}false{% endif %};
+              valor = br(document.getElementById('valor').value); recalc()"
+      x-on:submit="enviar($event)"
+      x-on:pageshow.window="enviando = false"
+      class="rounded-lg bg-white p-4 shadow sm:p-6">
   {% csrf_token %}
   <input type="hidden" name="cliente" value="{{ cliente.pk }}">
+  {# pagando com o crédito guardado: a forma vai escondida (não é dinheiro novo) #}
+  <input type="hidden" name="forma" value="credito" x-bind:disabled="!usandoCredito" {% if post.forma != "credito" %}disabled{% endif %}>
+
+  {# só com algo a pagar: sem cobrança, "usar o crédito" só trocaria crédito por crédito #}
+  {% if credito > 0 and devido > 0 %}
+  <div class="mb-4">
+    <button type="button" x-show="!usandoCredito" x-on:click="usarCredito()"
+            class="w-full rounded border border-green-600 bg-green-50 px-4 py-3 font-semibold text-green-800 hover:bg-green-100 sm:w-auto sm:py-2">
+      Usar o crédito de {{ credito|brl }}
+    </button>
+    <p x-show="usandoCredito" x-cloak class="rounded bg-green-50 px-3 py-2 text-sm text-green-900">
+      Pagando com o crédito guardado de {{ cliente.nome }} — não entra dinheiro novo.
+      <button type="button" x-on:click="pararCredito()" class="ml-1 underline">voltar para pagamento normal</button>
+    </p>
+  </div>
+  {% endif %}
 
   <div class="mb-4 grid gap-4 sm:grid-cols-4">
     <div>
-      <label class="mb-1 block text-sm font-medium">Valor recebido (R$)</label>
-      <input type="text" name="valor" required value="{{ post.valor|default:'' }}"
-             placeholder="ex.: 1.250,00"
-             x-on:input="valor = br($event.target.value)"
-             class="w-full rounded border border-gray-300 px-2 py-1">
+      <label for="valor" class="mb-1 block text-sm font-medium"
+             x-text="usandoCredito ? 'Quanto do crédito usar (R$)' : 'Valor recebido (R$)'">Valor recebido (R$)</label>
+      <input type="text" name="valor" id="valor" required value="{{ post.valor|default:'' }}"
+             inputmode="decimal" autocomplete="off" placeholder="ex.: 1.250,00"
+             x-on:input="digitouValor($event.target.value)"
+             class="w-full rounded border border-gray-300 px-2 py-2 text-base sm:py-1 sm:text-sm">
     </div>
     <div>
-      <label class="mb-1 block text-sm font-medium">Data do pagamento</label>
-      <input type="date" name="data" required
+      <label for="data" class="mb-1 block text-sm font-medium">Data do pagamento</label>
+      <input type="date" name="data" id="data" required
              value="{% if post.data %}{{ post.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}"
-             class="w-full rounded border border-gray-300 px-2 py-1">
+             class="w-full rounded border border-gray-300 px-2 py-2 sm:py-1">
     </div>
-    <div>
-      <label class="mb-1 block text-sm font-medium">Como pagou</label>
-      <select name="forma" class="w-full rounded border border-gray-300 px-2 py-1">
+    <div x-show="!usandoCredito">
+      <label for="forma" class="mb-1 block text-sm font-medium">Como pagou</label>
+      <select name="forma" id="forma" x-bind:disabled="usandoCredito" {% if post.forma == "credito" %}disabled{% endif %}
+              class="w-full rounded border border-gray-300 px-2 py-2 sm:py-1">
         {% for valor, rotulo in formas %}
         <option value="{{ valor }}" {% if post.forma == valor %}selected{% endif %}>{{ rotulo }}</option>
         {% endfor %}
       </select>
     </div>
     <div>
-      <label class="mb-1 block text-sm font-medium" title="Quando o cliente paga mais do que foi distribuído nas cobranças abaixo">Se sobrar dinheiro, vira</label>
-      <select name="sobra_destino" class="w-full rounded border border-gray-300 px-2 py-1">
+      <label for="sobra_destino" class="mb-1 block text-sm font-medium" title="Quando o cliente paga mais do que foi colocado nas cobranças abaixo">Se sobrar dinheiro, vira</label>
+      <select name="sobra_destino" id="sobra_destino" x-model="destino" class="w-full rounded border border-gray-300 px-2 py-2 sm:py-1">
         <option value="credito">Crédito do cliente</option>
         <option value="caucao" {% if post.sobra_destino == "caucao" %}selected{% endif %}>Reforço de caução</option>
       </select>
     </div>
   </div>
 
-  <div class="mb-4 overflow-x-auto">
-  <table class="w-full text-sm">
-    <thead class="bg-gray-50 text-left">
+  {# No celular cada cobrança vira um cartão; do sm para cima, tabela. Um só conjunto de campos. #}
+  <div class="mb-4">
+  <table class="block w-full text-sm sm:table">
+    <thead class="hidden bg-gray-50 text-left sm:table-header-group">
       <tr>
         <th class="px-3 py-2">Vencimento</th>
         <th class="px-3 py-2">Cobrança</th>
@@ -106,49 +222,64 @@
         </th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block space-y-3 sm:table-row-group sm:space-y-0 sm:divide-y sm:divide-gray-100">
       {% for cobranca, digitado in linhas %}
-      <tr class="{% if cobranca.status == 'atrasado' %}bg-red-50{% elif cobranca.status == 'judicial' %}bg-purple-50{% endif %}">
-        <td class="px-3 py-2">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
-        <td class="px-3 py-2">
+      <tr class="block rounded-lg border border-gray-200 p-3 sm:table-row sm:rounded-none sm:border-0 sm:p-0 {% if cobranca.status == 'atrasado' %}bg-red-50{% elif cobranca.status == 'judicial' %}bg-purple-50{% endif %}">
+        <td class="block sm:table-cell sm:px-3 sm:py-2">
+          <span class="text-xs text-gray-500 sm:hidden">Vence em </span>{{ cobranca.vencimento|date:"d/m/Y" }}
+          {% if cobranca.status == 'atrasado' %}<span class="text-xs font-semibold text-red-700 sm:hidden">· atrasada</span>{% endif %}
+        </td>
+        <td class="block font-medium sm:table-cell sm:px-3 sm:py-2 sm:font-normal">
           {{ cobranca.descricao }}
           {% if cobranca.status == 'judicial' %}<span class="rounded bg-purple-100 px-1 text-xs font-semibold text-purple-800">Judicial</span>{% endif %}
         </td>
-        <td class="px-3 py-2 font-semibold">{{ cobranca.saldo|brl }}</td>
-        <td class="px-3 py-2">
-          <input type="text" name="aplicar_{{ cobranca.pk }}" placeholder="0,00" value="{{ digitado }}"
-                 {# ponto decimal fixo: o parseFloat do botão "distribuir" não entende vírgula #}
+        <td class="block sm:table-cell sm:px-3 sm:py-2">
+          <span class="text-xs font-normal text-gray-500 sm:hidden">Falta receber: </span><strong>{{ cobranca.saldo|brl }}</strong>
+        </td>
+        <td class="mt-2 block sm:mt-0 sm:table-cell sm:px-3 sm:py-2">
+          <label for="aplicar_{{ cobranca.pk }}" class="mb-1 block text-xs text-gray-500 sm:sr-only">Quanto deste pagamento vai para ela (R$)</label>
+          <input type="text" name="aplicar_{{ cobranca.pk }}" id="aplicar_{{ cobranca.pk }}" placeholder="0,00" value="{{ digitado }}"
+                 inputmode="decimal" autocomplete="off"
+                 {# ponto decimal fixo: o parseFloat da distribuição não entende vírgula #}
                  data-saldo="{{ cobranca.saldo|stringformat:'.2f' }}"
-                 class="aplicacao w-28 rounded border border-gray-300 px-2 py-1"
+                 class="aplicacao w-full rounded border border-gray-300 px-2 py-2 text-base sm:w-28 sm:py-1 sm:text-sm"
                  x-on:input="recalc()">
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="4" class="px-3 py-4 text-gray-500">Nenhuma cobrança em aberto para este cliente — o valor recebido vai inteiro para o destino escolhido em "Se sobrar dinheiro".</td></tr>
+      <tr class="block sm:table-row"><td colspan="4" class="block px-3 py-4 text-gray-500 sm:table-cell">Nenhuma cobrança em aberto para este cliente — o valor recebido vai inteiro para o destino escolhido em "Se sobrar dinheiro".</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  {% if linhas %}
+  <button type="button" x-on:click="distribuir()"
+          class="mt-2 w-full rounded bg-gray-200 px-3 py-2 text-sm hover:bg-gray-300 sm:hidden">
+    distribuir automaticamente de novo
+  </button>
+  {% endif %}
   </div>
 
-  <div class="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
-    <div>Valor recebido: <strong x-text="reais(valor)"></strong></div>
-    <div>Distribuído nas cobranças: <strong x-text="reais(aplicado)"></strong></div>
-    <div>Sobra:
-      <strong x-text="reais(valor - aplicado)"
-              x-bind:class="valor - aplicado < -0.005 ? 'text-red-600' : 'text-green-700'"></strong>
-    </div>
+  <div class="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+    <div><span x-text="usandoCredito ? 'Crédito usado:' : 'Valor recebido:'">Valor recebido:</span> <strong x-text="reais(valor)"></strong></div>
+    <div>Colocado nas cobranças: <strong x-text="reais(aplicado)"></strong></div>
   </div>
-  <p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700" x-show="aplicado > valor + 0.005">
-    ⚠ Você distribuiu mais do que o cliente pagou. Diminua os valores nas cobranças ou corrija o valor recebido.
+  <p class="mb-4 rounded bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900" x-show="valor - aplicado > 0.005" x-cloak>
+    <span x-text="reais(valor - aplicado)"></span> vai ficar guardado como
+    <span x-text="destino === 'caucao' ? 'reforço da caução de ' + nome : 'crédito de ' + nome"></span>.
+  </p>
+  <p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700" x-show="aplicado > valor + 0.005" x-cloak>
+    ⚠ Você colocou nas cobranças mais do que o cliente pagou. Diminua os valores nas cobranças ou corrija o valor recebido.
   </p>
 
-  <div class="flex flex-wrap items-center gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95"
-            x-bind:disabled="aplicado > valor + 0.005" x-bind:class="aplicado > valor + 0.005 ? 'opacity-50 cursor-not-allowed' : ''">
-      Confirmar recebimento
+  <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+    <label for="observacoes" class="sr-only">Observações (opcional)</label>
+    <input type="text" name="observacoes" id="observacoes" placeholder="observações (opcional)" value="{{ post.observacoes|default:'' }}"
+           class="min-w-[12rem] rounded border border-gray-300 px-2 py-2 text-sm sm:order-2 sm:flex-1 sm:py-1">
+    <button class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 sm:order-1 sm:py-2"
+            x-bind:disabled="enviando || aplicado > valor + 0.005"
+            x-bind:class="enviando || aplicado > valor + 0.005 ? 'opacity-50 cursor-not-allowed' : ''">
+      <span x-text="enviando ? 'Lançando…' : 'Confirmar recebimento'">Confirmar recebimento</span>
     </button>
-    <input type="text" name="observacoes" placeholder="observações (opcional)" value="{{ post.observacoes|default:'' }}"
-           class="min-w-[12rem] flex-1 rounded border border-gray-300 px-2 py-1 text-sm">
   </div>
 </form>
 {% endif %}

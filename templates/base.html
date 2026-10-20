@@ -12,7 +12,33 @@
   <!-- x-cloak só esconde de fato com esta regra; sem ela o bloco pisca na tela até o Alpine subir. -->
   <style>[x-cloak]{display:none!important}
     /* campo com erro de validação: borda vermelha (Django marca com aria-invalid) */
-    [aria-invalid="true"]{border-color:#ef4444!important;background:#fef2f2}</style>
+    [aria-invalid="true"]{border-color:#ef4444!important;background:#fef2f2}
+    /* Contraste para ler no sol: cinza claro (400) em fundo claro vira 600, e o 500 direto
+       no fundo cinza da página vira 600 (dentro de cartão branco o 500 já passa). */
+    /* :where segura a força da regra em 1 classe + 1 tag: vence o .text-gray-* do Tailwind, mas
+       perde para hover:/sm:/group-hover: — o link que escurece ao passar o mouse continua escurecendo. */
+    main .text-gray-400:where(:not(.bg-marca-preto *, .bg-gray-700 *, .bg-gray-800 *, .bg-gray-900 *)){color:#4b5563}
+    main .text-gray-500:where(:not(.bg-white, .bg-white *, .bg-marca-preto *, .bg-gray-700 *, .bg-gray-800 *, .bg-gray-900 *)){color:#4b5563}
+    /* Dica "?" (static/js/ux.js): pequena na tela, mas com área de toque de 44px */
+    .dica-botao{position:relative;display:inline-flex;align-items:center;justify-content:center;width:1.15rem;height:1.15rem;
+      border-radius:9999px;border:1px solid currentColor;font-size:.7rem;font-weight:700;line-height:1;vertical-align:middle;
+      opacity:.75;cursor:help;text-decoration:none;text-transform:none}
+    .dica-botao::after{content:"";position:absolute;inset:-.8rem}
+    .dica-botao:hover,.dica-botao[aria-expanded="true"]{opacity:1}
+    .dica-botao:focus-visible{outline:2px solid #F0C948;outline-offset:2px}
+    .dica-balao{position:fixed;z-index:60;max-width:min(18rem,calc(100vw - 16px));border-radius:.5rem;background:#1A1A1A;color:#fff;
+      padding:.5rem .75rem;font-size:.875rem;font-weight:400;line-height:1.35;text-align:left;box-shadow:0 10px 15px -3px rgb(0 0 0/.25)}
+    /* Celular (abaixo de 640px) */
+    @media (max-width:639px){
+      /* letra de 16px nos campos: com menos que isso o iPhone dá zoom ao tocar e a tela sai do lugar */
+      input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]),select,textarea{font-size:16px!important}
+      /* alvos de toque de pelo menos 44px: botões, campos e links com cara de botão */
+      input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]):not([type=range]),select,
+      button:not([data-alvo-livre]),a.rounded[class*="px-"]:not([data-alvo-livre]){min-height:44px}
+      a.rounded[class*="px-"]:not([data-alvo-livre]):not(.block):not(.flex):not(.grid):not(.hidden):not(.inline-flex){display:inline-flex;align-items:center}
+      input[type=checkbox],input[type=radio]{width:1.25rem;height:1.25rem}
+    }
+    @media print{.dica-botao,.dica-balao{display:none!important}}</style>
   <script>
     tailwind.config = {
       theme: {
@@ -76,7 +102,8 @@
     {# menu em telas menores: lista vertical + busca #}
     <div id="menu-movel" x-show="menu" x-cloak class="border-t border-gray-800 px-4 pb-4 xl:hidden">
       <form method="get" action="{% url 'buscar' %}" class="mt-3 sm:hidden" role="search">
-        <input type="search" name="q" placeholder="Buscar placa ou cliente"
+        <label for="busca-movel" class="sr-only">Buscar placa ou cliente</label>
+        <input id="busca-movel" type="search" name="q" value="{{ request.GET.q }}" placeholder="Buscar placa ou cliente"
                class="w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-400 focus:border-marca-amarelo focus:outline-none">
       </form>
       <nav class="mt-2 grid grid-cols-2 gap-1 text-sm sm:grid-cols-5" aria-label="Seções">
@@ -87,7 +114,8 @@
   {% endwith %}
   {% endif %}
 
-  <main class="mx-auto max-w-6xl px-4 py-6">
+  {# no celular sobra espaço embaixo para a barra de atalhos fixa não cobrir o fim da página #}
+  <main class="mx-auto max-w-6xl px-4 py-6{% if user.is_authenticated %} pb-28 xl:pb-6 print:pb-0{% endif %}">
     {% if messages %}
       <div class="mb-4 space-y-2">
       {% for message in messages %}
@@ -101,7 +129,7 @@
              {% if 'error' in tag or 'warning' in tag %}role="alert"{% else %}role="status"{% endif %}>
           <span aria-hidden="true" class="font-bold">{% if 'error' in tag %}✕{% elif 'warning' in tag %}!{% elif 'success' in tag %}✓{% else %}i{% endif %}</span>
           <div class="flex-1">{{ message }}</div>
-          <button type="button" @click="aberto = false" class="text-lg leading-none opacity-50 hover:opacity-100" aria-label="Fechar aviso">×</button>
+          <button type="button" @click="aberto = false" class="-my-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded text-2xl leading-none opacity-60 hover:opacity-100" aria-label="Fechar aviso">×</button>
         </div>
         {% endwith %}
       {% endfor %}
@@ -109,27 +137,40 @@
     {% endif %}
     {% block conteudo %}{% endblock %}
   </main>
-  <script>
-    // Seletor de arquivo em português (o nativo do navegador sai "Choose File / No file chosen").
-    document.querySelectorAll('input[type="file"]').forEach(function (campo) {
-      campo.classList.add("sr-only");
-      const caixa = document.createElement("span");
-      caixa.className = "flex flex-wrap items-center gap-2";
-      const botao = document.createElement("button");
-      botao.type = "button";
-      botao.className = "rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50";
-      botao.textContent = "📎 Escolher arquivo";
-      const nome = document.createElement("span");
-      nome.className = "text-sm text-gray-500";
-      nome.textContent = "nenhum arquivo escolhido";
-      botao.addEventListener("click", function () { campo.click(); });
-      campo.addEventListener("change", function () {
-        nome.textContent = campo.files.length ? campo.files[0].name : "nenhum arquivo escolhido";
-        nome.className = campo.files.length ? "text-sm font-medium text-gray-800" : "text-sm text-gray-500";
-      });
-      campo.after(caixa);
-      caixa.append(botao, nome);
-    });
-  </script>
+  {% if user.is_authenticated %}
+  {% with ns=request.resolver_match.namespace nome=request.resolver_match.url_name %}
+  {# celular/tablet: barra fixa embaixo com o que mais se faz no dia a dia (no computador, o menu do topo) #}
+  <nav class="nao-imprime fixed inset-x-0 bottom-0 z-40 border-t border-gray-800 bg-marca-preto text-white xl:hidden print:hidden"
+       style="padding-bottom: env(safe-area-inset-bottom)" aria-label="Atalhos"
+       x-data="{ lancar: false }" @keydown.escape.window="lancar = false">
+    <div class="relative mx-auto grid max-w-lg grid-cols-4 gap-1 px-2 py-1 text-xs font-semibold">
+      <a href="{% url 'painel' %}" data-alvo-livre
+         class="flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-lg {% if not ns and nome == 'painel' %}text-marca-amarelo{% else %}text-gray-200 hover:bg-gray-800{% endif %}">
+        <span aria-hidden="true" class="text-xl leading-none">🏠</span>Painel</a>
+      <a href="{% url 'financeiro:receber' %}" data-alvo-livre
+         class="flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-lg {% if ns == 'financeiro' and nome == 'receber' %}text-marca-amarelo{% else %}text-gray-200 hover:bg-gray-800{% endif %}">
+        <span aria-hidden="true" class="text-xl leading-none">💵</span>Receber</a>
+      <a href="{% url 'km:lista' %}" data-alvo-livre
+         class="flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-lg {% if ns == 'km' %}text-marca-amarelo{% else %}text-gray-200 hover:bg-gray-800{% endif %}">
+        <span aria-hidden="true" class="text-xl leading-none">🛣️</span>KM</a>
+      <button type="button" data-alvo-livre @click="lancar = !lancar" @click.outside="lancar = false"
+              :aria-expanded="lancar" aria-controls="menu-lancar"
+              class="my-1 flex min-h-[48px] flex-col items-center justify-center rounded-lg bg-marca-amarelo text-sm font-black text-marca-preto">
+        + Lançar</button>
+      <div id="menu-lancar" x-show="lancar" x-cloak x-transition.opacity
+           class="absolute bottom-full right-2 mb-2 w-64 overflow-hidden rounded-lg bg-white text-base font-medium text-gray-900 shadow-xl ring-1 ring-black/10">
+        <p class="border-b border-gray-100 px-4 py-2 text-xs font-normal text-gray-600">O que você quer lançar?</p>
+        <a href="{% url 'financeiro:receber' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">💵</span>Pagamento recebido</a>
+        <a href="{% url 'manutencao:preventivas' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🔧</span>Manutenção <span class="text-xs font-normal text-gray-600">(escolha o carro)</span></a>
+        <a href="{% url 'multas:nova' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🚦</span>Multa</a>
+        <a href="{% url 'sinistros:novo' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">💥</span>Sinistro (batida, roubo…)</a>
+        <a href="{% url 'alocacoes:nova' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🔑</span>Nova alocação</a>
+      </div>
+    </div>
+  </nav>
+  {% endwith %}
+  {% endif %}
+  {# ajustes de uso de todas as telas: "(opcional)", dicas "?", "Salvando…", rótulos e arquivo #}
+  <script src="{% static 'js/ux.js' %}"></script>
 </body>
 </html>

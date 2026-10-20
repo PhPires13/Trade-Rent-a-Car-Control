@@ -1,0 +1,7 @@
+{# Um campo do formulário de multa — uso: {% include "multas/_campo.html" with field=form.valor largo=True %} #}
+<div class="{% if largo %}sm:col-span-2{% endif %}">
+  <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+  {{ field }}
+  {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+  {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+</div>

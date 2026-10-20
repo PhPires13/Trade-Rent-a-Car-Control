@@ -1,0 +1,12 @@
+{# Aviso ao vivo do formulário de sinistro (htmx): com quem o carro estava na data. #}
+{% if not veiculo or not dia %}
+  <p class="text-sm text-gray-500">Escolha o carro e a data para ver com quem ele estava.</p>
+{% elif cliente %}
+  <p class="rounded border-l-4 border-marca-amarelo bg-yellow-50 px-3 py-2 text-sm">
+    Em {{ dia|date:"d/m/Y" }} o carro {{ veiculo.placa }} estava com: <strong>{{ cliente.nome }}</strong>
+  </p>
+{% else %}
+  <p class="rounded border-l-4 border-gray-400 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+    Em {{ dia|date:"d/m/Y" }} o carro {{ veiculo.placa }} não estava alugado para ninguém.
+  </p>
+{% endif %}

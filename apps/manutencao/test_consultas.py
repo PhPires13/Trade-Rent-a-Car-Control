@@ -73,9 +73,9 @@ def test_quadro_de_preventivas_nao_consulta_por_veiculo(usuario_logado):
             )
 
     frota(0, 2)
-    poucas, _ = _queries_da_tela(usuario_logado, "/manutencao/preventivas/")
+    poucas, _ = _queries_da_tela(usuario_logado, "/manutencao/preventivas/?ver=todas")
     frota(2, 8)
-    muitas, html = _queries_da_tela(usuario_logado, "/manutencao/preventivas/")
+    muitas, html = _queries_da_tela(usuario_logado, "/manutencao/preventivas/?ver=todas")
     assert html.count("+ Registrar manutenção") == 10
     assert muitas == poucas
 

@@ -4,31 +4,7 @@
 
 {% block conteudo %}
 <h1 class="mb-1 text-2xl font-bold">Novo sinistro</h1>
-<p class="mb-6 text-sm text-gray-500">Registre batidas, roubos ou danos no carro. O motorista é identificado pela data do ocorrido.</p>
+<p class="mb-6 text-sm text-gray-500">Registre batidas, roubos ou danos no carro. O motorista é identificado pela data do ocorrido. O que ainda não souber (BO, franquia) pode preencher depois em Editar.</p>
 
-<form method="post" class="max-w-2xl space-y-4 rounded-lg bg-white p-6 shadow">
-  {% csrf_token %}
-  {% include "_erros_form.html" %}
-  <div class="grid gap-4 sm:grid-cols-2">
-    {% for field in form %}
-    <div {% if field.name == "descricao" or field.name == "observacoes" %}class="sm:col-span-2"{% endif %}>
-      <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
-      {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
-    </div>
-    {% endfor %}
-  </div>
-  <p class="text-xs text-gray-500">O conserto feito depois deve ser registrado em Manutenção, ligado a este sinistro — isso conta na hora de decidir vender o carro.</p>
-  <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar</button>
-    <a href="{% url 'sinistros:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
-  </div>
-</form>
-
-<style>
-  form input[type="text"], form input[type="date"], form input[type="number"], form select, form textarea {
-    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
-  }
-</style>
+{% include "sinistros/_form_blocos.html" with rotulo_botao="Registrar sinistro" %}
 {% endblock %}

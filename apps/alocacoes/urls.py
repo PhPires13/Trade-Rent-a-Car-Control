@@ -7,6 +7,11 @@ app_name = "alocacoes"
 urlpatterns = [
     path("", views.lista, name="lista"),
     path("nova/", views.nova, name="nova"),
+    path(
+        "<int:alocacao_id>/entrega/dispensar/",
+        views.entrega_dispensar,
+        name="entrega_dispensar",
+    ),
     path("<int:alocacao_id>/contrato/", views.contrato, name="contrato"),
     path("<int:alocacao_id>/vistoria/imprimir/", views.vistoria_imprimir, name="vistoria_imprimir"),
     path("<int:alocacao_id>/vistoria/nova/", views.vistoria_nova, name="vistoria_nova"),

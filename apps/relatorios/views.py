@@ -1,23 +1,69 @@
+from datetime import date
+
 from django.shortcuts import render
 
 from apps.financeiro.periodos import ano_mes
 
 from . import exportar, services
 
+MESES = (
+    "Janeiro",
+    "Fevereiro",
+    "Março",
+    "Abril",
+    "Maio",
+    "Junho",
+    "Julho",
+    "Agosto",
+    "Setembro",
+    "Outubro",
+    "Novembro",
+    "Dezembro",
+)
+ANO_MINIMO = 2000  # antes disso não há dado; ano absurdo na URL cai no mês atual
+
+
+def _vizinho(ano, mes, passo):
+    """(ano, mês) um mês antes (passo=-1) ou depois (passo=1), virando o ano."""
+    indice = ano * 12 + (mes - 1) + passo
+    return indice // 12, indice % 12 + 1
+
+
+def _mes_para_tela(ano, mes):
+    """Link ?mes= e nome por extenso ("Outubro de 2026") — as setas de mês
+    funcionam em qualquer navegador, ao contrário do <input type=month>."""
+    return {"param": f"{ano}-{mes:02d}", "nome": MESES[mes - 1], "ano": ano}
+
 
 def relatorios(request):
     """Central de relatórios mensais com exportação p/ contabilidade (docs.md §5)."""
     ano, mes = ano_mes(request)
+    hoje = date.today()
+    if not ANO_MINIMO <= ano <= hoje.year + 10:
+        # ?mes=0001-01 derrubava o gráfico (6 meses antes do ano 1 não existe)
+        ano, mes = hoje.year, hoje.month
     tipo = request.GET.get("exportar")
     formato = request.GET.get("formato", "xlsx")
     if tipo:
         return _exportar(tipo, formato, ano, mes)
+    receitas = services.receitas_do_mes(ano, mes)
+    despesas = services.despesas_do_mes(ano, mes)
     contexto = {
         "ano": ano,
         "mes": mes,
         "mes_str": f"{ano}-{mes:02d}",
-        "receitas": services.receitas_do_mes(ano, mes),
-        "despesas": services.despesas_do_mes(ano, mes),
+        "nome_mes": f"{MESES[mes - 1]} de {ano}",
+        "mes_anterior": _mes_para_tela(*_vizinho(ano, mes, -1)),
+        # mês que ainda não começou não tem o que mostrar — sem seta pra frente
+        "mes_seguinte": (
+            _mes_para_tela(*_vizinho(ano, mes, 1)) if (ano, mes) < (hoje.year, hoje.month) else None
+        ),
+        "mes_atual": None
+        if (ano, mes) == (hoje.year, hoje.month)
+        else _mes_para_tela(hoje.year, hoje.month),
+        "receitas": receitas,
+        "despesas": despesas,
+        "resumo": services.resumo_do_mes(receitas, despesas),
         "recebiveis": services.recebiveis_em_aberto(),
         "caucoes": services.caucoes_retidas(),
         "serie_mensal": services.serie_mensal(ano, mes),
@@ -39,9 +85,13 @@ def _planilha_receitas(ano, mes):
     linhas = [["Receita de locação (fatura) — BASE DO DAS", float(r["locacao"]), "Sim"]]
     for rotulo, valor in r["diversos"].items():
         linhas.append([f"Pagamentos diversos — {rotulo} (ND)", float(valor), "Não"])
-    linhas.append(["Caução recebida", float(r["caucao_recebida"]), "Não"])
     linhas.append(["Auxílio motorista recebido", float(r["total_auxilios"]), "Não"])
     linhas.append(["Venda de veículos", float(r["total_vendas"]), "Não"])
+    linhas.append(["TOTAL DAS RECEITAS", float(r["total_receitas"]), ""])
+    # caução depois do total: é dinheiro do cliente, não receita
+    linhas.append(
+        ["Caução recebida (não é receita — é do cliente)", float(r["caucao_recebida"]), "Não"]
+    )
     return "Receitas", ["Grupo", "Valor (R$)", "Base do DAS?"], linhas
 
 

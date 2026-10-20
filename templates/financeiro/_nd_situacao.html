@@ -1,0 +1,6 @@
+{% if c.status == "pago" %}<span class="whitespace-nowrap rounded bg-green-100 px-2 py-0.5 text-green-700">Paga</span>
+{% elif c.status == "parcial" %}<span class="whitespace-nowrap rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Parcial</span>
+{% elif c.status == "atrasado" %}<span class="whitespace-nowrap rounded bg-red-100 px-2 py-0.5 text-red-700">Atrasada</span>
+{% elif c.status == "judicial" %}<span class="whitespace-nowrap rounded bg-purple-100 px-2 py-0.5 text-purple-800" title="Em cobrança judicial — sem mensagem de WhatsApp">Judicial</span>
+{% elif c.status == "cancelada" %}<span class="whitespace-nowrap rounded bg-gray-100 px-2 py-0.5 text-gray-500 line-through">Cancelada</span>
+{% else %}<span class="whitespace-nowrap rounded bg-gray-100 px-2 py-0.5 text-gray-600" title="Emitida e ainda não paga">A receber</span>{% endif %}

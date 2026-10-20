@@ -22,22 +22,97 @@
   </ul>
 </details>
 
+<nav aria-label="Atalhos de tarefas" class="mb-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+  {% for atalho in atalhos %}
+  <a href="?{% if filtros_sem_tarefa %}{{ filtros_sem_tarefa }}&{% endif %}tarefa={{ atalho.chave }}"
+     {% if atalho.ativo %}aria-current="page"{% endif %}
+     class="flex min-h-[44px] flex-col justify-center rounded-lg px-3 py-2 text-sm font-semibold shadow {% if atalho.ativo %}bg-marca-preto text-white{% else %}bg-white text-gray-800 hover:ring-2 hover:ring-marca-amarelo{% endif %}">
+    <span>{{ atalho.rotulo }} <span class="ml-1 rounded-full px-2 py-0.5 text-xs {% if atalho.ativo %}bg-marca-amarelo text-marca-preto{% else %}bg-gray-100 text-gray-700{% endif %}">{{ atalho.total }}</span></span>
+    {% if atalho.vencidas %}<span class="text-xs font-semibold {% if atalho.ativo %}text-red-300{% else %}text-red-700{% endif %}">{{ atalho.vencidas }} com prazo vencido</span>{% endif %}
+  </a>
+  {% endfor %}
+  <a href="?{{ filtros_sem_tarefa }}" {% if not tarefa %}aria-current="page"{% endif %}
+     class="flex min-h-[44px] items-center rounded-lg px-3 py-2 text-sm font-semibold shadow {% if not tarefa %}bg-marca-preto text-white{% else %}bg-white text-gray-800 hover:ring-2 hover:ring-marca-amarelo{% endif %}">Todas</a>
+</nav>
+
+{% if tarefa == "indicar" %}
+<p class="mb-3 text-sm text-gray-600">Do prazo mais próximo para o mais distante. Depois de mandar o formulário ao órgão, toque em <strong>Condutor indicado</strong>.</p>
+{% elif tarefa == "pagar" %}
+<p class="mb-3 text-sm text-gray-600">Multas que ainda não foram pagas ao órgão. Depois de pagar, toque em <strong>Marcar paga</strong>.</p>
+{% elif tarefa == "cobrar" %}
+<p class="mb-3 text-sm text-gray-600">Multas que o cliente ainda deve. Para cobrar, <a href="{% url 'multas:gerar_nd' %}{% if filtro_cliente %}?cliente={{ filtro_cliente.pk }}{% endif %}" class="font-semibold underline">gere a nota de débito</a>.</p>
+{% endif %}
+
 <form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+  {% if tarefa %}<input type="hidden" name="tarefa" value="{{ tarefa }}">{% endif %}
+  {% if filtro_cliente %}<input type="hidden" name="cliente" value="{{ filtro_cliente.pk }}">{% endif %}
   <label for="filtro-placa-multa" class="sr-only">Placa</label>
   <input id="filtro-placa-multa" type="search" name="veiculo" value="{{ filtro_veiculo }}" placeholder="placa"
-         class="w-28 rounded border border-gray-300 px-2 py-1">
-  <label for="filtro-resultado-multa" class="sr-only">Situação</label>
-  <select id="filtro-resultado-multa" name="resultado" onchange="this.form.submit()" class="rounded border border-gray-300 px-2 py-1">
-    <option value="">Todas as situações</option>
+         class="w-28 rounded border border-gray-300 px-2 py-1.5">
+  <label for="filtro-resultado-multa" class="sr-only">Resultado do recurso</label>
+  <select id="filtro-resultado-multa" name="resultado" onchange="this.form.submit()" class="rounded border border-gray-300 px-2 py-1.5">
+    <option value="">Resultado do recurso: todos</option>
     {% for valor, rotulo in resultados %}
     <option value="{{ valor }}" {% if filtro_resultado == valor %}selected{% endif %}>{{ rotulo }}</option>
     {% endfor %}
   </select>
-  <button class="rounded bg-marca-preto px-3 py-1 text-white">Buscar</button>
-  {% if filtro_veiculo or filtro_resultado %}<a href="{% url 'multas:lista' %}" class="text-gray-500 underline">limpar filtros</a>{% endif %}
+  <button class="rounded bg-marca-preto px-3 py-1.5 text-white">Buscar</button>
+  {% if filtro_cliente %}
+  <span class="rounded-full bg-marca-amarelo/30 px-3 py-1">Cliente: <strong>{{ filtro_cliente.nome }}</strong></span>
+  {% endif %}
+  {% if filtro_veiculo or filtro_resultado or filtro_cliente or tarefa %}<a href="{% url 'multas:lista' %}" class="py-1.5 text-gray-500 underline">limpar filtros</a>{% endif %}
 </form>
 
-<div class="overflow-x-auto rounded-lg bg-white shadow">
+{% if not multas %}
+<div class="rounded-lg bg-white px-3 py-6 text-center text-sm text-gray-500 shadow">
+  {% if filtro_veiculo or filtro_resultado or filtro_cliente or tarefa %}Nenhuma multa encontrada aqui. <a href="{% url 'multas:lista' %}" class="underline">Ver todas</a>
+  {% else %}Nenhuma multa registrada. <a href="{% url 'multas:nova' %}" class="ml-1 font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">+ Registrar a primeira multa</a>{% endif %}
+</div>
+{% else %}
+{# celular: um cartão por multa, ação principal em botão largo (auditoria UX #13) #}
+<ul class="space-y-3 sm:hidden">
+  {% for multa in multas %}
+  <li class="rounded-lg bg-white p-4 shadow">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <p class="text-lg font-bold">{{ multa.veiculo.placa }}</p>
+        <p class="text-xs text-gray-500">{{ multa.data_infracao|date:"d/m/Y" }}{% if multa.cliente %} · {{ multa.cliente.nome }}{% endif %}</p>
+      </div>
+      <p class="text-right text-lg font-bold">{% if multa.valor %}{{ multa.valor|brl }}{% else %}—{% endif %}</p>
+    </div>
+    <p class="mt-1 text-sm">{{ multa.descricao|default:multa.codigo|truncatechars:70 }}</p>
+    <div class="mt-2 flex flex-wrap items-center gap-1.5">
+      {% include "multas/_selo_fici.html" %}
+      {% include "multas/_selo_pagamento.html" %}
+      {% if multa.multa_origem_nic_id %}<span class="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">Multa NIC (empresa)</span>{% endif %}
+      {% if multa.resultado != "em_aberto" %}<span class="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{{ multa.get_resultado_display }}</span>{% endif %}
+    </div>
+    <p class="mt-1 text-xs text-gray-600">Cliente: {{ multa.repasse }}</p>
+    <div class="mt-3 space-y-2">
+      {% if multa.fici_status == "pendente" %}
+        {% include "multas/_acao_fici.html" with grande=True %}
+      {% elif multa.pagamento == "pendente" and multa.valor %}
+        {% include "multas/_acao_paga.html" with grande=True %}
+      {% endif %}
+      <details class="text-sm">
+        <summary class="flex min-h-[44px] cursor-pointer select-none items-center justify-center rounded border border-gray-200 text-gray-700">Mais opções ▾</summary>
+        <div class="mt-2 space-y-2">
+          <a href="{% url 'multas:editar' multa.pk %}?volta={{ volta|urlencode }}" class="flex min-h-[44px] items-center justify-center rounded border border-gray-300 font-semibold text-gray-800">Editar multa</a>
+          {% if multa.fici_status == "pendente" and multa.pagamento == "pendente" and multa.valor %}
+            {% include "multas/_acao_paga.html" with grande=True %}
+          {% endif %}
+          {% if multa.fici_status == "pendente" and multa.fici_prazo and multa.fici_prazo < hoje %}
+            {% include "multas/_acao_nic.html" with grande=True %}
+          {% endif %}
+        </div>
+      </details>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+
+{# computador: tabela #}
+<div class="hidden overflow-x-auto rounded-lg bg-white shadow sm:block">
   <table class="w-full text-sm">
     <thead class="bg-marca-preto text-left text-white">
       <tr>
@@ -46,7 +121,7 @@
         <th class="px-3 py-2">Cliente</th>
         <th class="px-3 py-2">Infração</th>
         <th class="px-3 py-2">Valor</th>
-        <th class="px-3 py-2"><abbr title="Indicação do condutor: informar ao órgão quem dirigia, para os pontos irem ao motorista" class="cursor-help no-underline">FICI ⓘ</abbr></th>
+        <th class="px-3 py-2"><abbr title="Indicação do condutor: informar ao órgão quem dirigia, para os pontos irem ao motorista" class="no-underline">FICI</abbr></th>
         <th class="px-3 py-2" title="Se a multa será cobrada do cliente">Repasse</th>
         <th class="px-3 py-2">Pagamento</th>
         <th class="px-3 py-2"><span class="sr-only">Ações</span></th>
@@ -60,56 +135,32 @@
         <td class="px-3 py-2">{{ multa.cliente.nome|default:"—" }}</td>
         <td class="px-3 py-2">
           {{ multa.descricao|truncatechars:40 }}
-          <span class="block text-xs text-gray-400">{% if multa.codigo %}cód. {{ multa.codigo }}{% endif %}{% if multa.ait %} · <abbr title="Número do auto de infração" class="cursor-help no-underline">AIT</abbr> {{ multa.ait }}{% endif %}</span>
-          {% if multa.multa_origem_nic %}<span class="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800" title="Multa por não indicação do condutor, aplicada à empresa">NIC</span>{% endif %}
+          <span class="block text-xs text-gray-600">{% if multa.codigo %}cód. {{ multa.codigo }}{% endif %}{% if multa.ait %} · <abbr title="Número do auto de infração" class="no-underline">AIT</abbr> {{ multa.ait }}{% endif %}</span>
+          {% if multa.multa_origem_nic_id %}<span class="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800" title="Multa por não indicação do condutor, aplicada à empresa">NIC</span>{% endif %}
+          {% if multa.resultado != "em_aberto" %}<span class="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800" title="Resultado do recurso">{{ multa.get_resultado_display }}</span>{% endif %}
         </td>
         <td class="px-3 py-2">{% if multa.valor %}{{ multa.valor|brl }}{% else %}—{% endif %}</td>
-        <td class="px-3 py-2">
-          {% if multa.fici_status == "pendente" %}
-            <span class="whitespace-nowrap rounded {% if multa.fici_prazo and multa.fici_prazo < hoje %}bg-red-100 text-red-700 font-semibold{% else %}bg-yellow-100 text-yellow-800{% endif %} px-2 py-0.5 text-xs">
-              {% if multa.fici_prazo and multa.fici_prazo < hoje %}Prazo vencido {{ multa.fici_prazo|date:"d/m" }}{% else %}Indicar{% if multa.fici_prazo %} até {{ multa.fici_prazo|date:"d/m" }}{% endif %}{% endif %}
-            </span>
-          {% elif multa.fici_status == "indicado" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Indicado</span>
-          {% elif multa.fici_status == "prazo_perdido" %}<span class="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Prazo perdido</span>
-          {% else %}<span class="text-gray-400">—</span>{% endif %}
-        </td>
+        <td class="px-3 py-2">{% include "multas/_selo_fici.html" %}</td>
         <td class="px-3 py-2 text-xs">{{ multa.repasse }}</td>
-        <td class="px-3 py-2">
-          {% if multa.pagamento == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Paga{% if multa.pago_por %} ({{ multa.pago_por }}){% endif %}</span>
-          {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">A pagar</span>{% endif %}
-        </td>
+        <td class="px-3 py-2">{% include "multas/_selo_pagamento.html" %}</td>
         <td class="px-3 py-2 text-right text-xs">
-          <div class="flex flex-wrap justify-end gap-1.5">
+          <div class="flex flex-wrap items-start justify-end gap-1.5">
           {% if multa.fici_status == "pendente" %}
-          <form method="post" action="{% url 'multas:indicar_fici' multa.pk %}"
-                onsubmit="return confirm('Confirmar que o condutor da multa {{ multa.veiculo.placa|escapejs }} de {{ multa.data_infracao|date:"d/m/Y" }} já foi indicado ao órgão (FICI)?')">
-            {% csrf_token %}<button class="whitespace-nowrap rounded bg-green-600 px-2 py-1 font-semibold text-white hover:bg-green-700"
-                    title="Marca que você já informou ao órgão quem estava dirigindo">Condutor indicado</button>
-          </form>
-          <form method="post" action="{% url 'multas:registrar_nic' multa.pk %}"
-                onsubmit="return confirm('Registrar multa NIC contra a EMPRESA para {{ multa.veiculo.placa|escapejs }}?\n\nUse só quando o prazo de indicação do condutor foi perdido — isso cria uma nova multa em nome da empresa.')">
-            {% csrf_token %}<button class="whitespace-nowrap rounded border border-red-300 px-2 py-1 text-red-700 hover:bg-red-50"
-                    title="Prazo perdido: registra a multa por não indicação do condutor contra a empresa">Registrar NIC</button>
-          </form>
+            {% include "multas/_acao_fici.html" with grande=False %}
+            {% if multa.fici_prazo and multa.fici_prazo < hoje %}{% include "multas/_acao_nic.html" with grande=False %}{% endif %}
           {% endif %}
           {% if multa.pagamento == "pendente" and multa.valor %}
-          <form method="post" action="{% url 'multas:marcar_paga' multa.pk %}"
-                onsubmit="return confirm('Marcar a multa {{ multa.veiculo.placa|escapejs }} de {{ multa.valor|brl|escapejs }} como paga?')">
-            {% csrf_token %}<button class="whitespace-nowrap rounded border border-gray-300 px-2 py-1 text-gray-700 hover:bg-gray-50">Marcar paga</button>
-          </form>
+            {% include "multas/_acao_paga.html" with grande=False %}
           {% endif %}
+            <a href="{% url 'multas:editar' multa.pk %}?volta={{ volta|urlencode }}" class="whitespace-nowrap rounded px-2 py-1 text-gray-700 underline">Editar</a>
           </div>
         </td>
       </tr>
-      {% empty %}
-      <tr><td colspan="9" class="px-3 py-6 text-center text-gray-500">
-        {% if filtro_veiculo or filtro_resultado %}Nenhuma multa encontrada com esses filtros. <a href="{% url 'multas:lista' %}" class="underline">Limpar filtros</a>
-        {% else %}Nenhuma multa registrada. <a href="{% url 'multas:nova' %}" class="ml-1 font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">+ Registrar a primeira multa</a>{% endif %}
-      </td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% endif %}
 
 {% if pagina.paginator.num_pages > 1 %}
 <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">

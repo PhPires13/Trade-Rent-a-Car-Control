@@ -1,0 +1,18 @@
+{# Resposta do htmx ao registrar: a linha do pendente vira a confirmação e o contador de "faltam" se atualiza. #}
+<div id="pendente-{{ registro.veiculo.pk }}" data-linha-km data-registrado
+     class="bg-green-50 p-4 text-green-900 sm:px-3 sm:py-3" role="status">
+  <p class="font-semibold">✓ {{ sucesso }}.</p>
+  <p class="text-sm text-green-800">
+    Leitura de {{ registro.data_leitura|date:"d/m/Y" }}.
+    <a href="{% url 'km:corrigir' registro.pk %}?voltar=lista" class="ml-1 inline-block py-1 font-semibold underline">Corrigir</a>
+  </p>
+  {% if mes and registro.mes_referencia != mes %}
+  <p class="mt-2 rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+    ! Pela data escolhida, esta leitura ficou em {{ registro.mes_referencia|date:"m/Y" }} — {{ mes|date:"m/Y" }} continua pendente para {{ registro.veiculo.placa }}. Se a data estava errada, use Corrigir e apague.
+  </p>
+  {% endif %}
+  {% for aviso in avisos %}
+  <p class="mt-2 rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">! {{ aviso }}</p>
+  {% endfor %}
+</div>
+{% include "km/_contador_pendentes.html" with oob=True %}

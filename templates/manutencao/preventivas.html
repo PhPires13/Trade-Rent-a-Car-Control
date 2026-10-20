@@ -7,37 +7,64 @@
 <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
   <h1 class="text-2xl font-bold">Manutenção da frota</h1>
   <a href="{% url 'manutencao:plano' %}"
-     class="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">Configurar plano</a>
+     class="rounded border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">Configurar plano</a>
 </div>
 <p class="mb-4 text-sm text-gray-500">
   Revisões preventivas de cada carro (troca de óleo, pneus…) calculadas pelo KM. Ao registrar a manutenção de um item,
   a contagem recomeça do zero. Para mudar itens e intervalos, use <em>Configurar plano</em>.
 </p>
+
+{% if na_oficina %}
+<section class="mb-6 rounded-lg border-l-4 border-orange-400 bg-orange-50 p-4">
+  <h2 class="mb-2 font-bold text-orange-900">Na oficina agora ({{ na_oficina|length }})</h2>
+  <ul class="space-y-2 text-sm">
+    {% for m in na_oficina %}
+    <li class="flex flex-wrap items-center justify-between gap-2">
+      <span>
+        <a href="{% url 'manutencao:historico' m.veiculo_id %}" class="font-bold underline decoration-marca-amarelo decoration-2">{{ m.veiculo.placa }}</a>
+        {% if m.oficina %}· {{ m.oficina }}{% endif %}
+        · desde {{ m.data_entrada|date:"d/m" }} ({{ m.dias_parado }} dia{{ m.dias_parado|pluralize }})
+      </span>
+      <a href="{% url 'manutencao:voltou' m.pk %}?volta={{ request.get_full_path|urlencode }}"
+         class="w-full rounded bg-marca-preto px-3 py-2 text-center font-semibold text-white hover:brightness-125 sm:w-auto sm:py-1">Carro voltou da oficina</a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<div class="mb-4 flex flex-wrap items-center gap-2 text-sm" role="tablist" aria-label="O que mostrar">
+  <a href="{% url 'manutencao:preventivas' %}" role="tab" aria-selected="{% if ver_todas %}false{% else %}true{% endif %}"
+     class="rounded-full px-4 py-2 font-semibold {% if ver_todas %}bg-white text-gray-600 shadow{% else %}bg-marca-preto text-white{% endif %}">Só o que precisa de atenção</a>
+  <a href="{% url 'manutencao:preventivas' %}?ver=todas" role="tab" aria-selected="{% if ver_todas %}true{% else %}false{% endif %}"
+     class="rounded-full px-4 py-2 font-semibold {% if ver_todas %}bg-marca-preto text-white{% else %}bg-white text-gray-600 shadow{% endif %}">Ver todas</a>
+</div>
 <p class="mb-6 flex flex-wrap gap-2 text-xs">
   <span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">Vencida</span> já passou do KM
   <span class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-800">Próxima</span> está chegando
   <span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Em dia</span>
-  <span class="rounded bg-gray-100 px-2 py-0.5 text-gray-500">Sem registro</span> nunca foi feita no sistema
+  <span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Nunca registrada</span> informe a última troca
 </p>
 
 {% for veiculo, itens in quadro %}
-<div class="mb-6 rounded-lg bg-white shadow">
+<div id="veiculo-{{ veiculo.pk }}" class="mb-6 scroll-mt-20 rounded-lg bg-white shadow">
   <div class="flex flex-wrap items-center justify-between gap-2 rounded-t-lg bg-marca-preto px-4 py-2 text-white">
     <div>
       <span class="font-bold">{{ veiculo.placa }}</span>
       <span class="text-sm text-gray-300">{{ veiculo.marca_modelo }} · {{ veiculo.km_atual|intcomma }} km</span>
     </div>
-    <div class="flex gap-3 text-sm">
-      <a href="{% url 'manutencao:historico' veiculo.pk %}" class="text-gray-300 hover:text-marca-amarelo">Histórico</a>
+    <div class="flex items-center gap-3 text-sm">
+      <a href="{% url 'manutencao:historico' veiculo.pk %}" class="py-1 text-gray-300 hover:text-marca-amarelo">Histórico</a>
       <a href="{% url 'manutencao:registrar' veiculo.pk %}"
-         class="rounded bg-marca-amarelo px-2 py-0.5 font-semibold text-marca-preto hover:brightness-95">
+         class="rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto hover:brightness-95">
         + Registrar manutenção
       </a>
     </div>
   </div>
-  <div class="overflow-x-auto">
-  <table class="w-full text-sm">
-    <thead class="bg-gray-50 text-left">
+  {# No celular cada item vira um cartão; no computador, tabela. #}
+  <div class="sm:overflow-x-auto">
+  <table class="block w-full text-sm sm:table">
+    <thead class="hidden bg-gray-50 text-left sm:table-header-group">
       <tr>
         <th class="px-3 py-2">Item</th>
         <th class="px-3 py-2">Intervalo</th>
@@ -45,31 +72,35 @@
         <th class="px-3 py-2">Próxima com</th>
         <th class="px-3 py-2">Faltam</th>
         <th class="px-3 py-2">Status</th>
+        <th class="px-3 py-2"><span class="sr-only">Ação</span></th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block divide-y divide-gray-100 sm:table-row-group">
       {% for p in itens %}
-      <tr>
-        <td class="px-3 py-2 font-medium">{{ p.item.nome }}</td>
-        <td class="px-3 py-2">{{ p.intervalo_km|intcomma }} km</td>
-        <td class="px-3 py-2">
+      <tr class="block px-4 py-3 sm:table-row sm:p-0">
+        <td class="flex items-center justify-between gap-2 py-0.5 font-medium sm:table-cell sm:px-3 sm:py-2">
+          {{ p.item.nome }}
+          <span class="sm:hidden">{% include "manutencao/_status_preventiva.html" %}</span>
+        </td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">A cada </span>{{ p.intervalo_km|intcomma }} km</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Última: </span>
           {% if p.ultima %}{{ p.ultima.km|intcomma }} km em {{ p.ultima.data|date:"d/m/Y" }}{% else %}—{% endif %}
         </td>
-        <td class="px-3 py-2">{% if p.km_proximo %}{{ p.km_proximo|intcomma }} km{% else %}—{% endif %}</td>
-        <td class="px-3 py-2">
-          {% if p.faltam_km is not None %}{{ p.faltam_km|intcomma }} km
-            {% if p.dias_restantes is not None %}<span class="text-xs text-gray-500">≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }}</span>{% endif %}
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Próxima com: </span>{% if p.km_proximo %}{{ p.km_proximo|intcomma }} km{% else %}—{% endif %}</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Faltam: </span>
+          {% if p.faltam_km is not None %}
+            {% if p.faltam_km == 0 %}<span class="font-semibold text-red-700">vence agora</span>
+            {% elif p.faltam_km < 0 %}<span class="font-semibold text-red-700">vencida há {{ p.faltam_km|intcomma|cut:"-" }} km</span>
+            {% else %}{{ p.faltam_km|intcomma }} km{% endif %}
+            {% if p.dias_restantes %}<span class="text-xs text-gray-500">≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }}</span>{% endif %}
           {% else %}—{% endif %}
         </td>
-        <td class="px-3 py-2">
-          {% if p.status == Status.VENCIDA %}
-            <span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">Vencida</span>
-          {% elif p.status == Status.PROXIMA %}
-            <span class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-800">Próxima</span>
-          {% elif p.status == Status.OK %}
-            <span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Em dia</span>
-          {% else %}
-            <span class="rounded bg-gray-100 px-2 py-0.5 text-gray-500">Sem registro</span>
+        <td class="hidden sm:table-cell sm:px-3 sm:py-2">{% include "manutencao/_status_preventiva.html" %}</td>
+        <td class="block pt-2 sm:table-cell sm:px-3 sm:py-2 sm:text-right">
+          {% if p.status != Status.OK %}
+          <a href="{% url 'manutencao:registrar' veiculo.pk %}?item={{ p.item.pk }}{% if p.status == Status.SEM_REGISTRO %}&ultima=1{% endif %}&volta={{ request.get_full_path|urlencode }}%23veiculo-{{ veiculo.pk }}"
+             class="block whitespace-nowrap rounded border border-gray-300 px-3 py-2 text-center text-sm font-semibold hover:bg-gray-50 sm:inline-block sm:py-1 sm:text-xs">
+            {% if p.status == Status.SEM_REGISTRO %}Informar última troca{% else %}Registrar feita{% endif %}</a>
           {% endif %}
         </td>
       </tr>
@@ -80,8 +111,21 @@
 </div>
 {% empty %}
 <div class="rounded-lg bg-white p-6 text-center text-gray-500 shadow">
+  {% if ver_todas %}
   Nenhum carro de locação ativo para acompanhar.
   <a href="{% url 'frota:hub' %}" class="ml-1 font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">Ir para a frota</a>
+  {% else %}
+  <p class="font-semibold text-green-700">Nenhuma preventiva vencida ou perto de vencer.</p>
+  <a href="{% url 'manutencao:preventivas' %}?ver=todas" class="mt-2 inline-block font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">Ver todas</a>
+  {% endif %}
 </div>
 {% endfor %}
+
+{% if not ver_todas %}{% if total_em_dia or total_sem_registro %}
+<p class="mt-2 text-sm text-gray-500">
+  Fora desta lista: {{ total_em_dia }} item{{ total_em_dia|pluralize:"ns" }} em dia{% if total_sem_registro %} e
+  <strong>{{ total_sem_registro }} nunca registrado{{ total_sem_registro|pluralize }}</strong> (informe a última troca para o sistema começar a avisar){% endif %}.
+  <a href="{% url 'manutencao:preventivas' %}?ver=todas" class="font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">Ver todas</a>
+</p>
+{% endif %}{% endif %}
 {% endblock %}

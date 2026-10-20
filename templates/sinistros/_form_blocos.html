@@ -1,0 +1,50 @@
+{# Formulário de sinistro em blocos (novo e editar). Espera `form`, `volta` e `rotulo_botao`. #}
+<form method="post" class="form-sinistro max-w-2xl space-y-5"
+      x-data="{ protecao: {{ form.acionou_protecao.value|yesno:'true,false' }} }">
+  {% csrf_token %}
+  <input type="hidden" name="volta" value="{{ volta }}">
+  {% include "_erros_form.html" %}
+  {% for bloco in form.blocos %}
+  <fieldset class="rounded-lg bg-white p-4 shadow sm:p-6 {% if bloco.chave == 'situacao' and form.instance.pk %}border-l-4 border-marca-amarelo{% endif %}">
+    <legend class="float-left mb-1 w-full text-lg font-bold">{{ forloop.counter }}. {{ bloco.titulo }}</legend>
+    {% if bloco.dica %}<p class="clear-both mb-3 text-sm text-gray-500">{{ bloco.dica }}</p>{% endif %}
+    <div class="clear-both grid gap-4 sm:grid-cols-2">
+      {% for field in bloco.campos %}
+      <div class="{% if field.name in form.CAMPOS_LARGOS %}sm:col-span-2{% endif %}"
+           {% if field.name in form.CAMPOS_DA_PROTECAO %}x-show="protecao" x-cloak{% endif %}>
+        {% if field.name == "acionou_protecao" %}
+          <label class="flex cursor-pointer items-center gap-3 rounded border border-gray-300 px-3 py-3 text-base font-medium" for="{{ field.id_for_label }}">
+            {{ field }} <span>{{ field.label }}</span>
+          </label>
+        {% else %}
+          <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+        {% endif %}
+        {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+        {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+      </div>
+      {% if field.name == "data" %}
+      <div id="quem-estava" class="sm:col-span-2" aria-live="polite"
+           hx-get="{% url 'sinistros:quem_estava' %}"
+           hx-trigger="load, change from:#{{ form.veiculo.id_for_label }}, change from:#{{ form.data.id_for_label }}"
+           hx-include="#{{ form.veiculo.id_for_label }}, #{{ form.data.id_for_label }}">
+        {% include "sinistros/_quem_estava.html" with veiculo=None dia=None %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </fieldset>
+  {% endfor %}
+  <p class="text-xs text-gray-500">O conserto feito depois deve ser registrado em Manutenção, ligado a este sinistro — isso conta na hora de decidir vender o carro.</p>
+  <div class="flex flex-col gap-3 sm:flex-row">
+    <button class="rounded bg-marca-amarelo px-6 py-3 text-base font-bold text-marca-preto hover:brightness-95 sm:py-2">{{ rotulo_botao }}</button>
+    <a href="{{ volta }}" class="px-4 py-2 text-center text-sm text-gray-600 underline">Cancelar</a>
+  </div>
+</form>
+
+<style>
+  .form-sinistro input[type="text"], .form-sinistro input[type="date"], .form-sinistro input[type="number"], .form-sinistro select, .form-sinistro textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.6rem 0.6rem; font-size: 1rem;
+  }
+  .form-sinistro input[type="checkbox"] { width: 1.4rem; height: 1.4rem; flex-shrink: 0; }
+</style>

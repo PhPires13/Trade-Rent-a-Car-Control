@@ -6,16 +6,17 @@ from uuid import uuid4
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Prefetch
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.http import urlencode
 
-from apps.campos import dinheiro_br
+from apps.campos import dinheiro_br, exibir_dinheiro
 from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
-from . import services, whatsapp
+from . import recibo, services, whatsapp
 from .models import (
     ZERO,
     Caucao,
@@ -47,6 +48,23 @@ def _cobrancas_devidas(cliente):
     )
 
 
+def _abertas_por_cliente(cliente_ids):
+    """{cliente_id: [cobranças no fluxo normal com saldo]} numa consulta só.
+
+    Alimenta a mensagem única de WhatsApp por cliente — judicial fica de fora.
+    """
+    abertas = {}
+    qs = Cobranca.com_quitacao_anotada(
+        Cobranca.objects.filter(
+            cliente_id__in=cliente_ids, status__in=Cobranca.STATUS_EM_ABERTO
+        ).select_related("cliente", "alocacao__veiculo")
+    ).order_by("vencimento", "pk")
+    for cobranca in qs:
+        if cobranca.saldo > ZERO:
+            abertas.setdefault(cobranca.cliente_id, []).append(cobranca)
+    return abertas
+
+
 def cobrancas(request):
     """Painel de cobranças com filtros, paginação e sugestão de encargo (docs.md §4.3)."""
     encargo_ativo = Cobranca.objects.filter(cobranca_origem=OuterRef("pk")).exclude(
@@ -70,6 +88,8 @@ def cobrancas(request):
     qs = qs.order_by(*(("vencimento", "pk") if cronologica else ("-vencimento", "-pk")))
     pagina = Paginator(qs, COBRANCAS_POR_PAGINA).get_page(request.GET.get("pagina"))
     hoje = date.today()
+    abertas_por_cliente = _abertas_por_cliente({c.cliente_id for c in pagina.object_list})
+    clientes_com_link = set()
     linhas = []
     for cobranca in pagina.object_list:
         encargo = (
@@ -79,11 +99,20 @@ def cobrancas(request):
             and not cobranca.tem_encargo_ativo
             else None
         )
-        cobranca.link_whatsapp = (
-            whatsapp.link_cobranca(cobranca, hoje)
-            if cobranca.status in Cobranca.STATUS_DEVIDOS
-            else ""
-        )
+        # judicial/quitada saem vazias (whatsapp._cobravel)
+        cobranca.link_whatsapp = whatsapp.link_cobranca(cobranca, hoje)
+        # "cobrar tudo": uma mensagem com todos os itens, na 1ª linha cobrável do
+        # cliente — nunca numa linha judicial/paga (lá o aviso é "sem WhatsApp")
+        abertas = abertas_por_cliente.get(cobranca.cliente_id, [])
+        cobranca.link_whatsapp_cliente = ""
+        cobranca.qtd_abertas_cliente = len(abertas)
+        if (
+            cobranca.link_whatsapp
+            and len(abertas) > 1
+            and cobranca.cliente_id not in clientes_com_link
+        ):
+            clientes_com_link.add(cobranca.cliente_id)
+            cobranca.link_whatsapp_cliente = whatsapp.link_cliente(cobranca.cliente, abertas, hoje)
         linhas.append((cobranca, encargo))
     return render(
         request,
@@ -174,19 +203,50 @@ def cancelar(request, cobranca_id):
     return redirect("financeiro:cobrancas")
 
 
+def _id_valido(texto):
+    """pk vinda da URL: só algarismos ASCII e de tamanho sensato.
+
+    str.isdigit() aceita "²" e números gigantes estouram o inteiro do banco —
+    os dois virariam erro 500 em vez de serem ignorados.
+    """
+    return bool(texto) and texto.isascii() and texto.isdigit() and len(texto) <= 9
+
+
+def _resumo_do_recibo(request, cliente):
+    """?recibo=<pk>: o aviso pós-lançamento (o que quitou, sobra, recibo, desfazer)."""
+    recibo_id = request.GET.get("recibo", "")
+    if not (cliente and _id_valido(recibo_id)):
+        return None
+    recebimento = (
+        services.anotar_lancamento(Recebimento.objects.filter(pk=recibo_id, cliente=cliente))
+        .select_related("cliente")
+        .first()
+    )
+    if recebimento is None:  # desfeito ou de outro cliente: some sem erro
+        return None
+    resumo = services.resumo_recebimento(recebimento)
+    resumo["link_whatsapp"] = recibo.link_recibo(resumo)
+    resumo["pode_desfazer"] = services.pode_desfazer(recebimento)
+    return resumo
+
+
 def receber(request):
     """Baixa de recebimento com travas de lançamento (docs.md §4.3).
 
     Cobrança judicial também aparece aqui (STATUS_DEVIDOS): acordo pago
     precisa de onde ser lançado. No erro, a tela volta com tudo que foi
     digitado e diz qual campo falhou — nada de redigitar a distribuição.
+
+    Atalhos (botões "Recebi"): ?cliente=<pk> já escolhe o cliente e
+    ?cobranca=<pk> já preenche o valor com o que falta daquela cobrança.
+    Depois de lançar, ?recibo=<pk> mostra o resumo, o recibo e o desfazer.
     """
     clientes = Cliente.objects.order_by("nome")
     cliente = None
     cobrancas_abertas = []
     cliente_id = request.GET.get("cliente") or request.POST.get("cliente")
     if cliente_id:
-        if not cliente_id.isdigit():
+        if not _id_valido(cliente_id):
             raise Http404("Cliente inválido.")
         cliente = get_object_or_404(Cliente, pk=cliente_id)
         cobrancas_abertas = _cobrancas_devidas(cliente)
@@ -218,7 +278,7 @@ def receber(request):
                     raise ValidationError(
                         f"Valor a aplicar inválido em '{cobranca.descricao}' (ex.: 650,00)."
                     ) from None
-            services.registrar_recebimento(
+            recebimento = services.registrar_recebimento(
                 cliente=cliente,
                 data=data,
                 valor=valor,
@@ -226,14 +286,27 @@ def receber(request):
                 aplicacoes=aplicacoes,
                 sobra_destino=post.get("sobra_destino", "credito"),
                 observacoes=post.get("observacoes", ""),
+                bloquear_repetido=True,
             )
             messages.success(request, f"Recebimento de {brl(valor)} lançado para {cliente.nome}.")
-            return redirect(f"{request.path}?cliente={cliente.pk}")
+            return redirect(f"{request.path}?cliente={cliente.pk}&recibo={recebimento.pk}")
+        except services.RecebimentoRepetido as repetido:
+            # toque duplo: mostra o resumo do lançamento que já valeu
+            messages.warning(request, repetido.messages[0])
+            return redirect(f"{request.path}?cliente={cliente.pk}&recibo={repetido.recebimento.pk}")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
             # a transação foi desfeita, mas os objetos em memória podem ter status
             # de uma aplicação que não valeu: a tela volta com o que está no banco
             cobrancas_abertas = _cobrancas_devidas(cliente)
+    elif cliente and _id_valido(request.GET.get("cobranca", "")):
+        # "Recebi" de uma cobrança: valor = o que falta dela, já aplicado nela
+        escolhida = next(
+            (c for c in cobrancas_abertas if str(c.pk) == request.GET["cobranca"]), None
+        )
+        if escolhida and escolhida.saldo > ZERO:
+            saldo = exibir_dinheiro(escolhida.saldo)
+            post = {"valor": saldo, f"aplicar_{escolhida.pk}": saldo}
     credito = MovimentoCredito.saldo_do_cliente(cliente) if cliente else ZERO
     linhas = [
         (cobranca, post.get(f"aplicar_{cobranca.pk}", "") if post else "")
@@ -247,16 +320,67 @@ def receber(request):
             "cliente": cliente,
             "linhas": linhas,
             "credito": credito,
+            "devido": sum((c.saldo for c in cobrancas_abertas), ZERO),
             "hoje": date.today(),
             "post": post,
-            "formas": Recebimento.Forma.choices,
+            # crédito não é forma de pagamento: tem botão próprio na tela
+            "formas": [f for f in Recebimento.Forma.choices if f[0] != Recebimento.Forma.CREDITO],
+            "resumo": _resumo_do_recibo(request, cliente),
         },
     )
 
 
+def desfazer_recebimento(request, recebimento_id):
+    """Botão "Desfazer este lançamento" — só no mesmo dia (services.pode_desfazer)."""
+    recebimento = Recebimento.objects.select_related("cliente").filter(pk=recebimento_id).first()
+    if recebimento is None:
+        # toque duplo no Desfazer (ou outra aba): o 1º já apagou — avisa em vez de "página
+        # não encontrada"; o histórico ainda sabe de qual cliente era
+        apagado = Recebimento.history.filter(id=recebimento_id).order_by("-history_date").first()
+        if apagado is None:
+            raise Http404("Lançamento não encontrado.")
+        messages.info(request, "Este lançamento já foi desfeito.")
+        return redirect(f"{reverse('financeiro:receber')}?cliente={apagado.cliente_id}")
+    cliente = recebimento.cliente
+    if request.method != "POST":
+        return redirect(f"{reverse('financeiro:receber')}?cliente={cliente.pk}")
+    valor = recebimento.valor
+    try:
+        services.desfazer_recebimento(recebimento)
+    except ValidationError as erro:
+        messages.error(request, "; ".join(erro.messages))
+        return redirect(
+            f"{reverse('financeiro:receber')}?cliente={cliente.pk}&recibo={recebimento.pk}"
+        )
+    messages.success(
+        request,
+        f"Lançamento de {brl(valor)} de {cliente.nome} desfeito — as cobranças voltaram "
+        "a ficar em aberto. Se precisar, lance de novo com os dados certos.",
+    )
+    return redirect(f"{reverse('financeiro:receber')}?cliente={cliente.pk}")
+
+
 def nds(request):
-    notas = NotaDebito.objects.select_related("cliente").prefetch_related("itens", "cobranca")
-    return render(request, "financeiro/nds.html", {"notas": notas})
+    # cobrança com o quitado anotado: o botão "Enviar ao motorista" olha o saldo
+    # de cada ND sem 2 consultas por linha
+    notas = list(
+        NotaDebito.objects.select_related("cliente").prefetch_related(
+            "itens", Prefetch("cobranca", queryset=Cobranca.com_quitacao_anotada())
+        )
+    )
+    hoje = date.today()
+    for nd in notas:
+        nd.link_whatsapp = whatsapp.link_nd(nd, hoje)
+        # cobrável mas sem telefone: avisa em vez de sumir com o botão sem explicação
+        cobranca = getattr(nd, "cobranca", None)
+        nd.sem_telefone = (
+            not nd.link_whatsapp
+            and cobranca is not None
+            and cobranca.status in Cobranca.STATUS_EM_ABERTO
+            and cobranca.saldo > ZERO
+            and not whatsapp.telefone_whatsapp(nd.cliente.telefone)
+        )
+    return render(request, "financeiro/nds.html", {"notas": notas, "hoje": hoje})
 
 
 def nd_nova(request):
@@ -303,7 +427,8 @@ def nd_nova(request):
         except (KeyError, InvalidOperation, ValueError):
             messages.error(
                 request,
-                "Não deu para emitir: escolha o cliente, confira a data de emissão e "
+                "Não deu para emitir: escolha o cliente, confira as datas de emissão e de "
+                "vencimento e "
                 "preencha ao menos um item com descrição e valor (ex.: 150,00).",
             )
     itens_iniciais = [{"d": "", "v": ""}]
@@ -320,6 +445,10 @@ def nd_nova(request):
         "financeiro/nd_nova.html",
         {
             "clientes": clientes,
+            # o formulário calcula o vencimento sugerido ao trocar cliente/emissão
+            "dias_pagamento": {
+                str(pk): dia for pk, dia in services.dias_pagamento_por_cliente().items()
+            },
             "hoje": date.today(),
             "post": post,
             "itens_iniciais": itens_iniciais,
@@ -420,6 +549,13 @@ def das(request):
 
 def extrato_cliente(request, cliente_id):
     cliente = get_object_or_404(Cliente, pk=cliente_id)
+    recebimentos = list(
+        services.anotar_lancamento(cliente.recebimentos.all()).prefetch_related(
+            "aplicacoes__cobranca"
+        )[:50]
+    )
+    for recebimento in recebimentos:  # lançado hoje: tem o botão "Desfazer"
+        recebimento.pode_desfazer = services.pode_desfazer(recebimento)
     return render(
         request,
         "financeiro/extrato_cliente.html",
@@ -428,7 +564,12 @@ def extrato_cliente(request, cliente_id):
             "cobrancas": Cobranca.com_quitacao_anotada(cliente.cobrancas.order_by("-vencimento"))[
                 :100
             ],
-            "recebimentos": cliente.recebimentos.prefetch_related("aplicacoes__cobranca")[:50],
+            "recebimentos": recebimentos,
+            "status_devidos": Cobranca.STATUS_DEVIDOS,  # quem ganha o botão "Recebi"
             "credito": MovimentoCredito.saldo_do_cliente(cliente),
+            # mensagem única com tudo em aberto (judicial fica de fora)
+            "link_whatsapp": whatsapp.link_cliente(
+                cliente, _abertas_por_cliente([cliente.pk]).get(cliente.pk, []), date.today()
+            ),
         },
     )

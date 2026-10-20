@@ -89,7 +89,10 @@ def test_detalhe_do_substituto_mostra_motorista_e_valor_ajustado(usuario_logado,
 def test_detalhe_roda_com_queries_fixas(
     usuario_logado, veiculo, troca, django_assert_max_num_queries
 ):
-    with django_assert_max_num_queries(12):
+    # 12 do detalhe original + 7 fixas da faixa de pendências (4 das preventivas,
+    # KM do mês, multas sem FICI e sinistros abertos) + folga de 1 — não crescem
+    # com o número de registros do carro.
+    with django_assert_max_num_queries(20):
         assert usuario_logado.get(f"/frota/veiculo/{veiculo.pk}/").status_code == 200
 
 

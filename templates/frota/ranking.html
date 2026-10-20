@@ -61,7 +61,7 @@
         <div class="text-gray-500">Do investimento já voltou</div>
         <div class="font-black {% if f.na_janela_de_venda %}text-orange-600{% endif %}">
           {% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}
-          <span class="text-xs font-normal text-gray-400">meta ~75%</span>
+          <span class="text-xs font-normal text-gray-600">meta ~75%</span>
         </div>
       </div>
       <div title="Gasto de oficina dividido pelos km rodados nos últimos 6 meses."><div class="text-gray-500">Oficina por km (6 meses)</div><div>{% if f.custo_por_km_6m is not None %}{{ f.custo_por_km_6m|brl }}{% else %}—{% endif %}</div></div>

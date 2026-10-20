@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block titulo %}Editar sinistro — {{ sinistro.veiculo.placa }}{% endblock %}
+
+{% block conteudo %}
+<a href="{{ volta }}" class="mb-2 inline-block text-sm text-gray-600 underline">‹ Voltar para os sinistros</a>
+<h1 class="mb-1 text-2xl font-bold">Editar sinistro</h1>
+<p class="mb-6 text-sm text-gray-500">
+  {{ sinistro.veiculo.placa }} · {{ sinistro.veiculo.marca_modelo }} — {{ sinistro.get_tipo_display }} em {{ sinistro.data|date:"d/m/Y" }}.
+  Atualize a situação, o BO, a franquia ou quem paga conforme as coisas andam.
+</p>
+
+{% include "sinistros/_form_blocos.html" with rotulo_botao="Salvar alterações" %}
+
+{# Auxílio motorista: formulários à parte (não dá para colocar um form dentro do outro). #}
+<section class="mt-6 max-w-2xl rounded-lg bg-white p-4 shadow sm:p-6">
+  <h2 class="mb-1 text-lg font-bold">Auxílio motorista</h2>
+  <p class="mb-3 text-sm text-gray-500">A proteção paga um auxílio (normalmente 1 salário mínimo) quando o conserto de colisão deixa o carro mais de 7 dias parado.
+    {% if sinistro.dias_parado %}Este carro está com <strong>{{ sinistro.dias_parado }} dia{{ sinistro.dias_parado|pluralize }} parado</strong>.{% endif %}
+  </p>
+  {% for auxilio in sinistro.auxilios.all %}
+    {% if auxilio.status == "recebido" %}
+      <p class="mb-2 rounded bg-green-100 px-3 py-2 text-sm text-green-800">Auxílio recebido: {{ auxilio.valor|brl }}{% if auxilio.data_recebimento %} em {{ auxilio.data_recebimento|date:"d/m/Y" }}{% endif %}</p>
+    {% else %}
+      <form method="post" action="{% url 'sinistros:receber_auxilio' auxilio.pk %}" class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center"
+            onsubmit="return confirm('Confirmar que o auxílio motorista de {{ sinistro.veiculo.placa|escapejs }} foi recebido?')">
+        {% csrf_token %}
+        <input type="hidden" name="volta" value="{{ request.get_full_path }}">
+        <span class="rounded bg-yellow-100 px-3 py-2 text-sm text-yellow-800">Auxílio {{ auxilio.get_status_display|lower }}{% if auxilio.valor %} ({{ auxilio.valor|brl }}){% endif %}</span>
+        <label for="aux-rec-{{ auxilio.pk }}" class="sr-only">Valor recebido</label>
+        <input id="aux-rec-{{ auxilio.pk }}" type="text" name="valor" inputmode="decimal" placeholder="valor recebido (R$)"
+               title="Deixe em branco para manter o valor solicitado" class="rounded border border-gray-300 px-3 py-2 sm:w-44">
+        <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Marcar recebido</button>
+      </form>
+    {% endif %}
+  {% empty %}
+    {% if sinistro.tipo == "colisao" %}
+    <form method="post" action="{% url 'sinistros:solicitar_auxilio' sinistro.pk %}" class="flex flex-col gap-2 sm:flex-row sm:items-center">
+      {% csrf_token %}
+      <input type="hidden" name="volta" value="{{ request.get_full_path }}">
+      <label for="aux-sol-{{ sinistro.pk }}" class="text-sm font-medium">Valor pedido (R$)</label>
+      <input id="aux-sol-{{ sinistro.pk }}" type="text" name="valor" inputmode="decimal" placeholder="ex.: 1.518,00"
+             class="rounded border border-gray-300 px-3 py-2 sm:w-40">
+      <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Registrar pedido de auxílio</button>
+    </form>
+    {% else %}
+    <p class="text-sm text-gray-500">Só vale para colisão/avaria.</p>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endblock %}

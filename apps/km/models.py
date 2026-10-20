@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from simple_history.models import HistoricalRecords
 
+from apps.formatos import milhar
 from apps.frota.models import Veiculo
 
 
@@ -145,7 +146,13 @@ class RegistroKm(models.Model):
         anterior = self.registro_anterior()
         if anterior is not None and self.km < anterior.km:
             raise ValidationError(
-                {"km": f"KM ({self.km}) menor que a leitura anterior ({anterior.km})."}
+                {
+                    "km": (
+                        f"{milhar(self.km)} km é menor que a leitura anterior "
+                        f"({milhar(anterior.km)} km em {anterior.data_leitura:%d/%m/%Y}) — "
+                        f"o odômetro não volta. Confira o número."
+                    )
+                }
             )
         seguinte = self.registro_seguinte()
         if seguinte is not None and self.km > seguinte.km:
@@ -154,8 +161,9 @@ class RegistroKm(models.Model):
             raise ValidationError(
                 {
                     "km": (
-                        f"KM ({self.km}) maior que a leitura de "
-                        f"{seguinte.mes_referencia:%m/%Y} ({seguinte.km}), já registrada."
+                        f"{milhar(self.km)} km é maior que a leitura de "
+                        f"{seguinte.mes_referencia:%m/%Y} ({milhar(seguinte.km)} km), "
+                        f"já registrada."
                     )
                 }
             )

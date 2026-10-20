@@ -1,0 +1,12 @@
+{# Resposta HTMX de multas:quem_estava — aviso de com quem o carro estava + condutores do cliente (oob). #}
+{% if not veiculo or not data %}
+<p class="text-gray-500">Escolha o carro e a data da infração para ver com quem o carro estava.</p>
+{% elif vigente %}
+<p>Nessa data o carro estava com: <strong>{{ vigente.nome }}</strong>.</p>
+{% if escolhido and escolhido != vigente %}
+<p class="mt-1 text-amber-800">Atenção: você escolheu cobrar de <strong>{{ escolhido.nome }}</strong>, que não estava com o carro nessa data.</p>
+{% endif %}
+{% else %}
+<p class="text-amber-800">Nessa data o carro <strong>não estava alugado</strong> para ninguém{% if not escolhido %} — a multa fica sem cliente{% endif %}.</p>
+{% endif %}
+<div id="caixa-condutor" hx-swap-oob="true">{{ campo_condutor }}</div>

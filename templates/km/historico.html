@@ -1,17 +1,21 @@
 {% extends "base.html" %}
-{% load humanize %}
 
 {% block titulo %}KM — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
   <h1 class="text-2xl font-bold">Quilometragem — {{ veiculo }}</h1>
-  <a href="{% url 'km:lista' %}" class="text-sm underline">← Registro mensal</a>
+  <a href="{% url 'km:lista' %}" class="py-2 text-sm underline">← Registro mensal</a>
 </div>
+<p class="mb-2 text-sm text-gray-500">
+  KM atual do carro: <strong>{{ veiculo.km_atual|milhar }} km</strong>.
+  Digitou um número errado? Use <strong>Corrigir</strong> na leitura — o KM do carro e a cobrança de excedente são refeitos.
+</p>
 
-<div class="overflow-x-auto rounded-lg bg-white shadow">
-  <table class="w-full text-sm">
-    <thead class="bg-marca-preto text-left text-white">
+{# No celular cada leitura vira um cartão (rótulo à esquerda, valor à direita); no computador, tabela. #}
+<div class="rounded-lg bg-white shadow sm:overflow-x-auto">
+  <table class="block w-full text-sm sm:table">
+    <thead class="hidden bg-marca-preto text-left text-white sm:table-header-group">
       <tr>
         <th class="px-3 py-2">Mês</th>
         <th class="px-3 py-2">Data</th>
@@ -22,23 +26,28 @@
         <th class="px-3 py-2">Média/dia</th>
         <th class="px-3 py-2">Média/mês</th>
         <th class="px-3 py-2">Obs.</th>
+        <th class="px-3 py-2"><span class="sr-only">Ação</span></th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block divide-y divide-gray-200 sm:table-row-group sm:divide-gray-100">
       {% for registro in registros %}
-      <tr>
-        <td class="px-3 py-2 font-medium">{{ registro.mes_referencia|date:"m/Y" }}</td>
-        <td class="px-3 py-2">{{ registro.data_leitura|date:"d/m/Y" }}</td>
-        <td class="px-3 py-2">{{ registro.km|intcomma }}</td>
-        <td class="px-3 py-2">{{ registro.km_anterior|intcomma|default:"—" }}</td>
-        <td class="px-3 py-2">{{ registro.dias|default:"—" }}</td>
-        <td class="px-3 py-2 font-semibold">{{ registro.km_utilizado|intcomma|default:"—" }}</td>
-        <td class="px-3 py-2">{{ registro.media_dia|floatformat:0|default:"—" }}</td>
-        <td class="px-3 py-2">{{ registro.media_mes|floatformat:0|default:"—" }}</td>
-        <td class="px-3 py-2 text-gray-500">{{ registro.observacoes|default:"" }}</td>
+      <tr class="block px-4 py-3 sm:table-row sm:p-0">
+        <td class="block pb-1 text-lg font-bold sm:table-cell sm:px-3 sm:py-2 sm:text-sm sm:font-medium">{{ registro.mes_referencia|date:"m/Y" }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Data</span>{{ registro.data_leitura|date:"d/m/Y" }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">KM</span>{{ registro.km|milhar }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">KM anterior</span>{{ registro.km_anterior|milhar }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Dias</span>{{ registro.dias|default:"—" }}</td>
+        <td class="flex justify-between gap-3 py-0.5 font-semibold sm:table-cell sm:px-3 sm:py-2"><span class="font-normal text-gray-500 sm:hidden">KM rodado</span>{{ registro.km_utilizado|milhar }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/dia</span>{{ registro.media_dia|floatformat:0|default:"—" }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/mês</span>{{ registro.media_mes|floatformat:0|default:"—" }}</td>
+        <td class="block py-0.5 text-gray-500 sm:table-cell sm:px-3 sm:py-2">{{ registro.observacoes|default:"" }}</td>
+        <td class="block pt-2 sm:table-cell sm:px-3 sm:py-2 sm:text-right">
+          <a href="{% url 'km:corrigir' registro.pk %}"
+             class="block rounded border border-gray-300 px-3 py-2 text-center font-medium hover:bg-gray-50 sm:inline-block sm:py-1">Corrigir<span class="sr-only"> a leitura de {{ registro.mes_referencia|date:"m/Y" }}</span></a>
+        </td>
       </tr>
       {% empty %}
-      <tr><td colspan="9" class="px-3 py-6 text-center text-gray-500">Nenhuma leitura registrada para este veículo.
+      <tr class="block sm:table-row"><td colspan="10" class="block px-3 py-6 text-center text-gray-500 sm:table-cell">Nenhuma leitura registrada para este veículo.
         <a href="{% url 'km:lista' %}" class="ml-1 font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">Registrar leitura do mês</a></td></tr>
       {% endfor %}
     </tbody>

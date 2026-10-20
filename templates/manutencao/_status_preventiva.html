@@ -1,0 +1,4 @@
+{% if p.status == Status.VENCIDA %}<span class="whitespace-nowrap rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Vencida</span>
+{% elif p.status == Status.PROXIMA %}<span class="whitespace-nowrap rounded bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800">Próxima</span>
+{% elif p.status == Status.OK %}<span class="whitespace-nowrap rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Em dia</span>
+{% else %}<span class="whitespace-nowrap rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">Nunca registrada</span>{% endif %}

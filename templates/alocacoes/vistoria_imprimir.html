@@ -3,24 +3,25 @@
 {% block titulo %}Checklist de vistoria — {{ alocacao.veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<div class="nao-imprime mb-4 flex items-center justify-between gap-3">
+<div class="nao-imprime mb-4 flex flex-wrap items-center justify-between gap-3">
   <h1 class="text-2xl font-bold">Checklist de vistoria</h1>
-  <div class="flex items-center gap-3 text-sm">
+  <div class="flex flex-wrap items-center gap-3 text-sm">
     <button onclick="window.print()"
-            class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">
+            class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95">
       🖨 Imprimir
     </button>
-    <a href="{% url 'alocacoes:vistoria_nova' alocacao.pk %}" class="underline">Registrar vistoria (ler foto)</a>
-    <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
+    <a href="{% url 'alocacoes:vistoria_nova' alocacao.pk %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-medium">Registrar vistoria (ler foto)</a>
+    <a href="{% url 'alocacoes:lista' %}" class="py-3 text-gray-500 underline">← alocações</a>
   </div>
 </div>
-<p class="nao-imprime mb-4 text-xs text-gray-500">
-  Imprima, preencha à mão na entrega/devolução e depois fotografe o formulário preenchido em
+<p class="nao-imprime mb-4 text-sm text-gray-600">
+  Imprima <strong>2 vias</strong> (uma fica com a locadora, outra com o motorista), preencha à mão
+  na entrega ou na devolução do carro e depois fotografe o papel preenchido em
   "Registrar vistoria" — o sistema lê a foto e carrega os dados para você conferir e salvar.
 </p>
 
-<div class="checklist mx-auto max-w-3xl rounded-lg bg-white p-8 text-sm shadow print:shadow-none">
-  <div class="mb-4 flex items-center justify-between border-b-2 border-gray-800 pb-2">
+<div class="checklist mx-auto max-w-3xl rounded-lg bg-white p-4 text-[14px] shadow sm:p-8 print:p-0 print:shadow-none">
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-2 border-b-2 border-gray-800 pb-2">
     <div>
       <span class="rounded bg-marca-preto px-2 py-1 text-lg font-black text-marca-amarelo">TRADE</span>
       <span class="ml-1 italic">Rent a Car</span>
@@ -28,61 +29,129 @@
     <h2 class="text-lg font-black uppercase">Checklist de vistoria</h2>
   </div>
 
-  <div class="mb-3 grid grid-cols-2 gap-x-8 gap-y-1">
+  <div class="mb-4 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2 print:mb-3 print:gap-y-1 print:grid-cols-2">
     <p><strong>Veículo:</strong> {{ alocacao.veiculo.marca_modelo }} — {{ alocacao.veiculo.placa }}</p>
-    <p><strong>Cliente:</strong> {{ alocacao.cliente.nome }}</p>
-    <p><strong>Tipo:</strong> ☐ Entrada (entrega) &nbsp;&nbsp; ☐ Saída (devolução)</p>
+    <p><strong>Motorista:</strong> {{ alocacao.cliente.nome }}</p>
+    <p><strong>CPF:</strong> {{ alocacao.cliente.cpf_cnpj|default:"______________________" }}</p>
+    <p><strong>Telefone:</strong> {{ alocacao.cliente.telefone|default:"______________________" }}</p>
+    <p class="sm:col-span-2 print:col-span-2"><strong>Tipo:</strong>
+      <span class="quadrinho"></span> Entrega ao motorista <span class="text-gray-500">(o carro sai da locadora)</span>
+      &nbsp;&nbsp; <span class="quadrinho"></span> Devolução pelo motorista <span class="text-gray-500">(o carro volta)</span>
+    </p>
     <p><strong>Data:</strong> ____ / ____ / ________</p>
     <p><strong>KM no painel:</strong> ______________________</p>
-    <p><strong>Combustível:</strong>
-      {% for valor, rotulo in combustiveis %}☐ {{ rotulo }}&nbsp;&nbsp;{% endfor %}
+    <p class="sm:col-span-2 print:col-span-2"><strong>Combustível:</strong>
+      {% for valor, rotulo in combustiveis %}<span class="whitespace-nowrap"><span class="quadrinho"></span> {{ rotulo }}</span>&nbsp;&nbsp; {% endfor %}
     </p>
   </div>
 
-  <table class="mb-4 w-full border-collapse border border-gray-400 text-xs">
-    <thead>
-      <tr class="bg-gray-100">
-        <th class="border border-gray-400 px-2 py-1 text-left">Item</th>
-        <th class="border border-gray-400 px-2 py-1">OK</th>
-        <th class="border border-gray-400 px-2 py-1">Avaria</th>
-        <th class="border border-gray-400 px-2 py-1 text-left">Descrição da marca/avaria</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in itens %}
-      <tr>
-        <td class="border border-gray-400 px-2 py-2">{{ item }}</td>
-        <td class="border border-gray-400 px-2 py-2 text-center">☐</td>
-        <td class="border border-gray-400 px-2 py-2 text-center">☐</td>
-        <td class="border border-gray-400 px-2 py-2"></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  {# Desenho do carro para marcar avarias com as letras da legenda (lido junto com a foto). #}
+  <div class="desenho-carro mb-4 rounded border border-gray-400 p-2">
+    <p class="mb-1 font-semibold">Marque no desenho onde está cada avaria, com a letra:
+      <span class="font-normal">R = risco · A = amassado · T = trinca ou quebrado · F = falta a peça</span>
+    </p>
+    <svg viewBox="0 0 640 300" class="h-auto w-full" role="img"
+         aria-label="Desenho do carro visto de cima, dos lados, de frente e de trás"
+         fill="none" stroke="#1f2937" stroke-width="2" font-family="sans-serif" font-size="13">
+      <!-- Lateral esquerda (carro virado para a esquerda) -->
+      <text x="10" y="18" fill="#1f2937" stroke="none" font-weight="bold">Lado esquerdo</text>
+      <path d="M20 95 L20 72 Q22 62 40 60 L80 56 L110 32 Q118 26 132 26 L208 26 Q222 26 232 34 L262 58 L290 64 Q300 68 300 78 L300 95 Z"/>
+      <path d="M118 56 L132 34 L170 34 L170 56 Z M178 56 L178 34 L214 34 Q222 34 228 42 L240 56 Z"/>
+      <line x1="174" y1="58" x2="174" y2="92"/>
+      <circle cx="75" cy="96" r="16"/><circle cx="245" cy="96" r="16"/>
 
-  <p class="mb-1 font-semibold">Notas:</p>
-  <div class="mb-6 space-y-4">
-    <div class="border-b border-gray-400"></div>
-    <div class="border-b border-gray-400"></div>
-    <div class="border-b border-gray-400"></div>
+      <!-- Lateral direita (carro virado para a direita) -->
+      <text x="340" y="18" fill="#1f2937" stroke="none" font-weight="bold">Lado direito</text>
+      <path d="M620 95 L620 72 Q618 62 600 60 L560 56 L530 32 Q522 26 508 26 L432 26 Q418 26 408 34 L378 58 L350 64 Q340 68 340 78 L340 95 Z"/>
+      <path d="M522 56 L508 34 L470 34 L470 56 Z M462 56 L462 34 L426 34 Q418 34 412 42 L400 56 Z"/>
+      <line x1="466" y1="58" x2="466" y2="92"/>
+      <circle cx="565" cy="96" r="16"/><circle cx="395" cy="96" r="16"/>
+
+      <!-- Visto de cima (frente para a esquerda) -->
+      <text x="272" y="140" fill="#1f2937" stroke="none" font-weight="bold">Visto de cima</text>
+      <rect x="170" y="150" width="300" height="120" rx="40"/>
+      <path d="M250 160 Q232 210 250 260 L280 250 Q270 210 280 170 Z"/>
+      <path d="M400 165 Q414 210 400 255 L380 248 Q388 210 380 172 Z"/>
+      <rect x="280" y="170" width="100" height="80" rx="6"/>
+      <rect x="200" y="140" width="40" height="10" rx="3"/><rect x="400" y="140" width="40" height="10" rx="3"/>
+      <rect x="200" y="270" width="40" height="10" rx="3"/><rect x="400" y="270" width="40" height="10" rx="3"/>
+      <text x="176" y="214" fill="#6b7280" stroke="none" font-size="11">frente</text>
+      <text x="436" y="214" fill="#6b7280" stroke="none" font-size="11">trás</text>
+
+      <!-- Frente -->
+      <text x="20" y="142" fill="#1f2937" stroke="none" font-weight="bold">Frente</text>
+      <rect x="20" y="175" width="120" height="70" rx="14"/>
+      <path d="M35 175 L48 150 L112 150 L125 175"/>
+      <circle cx="40" cy="200" r="9"/><circle cx="120" cy="200" r="9"/>
+      <rect x="55" y="215" width="50" height="14" rx="3"/>
+
+      <!-- Trás -->
+      <text x="500" y="142" fill="#1f2937" stroke="none" font-weight="bold">Trás</text>
+      <rect x="500" y="175" width="120" height="70" rx="14"/>
+      <path d="M515 175 L528 150 L592 150 L605 175"/>
+      <rect x="508" y="190" width="22" height="14" rx="3"/><rect x="590" y="190" width="22" height="14" rx="3"/>
+      <rect x="535" y="215" width="50" height="14" rx="3"/>
+    </svg>
   </div>
 
-  <div class="mt-10 grid gap-10 sm:grid-cols-2">
+  {% comment %}
+    Itens: no celular cada item vira um cartão; no computador e no papel ficam em 2 colunas
+    de linhas compactas, para o checklist caber numa folha A4 só (a leitura usa UMA foto).
+  {% endcomment %}
+  <div class="mb-1 hidden gap-x-6 text-xs font-semibold text-gray-600 sm:grid sm:grid-cols-2 print:grid print:grid-cols-2">
+    {% for coluna in "12" %}
+    <div class="flex items-end gap-2 border-b-2 border-gray-800 pb-1">
+      <span class="flex-1">Item</span><span class="w-8 text-center">OK</span>
+      <span class="w-12 text-center">Avaria</span><span class="w-24">Qual avaria</span>
+    </div>
+    {% endfor %}
+  </div>
+  <ul class="itens-checklist mb-4 space-y-2 sm:block sm:columns-2 sm:gap-x-6 sm:space-y-0 print:block print:columns-2 print:gap-x-6 print:space-y-0">
+    {% for item in itens %}
+    <li class="item-checklist rounded border border-gray-300 p-3 sm:flex sm:items-center sm:gap-2 sm:rounded-none sm:border-0 sm:border-b sm:px-0 sm:py-1 print:flex print:items-center print:gap-2 print:rounded-none print:border-0 print:border-b print:px-0 print:py-1">
+      <p class="font-medium sm:flex-1 sm:font-normal sm:leading-tight print:flex-1 print:font-normal print:leading-tight">{{ item }}</p>
+      <p class="mt-2 flex items-center gap-4 sm:mt-0 sm:gap-2 print:mt-0 print:gap-2">
+        <span class="sm:flex sm:w-8 sm:justify-center print:flex print:w-8 print:justify-center"><span class="quadrinho"></span><span class="ml-1 sm:hidden print:hidden">OK</span></span>
+        <span class="sm:flex sm:w-12 sm:justify-center print:flex print:w-12 print:justify-center"><span class="quadrinho"></span><span class="ml-1 sm:hidden print:hidden">Avaria</span></span>
+      </p>
+      <div class="mt-4 border-b border-gray-400 sm:mt-0 sm:h-6 sm:w-24 print:mt-0 print:h-6 print:w-24"></div>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <p class="mb-1 font-semibold">Notas:</p>
+  <div class="mb-4">
+    <div class="h-9 border-b border-gray-400"></div>
+    <div class="h-9 border-b border-gray-400"></div>
+  </div>
+
+  <div class="assinaturas mt-10 grid gap-10 sm:grid-cols-2 print:mt-8 print:grid-cols-2">
     <div class="border-t border-gray-800 pt-1 text-center">
-      Trade Rent a Car
+      Assinatura da locadora — Trade Rent a Car<br>
+      <span class="text-gray-600">Data: ____ / ____ / ________</span>
     </div>
     <div class="border-t border-gray-800 pt-1 text-center">
-      {{ alocacao.cliente.nome }}
+      Assinatura do motorista — {{ alocacao.cliente.nome }}<br>
+      <span class="text-gray-600">Data: ____ / ____ / ________</span>
     </div>
   </div>
 </div>
 
 <style>
+  /* Quadrinho para marcar à caneta — maior que o caractere de caixinha, que sai minúsculo no papel. */
+  .quadrinho {
+    display: inline-block; width: 16px; height: 16px; border: 1.5px solid #1f2937;
+    border-radius: 2px; vertical-align: -3px; background: #fff;
+  }
+  .item-checklist { break-inside: avoid; }
   @media print {
+    @page { margin: 10mm; }
     header, .nao-imprime { display: none !important; }
     body { background: white !important; }
     .checklist { box-shadow: none !important; padding: 0 !important; max-width: 100% !important; }
     main { padding: 0 !important; max-width: 100% !important; }
+    .desenho-carro svg { max-height: 250px; }
+    .assinaturas { break-inside: avoid; }
   }
 </style>
 {% endblock %}

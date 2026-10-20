@@ -51,6 +51,12 @@ class Alocacao(models.Model):
     )
     status = models.CharField("status", max_length=10, choices=Status.choices, default=Status.ATIVA)
     observacoes = models.TextField("observações", blank=True)
+    # Cartão "Próximos passos da entrega" na ficha do cliente: o contrato se marca
+    # sozinho ao ser aberto para imprimir; o cartão some ao concluir ou dispensar.
+    contrato_aberto_em = models.DateField("contrato aberto para imprimir em", null=True, blank=True)
+    passos_entrega_dispensados = models.BooleanField(
+        "próximos passos da entrega dispensados", default=False
+    )
 
     history = HistoricalRecords()
 
@@ -268,7 +274,7 @@ class TrocaTemporaria(models.Model):
 
 
 class Vistoria(models.Model):
-    """Checklist de entrada/saída do carro (km, combustível, marcas, notas).
+    """Checklist de entrega/devolução do carro (km, combustível, marcas, notas).
 
     O papel continua existindo: o sistema imprime o checklist em branco, o
     preenchimento é feito à mão na entrega/devolução, e a foto do formulário
@@ -277,8 +283,10 @@ class Vistoria(models.Model):
     """
 
     class Tipo(models.TextChoices):
-        ENTRADA = "entrada", "Entrada (entrega ao cliente)"
-        SAIDA = "saida", "Saída (devolução do cliente)"
+        # Os valores gravados ("entrada"/"saida") ficam como estão; só o texto
+        # mostrado mudou — "entrada" confundia, porque na entrega o carro SAI do pátio.
+        ENTRADA = "entrada", "Entrega ao motorista"
+        SAIDA = "saida", "Devolução pelo motorista"
 
     class Combustivel(models.TextChoices):
         CHEIO = "cheio", "Cheio"

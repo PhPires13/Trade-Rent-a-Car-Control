@@ -91,7 +91,10 @@ def test_criar_alocacao_oferece_o_contrato(usuario_logado, db):
         follow=True,
     )
     html = resposta.content.decode()
-    assert "Gerar contrato de locação" in html
+    # o contrato agora é o 1º item do cartão "Próximos passos da entrega" na ficha
+    alocacao = Alocacao.objects.get(veiculo=veiculo)
+    assert "Próximos passos da entrega" in html
+    assert f"/alocacoes/{alocacao.pk}/contrato/" in html
 
 
 # ---------- checklist para imprimir ----------

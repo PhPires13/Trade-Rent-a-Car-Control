@@ -9,13 +9,14 @@
   <div class="flex flex-wrap items-center gap-3 text-sm">
     <a href="{% url 'manutencao:preventivas' %}" class="py-1 underline">← Manutenção da frota</a>
     <a href="{% url 'manutencao:registrar' veiculo.pk %}"
-       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Registrar manutenção</a>
+       class="rounded bg-marca-amarelo px-3 py-2 font-semibold text-marca-preto hover:brightness-95">+ Registrar manutenção</a>
   </div>
 </div>
 
-<div class="overflow-x-auto rounded-lg bg-white shadow">
-  <table class="w-full text-sm">
-    <thead class="bg-marca-preto text-left text-white">
+{# No celular cada linha vira um cartão: o rótulo de cada dado aparece antes do valor. #}
+<div class="rounded-lg sm:overflow-x-auto sm:bg-white sm:shadow">
+  <table class="block w-full text-sm sm:table">
+    <thead class="hidden bg-marca-preto text-left text-white sm:table-header-group">
       <tr>
         <th class="px-3 py-2">Data</th>
         <th class="px-3 py-2">Item</th>
@@ -23,41 +24,62 @@
         <th class="px-3 py-2">KM</th>
         <th class="px-3 py-2">Descrição</th>
         <th class="px-3 py-2" title="Quanto a oficina cobrou da empresa">Custo real</th>
+        <th class="px-3 py-2">Pago à oficina</th>
         <th class="px-3 py-2" title="Quanto foi cobrado do cliente (entre parênteses: diferença para o custo real)">Cobrado do cliente</th>
         <th class="px-3 py-2" title="Dias que o carro ficou na oficina">Dias parado</th>
         <th class="px-3 py-2" title="Cobrança do custo ao cliente, no Financeiro">Repasse</th>
+        <th class="px-3 py-2"><span class="sr-only">Ações</span></th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block space-y-3 sm:table-row-group sm:space-y-0 sm:divide-y sm:divide-gray-100">
       {% for m in manutencoes %}
-      <tr>
-        <td class="px-3 py-2">{{ m.data|date:"d/m/Y" }}</td>
-        <td class="px-3 py-2 font-medium">{{ m.item|default:"—" }}</td>
-        <td class="px-3 py-2">{{ m.get_tipo_display }}{% if m.sinistro %} <span class="text-xs text-red-600">(sinistro)</span>{% endif %}</td>
-        <td class="px-3 py-2">{{ m.km|intcomma|default:"—" }}</td>
-        <td class="px-3 py-2 text-gray-600">{{ m.descricao }}{% if m.oficina %} <span class="text-xs text-gray-400">· {{ m.oficina }}</span>{% endif %}</td>
-        <td class="px-3 py-2">{% if m.custo_real is not None %}{{ m.custo_real|brl }}{% else %}—{% endif %}</td>
-        <td class="px-3 py-2">
+      <tr class="block rounded-lg bg-white p-3 shadow sm:table-row sm:p-0 sm:shadow-none">
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Data: </span>{{ m.data|date:"d/m/Y" }}</td>
+        <td class="block py-0.5 font-medium sm:table-cell sm:px-3 sm:py-2"><span class="font-normal text-gray-500 sm:hidden">Item: </span>{{ m.item|default:"—" }}</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Tipo: </span>{{ m.get_tipo_display }}{% if m.sinistro %} <span class="text-xs text-red-600">(sinistro)</span>{% endif %}</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">KM: </span>{{ m.km|intcomma|default:"—" }}</td>
+        <td class="block py-0.5 text-gray-600 sm:table-cell sm:px-3 sm:py-2">{{ m.descricao }}{% if m.oficina %} <span class="text-xs text-gray-600">· {{ m.oficina }}</span>{% endif %}</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Custo real: </span>{% if m.custo_real is not None %}{{ m.custo_real|brl }}{% else %}—{% endif %}</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Pago à oficina: </span>
+          {% if not m.custo_real %}—
+          {% elif m.pagamento_custo == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Pago</span>
+          {% else %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">Falta pagar</span>{% endif %}
+        </td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Cobrado do cliente: </span>
           {% if m.valor_cobrado_cliente is not None %}{{ m.valor_cobrado_cliente|brl }}
-            {% if m.diferenca is not None %}<span class="block text-xs {% if m.diferenca >= 0 %}text-green-700{% else %}text-red-700{% endif %}" title="Cobrado do cliente menos o custo real">({% if m.diferenca >= 0 %}+{% endif %}{{ m.diferenca|brl }})</span>{% endif %}
+            {% if m.diferenca is not None %}<span class="text-xs sm:block {% if m.diferenca >= 0 %}text-green-700{% else %}text-red-700{% endif %}" title="Cobrado do cliente menos o custo real">({% if m.diferenca >= 0 %}+{% endif %}{{ m.diferenca|brl }})</span>{% endif %}
           {% else %}—{% endif %}
         </td>
-        <td class="px-3 py-2">{% if m.data_entrada %}{{ m.dias_parado }} dia{{ m.dias_parado|pluralize }}{% else %}—{% endif %}</td>
-        <td class="px-3 py-2">
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Dias parado: </span>
+          {% if m.data_entrada %}{{ m.dias_parado }} dia{{ m.dias_parado|pluralize }}
+            {% if not m.data_saida %}<span class="text-xs font-semibold text-orange-700 sm:block">ainda na oficina</span>{% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2">
           {% if m.cobranca_repasse_id %}
             <span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Cobrado</span>
           {% elif m.responsavel == "cliente" and m.valor_cobrado_cliente %}
             <form method="post" action="{% url 'manutencao:repassar' m.pk %}"
                   onsubmit="return confirm('Gerar cobrança de {{ m.valor_cobrado_cliente|brl|escapejs }} para o cliente? Ela entra no Financeiro como conta a receber.')">
               {% csrf_token %}
-              <button class="whitespace-nowrap rounded bg-marca-amarelo px-2 py-1 text-xs font-semibold text-marca-preto hover:brightness-95"
+              <button class="mt-1 w-full whitespace-nowrap rounded bg-marca-amarelo px-3 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:mt-0 sm:w-auto sm:px-2 sm:py-1 sm:text-xs"
                       title="Cria a cobrança deste custo para o cliente no Financeiro">Cobrar do cliente</button>
             </form>
-          {% else %}—{% endif %}
+          {% else %}<span class="hidden sm:inline">—</span>{% endif %}
+        </td>
+        <td class="block pt-2 sm:table-cell sm:px-3 sm:py-2">
+          <div class="flex flex-wrap gap-2 sm:flex-nowrap">
+            {% if m.data_entrada and not m.data_saida %}
+            <a href="{% url 'manutencao:voltou' m.pk %}"
+               class="flex-1 whitespace-nowrap rounded bg-marca-preto px-3 py-2 text-center text-sm font-semibold text-white hover:brightness-125 sm:flex-none sm:px-2 sm:py-1 sm:text-xs">Carro voltou da oficina</a>
+            {% endif %}
+            <a href="{% url 'manutencao:editar' m.pk %}"
+               class="flex-1 rounded border border-gray-300 px-3 py-2 text-center text-sm hover:bg-gray-50 sm:flex-none sm:px-2 sm:py-1 sm:text-xs">Editar</a>
+          </div>
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="9" class="px-3 py-6 text-center text-gray-500">Nenhuma manutenção registrada para este veículo.
+      <tr class="block rounded-lg bg-white shadow sm:table-row sm:shadow-none"><td colspan="11" class="block px-3 py-6 text-center text-gray-500 sm:table-cell">Nenhuma manutenção registrada para este carro.
         <a href="{% url 'manutencao:registrar' veiculo.pk %}" class="ml-1 font-semibold text-marca-preto underline decoration-marca-amarelo decoration-2">+ Registrar a primeira</a></td></tr>
       {% endfor %}
     </tbody>

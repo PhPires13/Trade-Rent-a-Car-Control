@@ -6,12 +6,12 @@
 <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
   <h1 class="text-2xl font-bold">Sinistros e eventos</h1>
   <a href="{% url 'sinistros:novo' %}"
-     class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">+ Novo sinistro</a>
+     class="rounded bg-marca-amarelo px-4 py-2.5 text-base font-semibold text-marca-preto hover:brightness-95 sm:px-3 sm:py-1.5 sm:text-sm">+ Novo sinistro</a>
 </div>
 
-<form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+<form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-base sm:text-sm">
   <label for="filtro-status-sinistro" class="sr-only">Status</label>
-  <select id="filtro-status-sinistro" name="status" onchange="this.form.submit()" class="rounded border border-gray-300 px-2 py-1">
+  <select id="filtro-status-sinistro" name="status" onchange="this.form.submit()" class="rounded border border-gray-300 px-2 py-2 sm:py-1">
     <option value="">Todos os status</option>
     {% for valor, rotulo in statuses %}
     <option value="{{ valor }}" {% if filtro == valor %}selected{% endif %}>{{ rotulo }}</option>
@@ -19,14 +19,14 @@
   </select>
   <label for="filtro-placa-sinistro" class="sr-only">Placa</label>
   <input id="filtro-placa-sinistro" type="search" name="veiculo" value="{{ filtro_veiculo }}" placeholder="placa"
-         class="w-28 rounded border border-gray-300 px-2 py-1">
-  <button class="rounded bg-marca-preto px-3 py-1 text-white">Buscar</button>
+         class="w-32 rounded border border-gray-300 px-2 py-2 sm:w-28 sm:py-1">
+  <button class="rounded bg-marca-preto px-4 py-2 text-white sm:px-3 sm:py-1">Buscar</button>
   {% if filtro or filtro_veiculo %}<a href="{% url 'sinistros:lista' %}" class="text-gray-500 underline">limpar filtros</a>{% endif %}
 </form>
 
 <div class="space-y-4">
   {% for sinistro in sinistros %}
-  <div class="rounded-lg bg-white p-5 shadow">
+  <div class="rounded-lg bg-white p-4 shadow sm:p-5">
     <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
       <div>
         <span class="font-bold">{{ sinistro.veiculo.placa }}</span>
@@ -37,15 +37,17 @@
         {% elif sinistro.status == "regularizacao" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">Em regularização</span>
         {% else %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Concluído</span>{% endif %}
       </div>
-      <div class="text-sm text-gray-500">
+      <div class="flex flex-wrap items-center gap-3 text-sm text-gray-500">
         {% if sinistro.acionou_protecao %}
           <span title="Acionou a proteção veicular (Auto Truck)">Proteção acionada {{ sinistro.data_evento|date:"d/m/Y"|default:"" }}</span>
           {% if sinistro.franquia_valor is not None %}· franquia {{ sinistro.franquia_valor|brl }}{% endif %}
         {% endif %}
+        <a href="{% url 'sinistros:editar' sinistro.pk %}?volta={{ aqui|urlencode }}"
+           class="rounded border border-gray-300 px-4 py-2 font-semibold text-marca-preto hover:bg-gray-50 sm:px-3 sm:py-1">Editar</a>
       </div>
     </div>
     <p class="mb-2 text-sm text-gray-600">{{ sinistro.descricao|default:"(sem descrição)" }}
-      {% if sinistro.boletim_ocorrencia %}<span class="text-xs text-gray-400">· BO {{ sinistro.boletim_ocorrencia }}</span>{% endif %}
+      {% if sinistro.boletim_ocorrencia %}<span class="text-xs text-gray-600">· BO {{ sinistro.boletim_ocorrencia }}</span>{% endif %}
     </p>
     <div class="flex flex-wrap items-center gap-3 text-sm">
       {% if sinistro.dias_parado %}
@@ -60,22 +62,24 @@
           <form method="post" action="{% url 'sinistros:receber_auxilio' auxilio.pk %}" class="flex flex-wrap items-center gap-1"
                 onsubmit="return confirm('Confirmar que o auxílio motorista de {{ sinistro.veiculo.placa|escapejs }} foi recebido?')">
             {% csrf_token %}
+            <input type="hidden" name="volta" value="{{ aqui }}">
             <span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Auxílio {{ auxilio.get_status_display|lower }}{% if auxilio.valor %} ({{ auxilio.valor|brl }}){% endif %}</span>
             <label for="aux-rec-{{ auxilio.pk }}" class="sr-only">Valor recebido</label>
             <input id="aux-rec-{{ auxilio.pk }}" type="text" name="valor" inputmode="decimal" placeholder="valor recebido (R$)"
-                   title="Deixe em branco para manter o valor solicitado" class="w-36 rounded border border-gray-300 px-1 py-0.5 text-xs">
-            <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto hover:brightness-95">Marcar recebido</button>
+                   title="Deixe em branco para manter o valor solicitado" class="w-40 rounded border border-gray-300 px-2 py-2 text-sm sm:w-36 sm:px-1 sm:py-0.5 sm:text-xs">
+            <button class="rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:px-2 sm:py-0.5 sm:text-xs">Marcar recebido</button>
           </form>
         {% endif %}
       {% empty %}
         {% if sinistro.auxilio_disponivel %}
         <form method="post" action="{% url 'sinistros:solicitar_auxilio' sinistro.pk %}" class="flex flex-wrap items-center gap-1">
           {% csrf_token %}
+          <input type="hidden" name="volta" value="{{ aqui }}">
           <span class="font-semibold text-red-700" title="A proteção paga um auxílio ao motorista quando o carro fica mais de 7 dias parado">⚠ Parado há mais de 7 dias — dá para pedir o auxílio motorista:</span>
           <label for="aux-sol-{{ sinistro.pk }}" class="sr-only">Valor do auxílio</label>
           <input id="aux-sol-{{ sinistro.pk }}" type="text" name="valor" inputmode="decimal" placeholder="ex.: 1.518,00" title="Normalmente 1 salário mínimo"
-                 class="w-32 rounded border border-gray-300 px-1 py-0.5 text-xs">
-          <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto hover:brightness-95">Registrar pedido</button>
+                 class="w-36 rounded border border-gray-300 px-2 py-2 text-sm sm:w-32 sm:px-1 sm:py-0.5 sm:text-xs">
+          <button class="rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:px-2 sm:py-0.5 sm:text-xs">Registrar pedido</button>
         </form>
         {% endif %}
       {% endfor %}

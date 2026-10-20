@@ -23,7 +23,63 @@
      {% if mostrar != "ativas" %}aria-current="page"{% endif %}>Todas (inclui encerradas)</a>
 </nav>
 
-<div class="overflow-x-auto rounded-lg bg-white shadow">
+{# Celular: um cartão por alocação (a tabela larga fica para telas maiores) #}
+<div class="space-y-3 sm:hidden">
+  {% for alocacao in alocacoes %}
+  <article class="rounded-lg bg-white p-4 shadow {% if alocacao.status == 'ativa' %}border-l-4 border-marca-amarelo{% endif %}">
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0">
+        <a href="{% url 'alocacoes:timeline' alocacao.veiculo.pk %}"
+           class="text-lg font-bold underline decoration-marca-amarelo decoration-2">{{ alocacao.veiculo.placa }}</a>
+        <span class="text-sm text-gray-500">{{ alocacao.veiculo.marca_modelo }}</span>
+        <a href="{% url 'pessoas:detalhe' alocacao.cliente.pk %}" class="block font-medium underline">{{ alocacao.cliente.nome }}</a>
+      </div>
+      {% if alocacao.status == "encerrada" %}
+        <span class="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">Encerrada {{ alocacao.data_termino|date:"d/m/y" }}</span>
+      {% elif alocacao.troca_ativa %}
+        <span class="shrink-0 rounded bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">Com substituto {{ alocacao.troca_ativa.veiculo_substituto.placa }}</span>
+      {% else %}
+        <span class="shrink-0 rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Ativa</span>
+      {% endif %}
+    </div>
+    <dl class="mt-3 grid grid-cols-2 gap-2 text-sm">
+      <div>
+        <dt class="text-gray-500">Valor/semana</dt>
+        <dd class="font-semibold">{{ alocacao.valor_semanal|brl }}
+          {% if alocacao.troca_ativa and alocacao.troca_ativa.valor_semanal_ajustado %}
+          <span class="block text-xs font-normal text-yellow-700">troca: {{ alocacao.troca_ativa.valor_semanal_ajustado|brl }}</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div><dt class="text-gray-500">Dia de pagar</dt><dd>{{ alocacao.get_dia_vencimento_display }}</dd></div>
+      <div><dt class="text-gray-500">Desde</dt><dd>{{ alocacao.data_inicio|date:"d/m/Y" }}</dd></div>
+    </dl>
+    {% if alocacao.status == "ativa" %}
+    <div class="mt-3 grid grid-cols-2 gap-2 border-t border-gray-100 pt-3 text-sm">
+      {% if alocacao.troca_ativa %}
+      <a href="{% url 'alocacoes:troca_devolver' alocacao.troca_ativa.pk %}"
+         class="col-span-2 rounded bg-marca-amarelo px-3 py-3 text-center font-semibold text-marca-preto">Devolver substituto</a>
+      {% endif %}
+      <a href="{% url 'alocacoes:contrato' alocacao.pk %}" class="rounded border border-gray-300 px-3 py-3 text-center font-medium">Contrato</a>
+      <a href="{% url 'alocacoes:vistoria_nova' alocacao.pk %}" class="rounded border border-gray-300 px-3 py-3 text-center font-medium">Vistoria</a>
+      <a href="{% url 'alocacoes:editar' alocacao.pk %}" class="rounded border border-gray-300 px-3 py-3 text-center font-medium">Editar valores</a>
+      {% if not alocacao.troca_ativa %}
+      <a href="{% url 'alocacoes:troca_nova' alocacao.pk %}" class="rounded border border-gray-300 px-3 py-3 text-center font-medium">Trocar carro</a>
+      {% endif %}
+      <a href="{% url 'alocacoes:encerrar' alocacao.pk %}" class="col-span-2 rounded border border-red-200 px-3 py-3 text-center font-semibold text-red-700">Encerrar (carro devolvido)</a>
+    </div>
+    {% endif %}
+  </article>
+  {% empty %}
+  <div class="rounded-lg bg-white px-4 py-8 text-center shadow">
+    <p class="text-gray-600">{% if mostrar == "ativas" %}Nenhum carro alugado no momento.{% else %}Nenhuma alocação registrada ainda.{% endif %}</p>
+    <a href="{% url 'alocacoes:nova' %}"
+       class="mt-3 block rounded bg-marca-amarelo px-4 py-3 font-semibold text-marca-preto">+ Alocar um carro a um cliente</a>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="hidden overflow-x-auto rounded-lg bg-white shadow sm:block">
   <table class="w-full text-sm">
     <thead class="bg-marca-preto text-left text-white">
       <tr>

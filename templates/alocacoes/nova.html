@@ -5,7 +5,7 @@
 {% block conteudo %}
 <a href="{% url 'alocacoes:lista' %}" class="text-sm text-gray-600 underline">← Alocações</a>
 <h1 class="mb-1 mt-2 text-2xl font-bold">Nova alocação</h1>
-<p class="mb-6 text-sm text-gray-600">Entregar um carro disponível a um cliente. As cobranças semanais saem sozinhas a partir da data de início.</p>
+<p class="mb-6 text-sm text-gray-600">Entregar um carro disponível a um cliente. As cobranças semanais saem sozinhas a partir da data de início. Depois de alocar, a ficha do cliente mostra o que falta na entrega (contrato, vistoria, caução e 1ª semana).</p>
 
 {% if sem_veiculos or sem_clientes %}
 <div class="mb-4 max-w-xl rounded border-l-4 border-yellow-500 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
@@ -18,10 +18,48 @@
 </div>
 {% endif %}
 
-{{ referencias|json_script:"referencias-categoria" }}
-<form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
-      x-data="{ limite: '{{ form.limite_km.value|default:'ilimitado' }}', veiculo: '{{ form.veiculo.value|default:'' }}', refs: JSON.parse(document.getElementById('referencias-categoria').textContent) }"
-      @change="if ($event.target.name === 'veiculo') veiculo = $event.target.value">
+{{ dados_veiculos|json_script:"dados-veiculos" }}
+{{ dados_clientes|json_script:"dados-clientes" }}
+{{ carros_na_oficina|json_script:"carros-na-oficina" }}
+{# Ao escolher o carro: KM atual e preço de referência. Ao escolher o cliente: #}
+{# dia de pagar e caução do cadastro como sugestão — tudo continua editável.   #}
+<form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-4 shadow sm:p-6"
+      x-data="{
+        limite: '{{ form.limite_km.value|default:'ilimitado' }}',
+        veiculo: '{{ form.veiculo.value|default:'' }}',
+        cliente: '{{ form.cliente.value|default:'' }}',
+        veiculos: JSON.parse(document.getElementById('dados-veiculos').textContent),
+        clientes: JSON.parse(document.getElementById('dados-clientes').textContent),
+        sugeridoDia: false,
+        sugeridaCaucao: false,
+        campo(nome) { return document.getElementById('id_' + nome) },
+        init() {
+          const c = this.clientes[this.cliente];
+          this.sugeridoDia = !!(c && c.dia !== '' && this.campo('dia_vencimento').value === c.dia);
+          this.sugeridaCaucao = !!(c && c.caucao && this.campo('caucao_valor').value === c.caucao);
+        },
+        mudou(alvo) {
+          if (alvo.name === 'veiculo') {
+            this.veiculo = alvo.value;
+            const v = this.veiculos[alvo.value];
+            if (v) this.campo('km_entrega').value = v.km;
+          } else if (alvo.name === 'cliente') {
+            this.cliente = alvo.value;
+            const c = this.clientes[alvo.value];
+            // trocou de cliente: apaga a sugestão do anterior que ninguém mexeu
+            if (this.sugeridoDia) this.campo('dia_vencimento').value = '';
+            if (this.sugeridaCaucao) this.campo('caucao_valor').value = '';
+            this.sugeridoDia = !!(c && c.dia !== '');
+            this.sugeridaCaucao = !!(c && c.caucao);
+            if (this.sugeridoDia) this.campo('dia_vencimento').value = c.dia;
+            if (this.sugeridaCaucao) this.campo('caucao_valor').value = c.caucao;
+          } else if (alvo.name === 'dia_vencimento') {
+            this.sugeridoDia = false;
+          }
+        }
+      }"
+      @change="mudou($event.target)"
+      @input="if ($event.target.name === 'caucao_valor') sugeridaCaucao = false">
   {% csrf_token %}
   {% include "_erros_form.html" %}
   {% for field in form %}
@@ -36,22 +74,34 @@
       {{ field }}
     {% endif %}
     {% if field.name == "veiculo" %}
-    <template x-if="refs[veiculo]">
+    <template x-if="veiculos[veiculo] && veiculos[veiculo].valor">
       <p class="mt-1 rounded bg-yellow-50 px-2 py-1.5 text-xs text-yellow-900">
-        Categoria <strong x-text="refs[veiculo].categoria"></strong>: preço de referência
-        <strong>R$ <span x-text="refs[veiculo].valor"></span></strong>/semana.
-        <button type="button" class="ml-1 font-semibold underline"
-                @click="document.getElementById('id_valor_semanal').value = refs[veiculo].valor">Usar este valor</button>
+        Categoria <strong x-text="veiculos[veiculo].categoria"></strong>: preço de referência
+        <strong>R$ <span x-text="veiculos[veiculo].valor"></span></strong>/semana.
+        <button type="button" class="ml-1 py-1 font-semibold underline"
+                @click="campo('valor_semanal').value = veiculos[veiculo].valor">Usar este valor</button>
       </p>
     </template>
+    <p x-data="{ oficina: JSON.parse(document.getElementById('carros-na-oficina').textContent) }"
+       x-show="oficina[veiculo]" x-cloak role="alert"
+       class="mt-1 rounded border-l-4 border-orange-400 bg-orange-50 px-2 py-1.5 text-sm text-orange-900">
+      Este carro está <strong>na oficina</strong> desde <span x-text="oficina[veiculo]"></span>.
+      Confira se ele já voltou antes de entregar ao motorista.
+    </p>
+    {% elif field.name == "km_entrega" %}
+    <p x-show="veiculos[veiculo]" x-cloak class="mt-1 text-xs text-gray-600">Preenchido com o KM que o sistema já tem deste carro — confira no painel.</p>
+    {% elif field.name == "dia_vencimento" %}
+    <p x-show="sugeridoDia" x-cloak class="mt-1 rounded bg-blue-50 px-2 py-1 text-xs text-blue-900">Sugerido pelo cadastro do cliente — pode mudar.</p>
+    {% elif field.name == "caucao_valor" %}
+    <p x-show="sugeridaCaucao" x-cloak class="mt-1 rounded bg-blue-50 px-2 py-1 text-xs text-blue-900">Sugerido pelo cadastro do cliente — pode mudar ou apagar.</p>
     {% endif %}
-    {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+    {% if field.help_text and field.name != "dia_vencimento" %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
   </div>
   {% endfor %}
-  <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Alocar carro</button>
-    <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <button class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 sm:py-2">Alocar carro</button>
+    <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-center text-sm text-gray-600 underline">Cancelar</a>
   </div>
 </form>
 

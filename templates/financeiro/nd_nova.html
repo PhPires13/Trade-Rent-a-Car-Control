@@ -11,8 +11,33 @@
 </p>
 
 {{ itens_iniciais|json_script:"nd-itens-iniciais" }}
+{{ dias_pagamento|json_script:"nd-dias-pagamento" }}
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
       x-data='{ itens: JSON.parse(document.getElementById("nd-itens-iniciais").textContent), enviando: false,
+                dias: JSON.parse(document.getElementById("nd-dias-pagamento").textContent),
+                cliente: "{{ post.cliente|default:''|escapejs }}",
+                emissao: "{% if post.data_emissao %}{{ post.data_emissao|escapejs }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}",
+                venc: "{{ post.vencimento|default:''|escapejs }}",
+                manual: {% if post.vencimento %}true{% else %}false{% endif %},
+                nomesDias: ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"],
+                diaDoCliente() { const d = this.dias[this.cliente]; return d === undefined ? null : d; },
+                sugerido() {
+                  /* mesma regra do servidor: próximo dia de pagamento, nunca o próprio dia da emissão */
+                  if (!this.emissao) return "";
+                  const base = new Date(this.emissao + "T12:00:00");
+                  const semana = (base.getDay() + 6) % 7, dia = this.diaDoCliente();
+                  const falta = dia === null ? 7 : (((dia - semana) % 7 + 7) % 7 || 7);
+                  base.setDate(base.getDate() + falta);
+                  return base.getFullYear() + "-" + String(base.getMonth() + 1).padStart(2, "0") + "-" + String(base.getDate()).padStart(2, "0");
+                },
+                ddmm(iso) { return iso ? iso.slice(8, 10) + "/" + iso.slice(5, 7) : ""; },
+                explicacao() {
+                  const s = this.sugerido(), dia = this.diaDoCliente();
+                  if (!this.cliente || !s) return "";
+                  if (dia === null) return "Este cliente ainda não tem dia de pagamento: sugerimos 7 dias depois da emissão (" + this.ddmm(s) + ").";
+                  return "Próximo dia de pagamento do cliente: " + this.nomesDias[dia] + ", " + this.ddmm(s) + ".";
+                },
+                ajustar() { if (!this.manual) this.venc = this.sugerido(); },
                 br(texto) {
                   let t = String(texto || "").replace(/R\$|\s/g, "");
                   if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
@@ -21,12 +46,13 @@
                 },
                 get total() { return this.itens.reduce((s, it) => s + this.br(it.v), 0); },
                 reais(n) { return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); } }'
-      x-on:submit="if (!confirm('Emitir a nota de débito de ' + reais(total) + '? Depois de emitida, o número fica usado.')) { $event.preventDefault(); } else { enviando = true; }">
+      x-init="ajustar()"
+      x-on:submit="if (!confirm('Emitir a nota de débito de ' + reais(total) + (venc ? ', com vencimento em ' + ddmm(venc) : '') + '? Depois de emitida, o número fica usado.')) { $event.preventDefault(); } else { enviando = true; }">
   {% csrf_token %}
   <input type="hidden" name="token" value="{{ token }}">
   <div>
     <label class="mb-1 block text-sm font-medium">Cliente *</label>
-    <select name="cliente" required>
+    <select name="cliente" required x-model="cliente" x-on:change="ajustar()">
       <option value="">— escolha —</option>
       {% for c in clientes %}
       <option value="{{ c.pk }}" {% if post.cliente == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.nome }}</option>
@@ -36,14 +62,21 @@
   <div class="grid gap-4 sm:grid-cols-2">
     <div>
       <label class="mb-1 block text-sm font-medium">Data de emissão *</label>
-      <input type="date" name="data_emissao" required
+      <input type="date" name="data_emissao" required x-model="emissao" x-on:change="ajustar()"
              value="{% if post.data_emissao %}{{ post.data_emissao }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}">
     </div>
     <div>
-      <label class="mb-1 block text-sm font-medium">Vencimento (opcional)</label>
-      <input type="date" name="vencimento" value="{{ post.vencimento|default:'' }}">
+      <label for="nd-vencimento" class="mb-1 block text-sm font-medium">Vencimento</label>
+      <input type="date" id="nd-vencimento" name="vencimento" x-model="venc" x-on:input="manual = true" x-bind:min="emissao"
+             value="{{ post.vencimento|default:'' }}" aria-describedby="nd-vencimento-ajuda">
     </div>
   </div>
+  <p id="nd-vencimento-ajuda" class="-mt-2 text-xs text-gray-500">
+    <span x-text="explicacao()"></span>
+    <button type="button" class="ml-1 underline" x-show="manual && venc !== sugerido() && cliente"
+            x-on:click="manual = false; ajustar()">usar a data sugerida</button>
+    <span x-show="!cliente">Se deixar em branco, a nota vence no próximo dia de pagamento do cliente — nunca no mesmo dia da emissão.</span>
+  </p>
 
   <div>
     <label class="mb-1 block text-sm font-medium">O que está sendo cobrado *</label>

@@ -38,6 +38,25 @@ def receitas_do_mes(ano, mes):
         "vendas": list(vendas),
         "total_vendas": total_vendas,
         "total_outros_creditos": total_auxilios + total_vendas,
+        # o que entrou de verdade: caução fica de fora — o dinheiro é do cliente
+        # (mesma soma da barra "Receita" de serie_mensal)
+        "total_receitas": (
+            fiscal["locacao"] + fiscal["total_diversos"] + total_auxilios + total_vendas
+        ),
+    }
+
+
+def resumo_do_mes(receitas, despesas):
+    """ "Quanto sobrou este mês": receitas (sem caução) menos despesas."""
+    entrou = receitas["total_receitas"]
+    saiu = despesas["total_geral"]
+    return {
+        "entrou": entrou,
+        "saiu": saiu,
+        "sobrou": entrou - saiu,
+        # mês no vermelho: a tela diz "Faltou R$ 300", sem sinal de menos
+        "faltou": max(saiu - entrou, ZERO),
+        "base_das": receitas["locacao"],
     }
 
 

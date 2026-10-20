@@ -172,6 +172,16 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - Código morto e duplicações removidos (enums no lugar de textos soltos, fonte única para regras repetidas).
 - Testes gravam uploads numa pasta temporária; `midia/` fora do git.
 
+### Etapa 14 — 18 melhorias de UX (aprovadas, opções recomendadas)
+- Registrar pagamento: distribui sozinho, aviso de sobra/crédito, botão "Usar o crédito", trava contra lançamento duplicado, resumo pós-lançamento, recibo no WhatsApp e "Desfazer" no mesmo dia.
+- WhatsApp com texto certo por tipo de cobrança e mensagem única por cliente; ND sem vencimento vence no próximo dia de pagamento do cliente.
+- Global: campos "(opcional)", dicas "?", inputs 16px e botões 44px no celular, "Salvando…" contra toque duplo, barra inferior com "+ Lançar" no celular.
+- KM: aviso de número fora do normal com confirmação, botão "Corrigir" leitura, registro sem recarregar; tabelas viram cartões no celular.
+- Alocação: sugestões do cadastro do cliente, entrega guiada (próximos passos) e devolução em passos; contrato com data de início e testemunhas; vistoria "Entrega/Devolução" com desenho do carro.
+- Manutenção: selo "Na oficina", editar manutenção e "Carro voltou da oficina", preventivas "só o que precisa de atenção", formulário por seções.
+- Ficha do carro com faixa de pendências; multas e sinistros editáveis, com "o carro estava com: Fulano" ao vivo e atalhos com contador; NIC só após o prazo.
+- Relatórios com navegação por mês e "Quanto sobrou este mês"; Painel "Hoje" + tela "Quem deve"; busca sem acentos por CPF, telefone, condutor, AIT e BO.
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:

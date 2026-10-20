@@ -1,0 +1,16 @@
+{# "Registrar NIC" pede o valor antes de confirmar; só é incluído com o prazo vencido (UX #13) #}
+<div x-data="{ aberto: false }" class="{% if grande %}w-full{% endif %}">
+  <button type="button" @click="aberto = !aberto" :aria-expanded="aberto"
+          class="whitespace-nowrap rounded border border-red-300 bg-white text-red-700 hover:bg-red-50 {% if grande %}w-full px-4 py-3 text-base{% else %}px-2 py-1{% endif %}"
+          title="Prazo perdido: registra a multa por não indicação do condutor contra a empresa">Registrar NIC</button>
+  <form x-show="aberto" x-cloak method="post" action="{% url 'multas:registrar_nic' multa.pk %}"
+        onsubmit="return confirm('Registrar multa NIC contra a EMPRESA para {{ multa.veiculo.placa|escapejs }}?\n\nIsso cria uma nova multa em nome da empresa.')"
+        class="mt-2 rounded border border-red-200 bg-red-50 p-3 text-left text-sm">
+    {% csrf_token %}<input type="hidden" name="volta" value="{{ volta }}">
+    <label for="nic-valor-{{ multa.pk }}{{ grande|yesno:'-c,' }}" class="mb-1 block font-medium">Valor da multa NIC (R$)</label>
+    <input id="nic-valor-{{ multa.pk }}{{ grande|yesno:'-c,' }}" name="valor" inputmode="decimal" placeholder="0,00"
+           class="mb-1 w-full rounded border border-gray-300 px-2 py-2">
+    <p class="mb-2 text-xs text-gray-600">Está na nova notificação do órgão. Se ainda não chegou, deixe vazio e preencha depois em Editar.</p>
+    <button class="w-full rounded bg-red-700 px-3 py-2.5 font-semibold text-white hover:bg-red-800">Confirmar NIC</button>
+  </form>
+</div>

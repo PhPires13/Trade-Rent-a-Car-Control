@@ -9,8 +9,8 @@
   <a href="{% url 'manutencao:preventivas' %}" class="text-sm underline">ver status da frota</a>
 </div>
 <p class="mb-6 text-sm text-gray-500">
-  Itens com intervalo viram preventiva por km; sem intervalo são manutenções esporádicas
-  (suspensão, embreagem, velas). Itens inativos somem do quadro de preventivas.
+  Itens com "troca a cada" em km viram revisão do plano: o sistema avisa quando está chegando.
+  Deixe vazio quando não tem prazo fixo (suspensão, embreagem, velas). Itens fora de uso somem do quadro de preventivas.
 </p>
 
 {# formulários das linhas — os inputs da tabela apontam para eles pelo atributo form= #}
@@ -22,40 +22,47 @@
 </form>
 {% endfor %}
 
-<div class="mb-8 overflow-x-auto rounded-lg bg-white shadow">
-  <table class="w-full text-sm">
-    <thead class="bg-marca-preto text-left text-white">
+{# No celular cada item vira um cartão; no computador, tabela. #}
+<div class="mb-8 rounded-lg sm:overflow-x-auto sm:bg-white sm:shadow">
+  <table class="block w-full text-sm sm:table">
+    <thead class="hidden bg-marca-preto text-left text-white sm:table-header-group">
       <tr>
         <th class="px-3 py-2">Item</th>
-        <th class="px-3 py-2">Intervalo padrão (km)</th>
-        <th class="px-3 py-2">Ativo</th>
-        <th class="px-3 py-2"></th>
+        <th class="px-3 py-2">Troca a cada (km)</th>
+        <th class="px-3 py-2">Em uso</th>
+        <th class="px-3 py-2"><span class="sr-only">Salvar</span></th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block space-y-3 sm:table-row-group sm:space-y-0 sm:divide-y sm:divide-gray-100">
       {% for item in itens %}
-      <tr>
-        <td class="px-3 py-2">
-          <input type="text" name="nome" value="{{ item.nome }}" form="item-{{ item.pk }}"
-                 class="w-full rounded border border-gray-300 px-2 py-1" required>
+      <tr class="block space-y-2 rounded-lg bg-white p-3 shadow sm:table-row sm:space-y-0 sm:p-0 sm:shadow-none">
+        <td class="block sm:table-cell sm:px-3 sm:py-2">
+          <label class="mb-1 block text-xs text-gray-500 sm:hidden" for="nome-{{ item.pk }}">Item</label>
+          <input type="text" id="nome-{{ item.pk }}" name="nome" value="{{ item.nome }}" form="item-{{ item.pk }}"
+                 aria-label="Nome do item" class="w-full rounded border border-gray-300 px-2 py-2 sm:py-1" required>
         </td>
-        <td class="px-3 py-2">
-          <input type="number" name="intervalo_km_padrao" min="1" placeholder="esporádica"
+        <td class="block sm:table-cell sm:px-3 sm:py-2">
+          <label class="mb-1 block text-xs text-gray-500 sm:hidden" for="intervalo-{{ item.pk }}">Troca a cada (km)</label>
+          <input type="number" id="intervalo-{{ item.pk }}" name="intervalo_km_padrao" min="1" placeholder="sem prazo fixo" inputmode="numeric"
                  value="{{ item.intervalo_km_padrao|default_if_none:'' }}" form="item-{{ item.pk }}"
-                 class="w-40 rounded border border-gray-300 px-2 py-1">
+                 aria-label="Troca a cada quantos km (vazio se não tem prazo fixo)"
+                 class="w-full rounded border border-gray-300 px-2 py-2 sm:w-40 sm:py-1">
         </td>
-        <td class="px-3 py-2">
-          <input type="checkbox" name="ativo" form="item-{{ item.pk }}" {% if item.ativo %}checked{% endif %}>
+        <td class="block sm:table-cell sm:px-3 sm:py-2">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" name="ativo" form="item-{{ item.pk }}" class="h-5 w-5" {% if item.ativo %}checked{% endif %}>
+            <span class="text-sm text-gray-600">Em uso</span>
+          </label>
         </td>
-        <td class="px-3 py-2 text-right">
+        <td class="block sm:table-cell sm:px-3 sm:py-2 sm:text-right">
           <button form="item-{{ item.pk }}"
-                  class="rounded bg-marca-amarelo px-3 py-1 text-xs font-semibold text-marca-preto hover:brightness-95">
+                  class="w-full rounded bg-marca-amarelo px-3 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:w-auto sm:py-1 sm:text-xs">
             Salvar
           </button>
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="4" class="px-3 py-4 text-gray-500">Nenhum item no plano.</td></tr>
+      <tr class="block sm:table-row"><td colspan="4" class="block px-3 py-4 text-gray-500 sm:table-cell">Nenhum item no plano.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -82,9 +89,9 @@
   (o padrão do item é 30.000). Sem exceção cadastrada, vale o intervalo padrão.
 </p>
 
-<div class="mb-6 overflow-x-auto rounded-lg bg-white shadow">
-  <table class="w-full text-sm">
-    <thead class="bg-marca-preto text-left text-white">
+<div class="mb-6 rounded-lg sm:overflow-x-auto sm:bg-white sm:shadow">
+  <table class="block w-full text-sm sm:table">
+    <thead class="hidden bg-marca-preto text-left text-white sm:table-header-group">
       <tr>
         <th class="px-3 py-2">Veículo</th>
         <th class="px-3 py-2">Item</th>
@@ -93,29 +100,29 @@
         <th class="px-3 py-2"></th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block space-y-3 sm:table-row-group sm:space-y-0 sm:divide-y sm:divide-gray-100">
       {% for p in personalizados %}
-      <tr>
-        <td class="px-3 py-2 font-medium">{{ p.veiculo.placa }}
+      <tr class="block rounded-lg bg-white p-3 shadow sm:table-row sm:p-0 sm:shadow-none">
+        <td class="block py-0.5 font-medium sm:table-cell sm:px-3 sm:py-2">{{ p.veiculo.placa }}
           <span class="text-gray-500">{{ p.veiculo.marca_modelo }}</span>
         </td>
-        <td class="px-3 py-2">{{ p.item.nome }}</td>
-        <td class="px-3 py-2 font-semibold">{{ p.intervalo_km|intcomma }} km</td>
-        <td class="px-3 py-2 text-gray-500">
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2">{{ p.item.nome }}</td>
+        <td class="block py-0.5 font-semibold sm:table-cell sm:px-3 sm:py-2"><span class="font-normal text-gray-500 sm:hidden">A cada </span>{{ p.intervalo_km|intcomma }} km</td>
+        <td class="block py-0.5 text-gray-500 sm:table-cell sm:px-3 sm:py-2"><span class="sm:hidden">Padrão do plano: </span>
           {% if p.item.intervalo_km_padrao %}{{ p.item.intervalo_km_padrao|intcomma }} km{% else %}—{% endif %}
         </td>
-        <td class="px-3 py-2 text-right">
+        <td class="block pt-1 sm:table-cell sm:px-3 sm:py-2 sm:text-right">
           <form method="post"
                 onsubmit="return confirm('Remover o intervalo de {{ p.intervalo_km }} km de {{ p.item.nome }} do {{ p.veiculo.placa }}? O veículo volta ao padrão do plano.')">
             {% csrf_token %}
             <input type="hidden" name="acao" value="remover_intervalo">
             <input type="hidden" name="intervalo_id" value="{{ p.pk }}">
-            <button class="text-xs text-red-700 underline">remover</button>
+            <button class="py-1 text-sm text-red-700 underline sm:text-xs">remover</button>
           </form>
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="5" class="px-3 py-4 text-gray-500">Nenhuma exceção cadastrada — todos os veículos usam o intervalo padrão.</td></tr>
+      <tr class="block sm:table-row"><td colspan="5" class="block px-3 py-4 text-gray-500 sm:table-cell">Nenhuma exceção cadastrada — todos os veículos usam o intervalo padrão.</td></tr>
       {% endfor %}
     </tbody>
   </table>

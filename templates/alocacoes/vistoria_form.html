@@ -3,12 +3,12 @@
 {% block titulo %}Vistoria — {{ alocacao.veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<div class="mb-4 flex items-center justify-between gap-3">
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
   <h1 class="text-2xl font-bold">
     Vistoria — {{ alocacao.veiculo.placa }} <span class="text-gray-500">({{ alocacao.cliente.nome }})</span>
   </h1>
-  <div class="flex items-center gap-3 text-sm">
-    <a href="{% url 'alocacoes:vistoria_imprimir' alocacao.pk %}" class="underline">🖨 Checklist em branco</a>
+  <div class="flex flex-wrap items-center gap-3 text-sm">
+    <a href="{% url 'alocacoes:vistoria_imprimir' alocacao.pk %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-medium">🖨 Checklist em branco</a>
     <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
   </div>
 </div>
@@ -40,13 +40,22 @@
     <div>
       <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
       {{ field }}
+      {% if field.name == "tipo" %}
+      <p class="mt-1 text-xs text-gray-500">
+        <strong>Entrega ao motorista</strong>: o carro sai da locadora com ele.
+        <strong>Devolução pelo motorista</strong>: o carro volta para a locadora.
+      </p>
+      {% endif %}
       {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
       {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
     </div>
     {% endif %}
   {% endfor %}
 
-  <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Salvar vistoria</button>
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <button class="rounded bg-marca-amarelo px-5 py-3 font-bold text-marca-preto hover:brightness-95">Salvar vistoria</button>
+    <a href="{% url 'alocacoes:lista' %}" class="rounded border border-gray-300 px-5 py-3 text-center text-gray-700">Cancelar</a>
+  </div>
 </form>
 
 {% if vistorias %}
@@ -54,7 +63,7 @@
   <h2 class="mb-2 font-semibold">Vistorias desta alocação</h2>
   <ul class="divide-y divide-gray-100 text-sm">
     {% for vistoria in vistorias %}
-    <li class="flex items-center justify-between py-2">
+    <li class="flex flex-wrap items-center justify-between gap-2 py-2">
       <span>
         {{ vistoria.get_tipo_display }} — {{ vistoria.data|date:"d/m/Y" }}
         {% if vistoria.km %}· {{ vistoria.km|milhar }} km{% endif %}

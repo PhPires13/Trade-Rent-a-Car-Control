@@ -3,17 +3,29 @@ from datetime import date, timedelta
 from django.conf import settings
 from django.db.models import Count, Q
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views.static import serve
 
 from apps.alocacoes.models import TrocaTemporaria
+from apps.busca import (
+    MINIMO_DIGITOS,
+    nome_casa,
+    numero_casa,
+    parece_numero,
+    sem_acento,
+    so_digitos,
+    so_letras_e_digitos,
+)
+from apps.financeiro.devedores import resumo_do_dia
 from apps.financeiro.models import ZERO, Cobranca
 from apps.frota.alertas import vigencias_a_vencer
 from apps.frota.desmobilizacao import ranking_da_frota
 from apps.frota.models import Veiculo, normalizar_placa
 from apps.km.models import veiculos_com_leitura_pendente
 from apps.manutencao.services import preventivas_em_alerta
+from apps.multas.models import Multa
 from apps.multas.services import alertas_fici
-from apps.pessoas.models import Cliente
+from apps.pessoas.models import Cliente, CondutorAutorizado
 from apps.sinistros.models import Sinistro
 
 
@@ -26,25 +38,109 @@ def midia(request, caminho):
     return serve(request, caminho, document_root=settings.MEDIA_ROOT)
 
 
+#: Por grupo; com mais que isso a tela pede para refinar a busca.
+LIMITE_BUSCA = 20
+
+
+def _buscar_clientes(texto, digitos):
+    """Clientes por nome, CPF/CNPJ, telefone ou nome/CPF de condutor autorizado.
+
+    Devolve [{"cliente", "motivo"}] — o motivo diz por que apareceu quando não
+    foi pelo nome ("condutor autorizado: Zé"), e os condutores sem cliente.
+    """
+    achados = {}
+    for cliente in Cliente.objects.order_by("nome"):
+        if nome_casa(texto, cliente.nome):
+            achados[cliente.pk] = {"cliente": cliente, "motivo": ""}
+        elif digitos and numero_casa(digitos, cliente.cpf_cnpj):
+            achados[cliente.pk] = {"cliente": cliente, "motivo": "CPF/CNPJ"}
+        elif digitos and numero_casa(digitos, cliente.telefone):
+            achados[cliente.pk] = {"cliente": cliente, "motivo": "telefone"}
+    sem_cliente = []
+    for condutor in CondutorAutorizado.objects.select_related("cliente"):
+        casou = nome_casa(texto, condutor.nome) or (
+            digitos
+            and (numero_casa(digitos, condutor.cpf) or numero_casa(digitos, condutor.contato))
+        )
+        if not casou:
+            continue
+        if condutor.cliente is None:
+            sem_cliente.append(condutor)
+        elif condutor.cliente_id not in achados:
+            achados[condutor.cliente_id] = {
+                "cliente": condutor.cliente,
+                "motivo": f"condutor autorizado: {condutor.nome}",
+            }
+    clientes = sorted(achados.values(), key=lambda a: sem_acento(a["cliente"].nome))
+    return clientes[:LIMITE_BUSCA], sem_cliente[:LIMITE_BUSCA]
+
+
+def _buscar_por_codigo(modelo, campos, codigo, relacionados):
+    """Registros cujo número (AIT, BO...) contém o código, ignorando pontuação."""
+    vazio = Q()
+    for campo in campos:
+        vazio &= Q(**{campo: ""})
+    achados = []
+    for registro in modelo.objects.exclude(vazio).select_related(*relacionados):
+        if any(codigo in so_letras_e_digitos(getattr(registro, campo)) for campo in campos):
+            achados.append(registro)
+            if len(achados) == LIMITE_BUSCA:
+                break
+    return achados
+
+
 def buscar(request):
-    """Busca global por placa ou nome de cliente (barra do topo)."""
+    """Busca global da barra do topo (proposta #18).
+
+    Ignora acento e maiúscula; acha carro (placa/modelo), cliente (nome,
+    CPF/CNPJ, telefone, condutor autorizado), multa (AIT/nº de processamento)
+    e sinistro (nº do BO). Um único resultado vai direto para a ficha.
+    """
     consulta = request.GET.get("q", "").strip()
-    veiculos, clientes = [], []
+    veiculos, clientes, condutores, multas, sinistros = [], [], [], [], []
     if consulta:
-        filtro = Q(marca_modelo__icontains=consulta)
-        # "-" ou " - " viram placa vazia, e placa__icontains="" acharia a frota inteira
-        if placa := normalizar_placa(consulta):
-            filtro |= Q(placa__icontains=placa)
-        veiculos = list(Veiculo.objects.filter(filtro).order_by("placa")[:20])
-        clientes = list(Cliente.objects.filter(nome__icontains=consulta).order_by("nome")[:20])
-        if len(veiculos) == 1 and not clientes:
-            return redirect("frota:detalhe", veiculos[0].pk)
-        if len(clientes) == 1 and not veiculos:
-            return redirect("pessoas:detalhe", clientes[0].pk)
+        texto = sem_acento(consulta)
+        digitos = so_digitos(consulta) if parece_numero(consulta) else ""
+        # "-" ou " - " viram placa vazia, e placa vazia acharia a frota inteira
+        placa = normalizar_placa(consulta)
+        veiculos = [
+            v
+            for v in Veiculo.objects.order_by("placa")
+            if (placa and placa in v.placa) or nome_casa(texto, v.marca_modelo)
+        ][:LIMITE_BUSCA]
+        clientes, condutores = _buscar_clientes(texto, digitos)
+        codigo = so_letras_e_digitos(consulta)
+        # AIT/BO sempre têm número; sem isso um nome ("joao") varreria multas à toa
+        if len(so_digitos(codigo)) >= MINIMO_DIGITOS:
+            multas = _buscar_por_codigo(
+                Multa, ["ait", "num_processamento"], codigo, ["veiculo", "cliente"]
+            )
+            sinistros = _buscar_por_codigo(
+                Sinistro, ["boletim_ocorrencia"], codigo, ["veiculo", "cliente"]
+            )
+        destinos = (
+            [reverse("frota:detalhe", args=[v.pk]) for v in veiculos]
+            + [reverse("pessoas:detalhe", args=[c["cliente"].pk]) for c in clientes]
+            + [reverse("pessoas:condutor_editar", args=[c.pk]) for c in condutores]
+            + [reverse("multas:editar", args=[m.pk]) for m in multas]
+            + [reverse("sinistros:editar", args=[s.pk]) for s in sinistros]
+        )
+        if len(destinos) == 1:
+            return redirect(destinos[0])
+    grupos = [veiculos, clientes, condutores, multas, sinistros]
     return render(
         request,
         "buscar.html",
-        {"consulta": consulta, "veiculos": veiculos, "clientes": clientes},
+        {
+            "consulta": consulta,
+            "veiculos": veiculos,
+            "clientes": clientes,
+            "condutores": condutores,
+            "multas": multas,
+            "sinistros": sinistros,
+            "total": sum(len(g) for g in grupos),
+            "cortado": any(len(g) == LIMITE_BUSCA for g in grupos),
+        },
     )
 
 
@@ -120,5 +216,7 @@ def painel(request):
         "auxilios_disponiveis": [s for s in sinistros_abertos if s.auxilio_disponivel],
         "candidatos_venda": [f for f in fichas if f.nivel in ("preparar", "vender")],
         "vigencias": vigencias_a_vencer(hoje),
+        # bloco "Hoje": quem paga hoje e quem está devendo (proposta #8)
+        **resumo_do_dia(hoje),
     }
     return render(request, "painel.html", contexto)

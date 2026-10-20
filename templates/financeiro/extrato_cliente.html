@@ -13,6 +13,11 @@
   </h1>
   <div class="flex flex-wrap items-center gap-3 text-sm">
     <span title="Dinheiro que o cliente pagou a mais e pode ser usado nas próximas cobranças">Crédito a favor do cliente: <strong>{{ credito|brl }}</strong></span>
+    {% if link_whatsapp %}
+    <a href="{{ link_whatsapp }}" target="_blank" rel="noopener"
+       class="rounded border border-green-600 px-3 py-1.5 font-semibold text-green-700 hover:bg-green-50"
+       title="Abre o WhatsApp com uma mensagem só, listando tudo que está em aberto e o total">💬 Cobrar no WhatsApp</a>
+    {% endif %}
     <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}"
        class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">Registrar pagamento</a>
   </div>
@@ -21,21 +26,27 @@
 <div class="grid gap-6 lg:grid-cols-2">
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 font-semibold">Cobranças</h2>
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <tbody class="divide-y divide-gray-100">
+    {# no celular cada linha vira um cartão (descrição em cima, datas e valores embaixo) #}
+    <div class="sm:overflow-x-auto">
+    <table class="block w-full text-sm sm:table">
+      <tbody class="block divide-y divide-gray-100 sm:table-row-group">
         {% for cobranca in cobrancas %}
-        <tr>
-          <td class="px-2 py-1.5">{{ cobranca.vencimento|date:"d/m/y" }}</td>
-          <td class="px-2 py-1.5">{{ cobranca.descricao }}</td>
-          <td class="px-2 py-1.5 text-right">{{ cobranca.valor|brl }}</td>
-          <td class="px-2 py-1.5">
+        <tr class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 sm:table-row sm:py-0">
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell text-gray-600 sm:text-gray-900">{{ cobranca.vencimento|date:"d/m/y" }}</td>
+          <td class="order-first basis-full font-medium sm:px-2 sm:py-1.5 sm:table-cell sm:font-normal">{{ cobranca.descricao }}</td>
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell sm:text-right">{{ cobranca.valor|brl }}</td>
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell">
             {% if cobranca.status == "pago" %}<span class="text-green-700">Pago</span>
             {% elif cobranca.status == "atrasado" %}<span class="font-semibold text-red-700">Atrasado ({{ cobranca.saldo|brl }})</span>
             {% elif cobranca.status == "parcial" %}<span class="text-yellow-800">Parcial ({{ cobranca.saldo|brl }})</span>
             {% elif cobranca.status == "judicial" %}<span class="font-semibold text-purple-800">Judicial ({{ cobranca.saldo|brl }})</span>
-            {% elif cobranca.status == "cancelada" %}<span class="text-gray-400 line-through">Cancelada</span>
+            {% elif cobranca.status == "cancelada" %}<span class="text-gray-600 line-through">Cancelada</span>
             {% else %}<span class="text-gray-600">{{ cobranca.get_status_display }}</span>{% endif %}
+            {% if cobranca.status in status_devidos and cobranca.saldo > 0 %}
+            <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}&cobranca={{ cobranca.pk }}"
+               class="ml-1 inline-block whitespace-nowrap rounded bg-marca-amarelo px-2 py-1 text-xs font-semibold text-marca-preto hover:brightness-95"
+               title="Abre o recebimento já com o valor que falta desta cobrança">✓ Recebi</a>
+            {% endif %}
           </td>
         </tr>
         {% empty %}
@@ -48,16 +59,24 @@
 
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 font-semibold">Pagamentos recebidos</h2>
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <tbody class="divide-y divide-gray-100">
+    <div class="sm:overflow-x-auto">
+    <table class="block w-full text-sm sm:table">
+      <tbody class="block divide-y divide-gray-100 sm:table-row-group">
         {% for recebimento in recebimentos %}
-        <tr>
-          <td class="px-2 py-1.5">{{ recebimento.data|date:"d/m/y" }}</td>
-          <td class="px-2 py-1.5">{{ recebimento.get_forma_display }}</td>
-          <td class="px-2 py-1.5 text-right font-medium text-green-700">{{ recebimento.valor|brl }}</td>
-          <td class="px-2 py-1.5 text-xs text-gray-500">
+        <tr class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 sm:table-row sm:py-0">
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.data|date:"d/m/y" }}</td>
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.get_forma_display }}</td>
+          <td class="sm:px-2 sm:py-1.5 sm:table-cell font-medium text-green-700 sm:text-right">{{ recebimento.valor|brl }}</td>
+          <td class="basis-full sm:px-2 sm:py-1.5 sm:table-cell text-xs text-gray-500">
             {% for aplicacao in recebimento.aplicacoes.all %}{{ aplicacao.cobranca.descricao }} ({{ aplicacao.valor|brl }}){% if not forloop.last %}; {% endif %}{% endfor %}
+            {% if recebimento.pode_desfazer %}
+            <form method="post" action="{% url 'financeiro:desfazer_recebimento' recebimento.pk %}" class="mt-1"
+                  onsubmit="if (!confirm('Desfazer este lançamento de {{ recebimento.valor|brl }}? As cobranças voltam a ficar em aberto e o crédito ou reforço de caução gerado por ele é removido.')) return false; this.querySelector('button').disabled = true; return true;">
+              {% csrf_token %}
+              <button class="rounded border border-red-300 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 sm:px-2 sm:py-1"
+                      title="Só no mesmo dia do lançamento">↩ desfazer (lançado hoje)</button>
+            </form>
+            {% endif %}
           </td>
         </tr>
         {% empty %}

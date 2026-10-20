@@ -23,9 +23,14 @@
     <a href="{% url 'pessoas:editar' cliente.pk %}"
        class="rounded border border-gray-300 bg-white px-3 py-1.5 font-medium hover:bg-gray-50">Editar cadastro</a>
     <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}"
-       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">Receber pagamento</a>
+       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95"
+       title="Abre o recebimento já com este cliente escolhido">✓ Recebi</a>
   </div>
 </div>
+
+{# Cartão "Próximos passos da entrega" (alocações) — some quando tudo está feito #}
+{% load entrega_tags %}
+{% if alocacao_ativa %}{% passos_entrega alocacao_ativa %}{% endif %}
 
 <div class="grid gap-6 lg:grid-cols-3">
   <div class="rounded-lg bg-white p-5 shadow lg:col-span-2">
@@ -99,6 +104,7 @@
       {{ alocacao_ativa.valor_semanal|brl }}/semana ·
       desde {{ alocacao_ativa.data_inicio|date:"d/m/Y" }} ·
       vence {{ alocacao_ativa.get_dia_vencimento_display }}
+      {% if cliente.dia_vencimento is not None and cliente.dia_vencimento != alocacao_ativa.dia_vencimento %}<span class="text-gray-600">(preferência do cadastro: {{ cliente.get_dia_vencimento_display|lower }})</span>{% endif %}
     </div>
   </div>
   {% if alocacao_ativa.troca_ativa %}
@@ -163,7 +169,7 @@
   <div class="rounded-lg bg-white p-5 shadow">
     <div class="mb-3 flex items-center justify-between">
       <h2 class="font-semibold">Multas ({{ total_multas }})</h2>
-      <a href="{% url 'multas:lista' %}" class="text-sm underline">ver todas</a>
+      <a href="{% url 'multas:lista' %}?cliente={{ cliente.pk }}" class="text-sm underline">ver todas</a>
     </div>
     <div class="overflow-x-auto">
     <table class="w-full text-sm">

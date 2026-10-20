@@ -53,6 +53,18 @@
   </div>
   {% if multas %}
   <p class="mb-3 text-xs text-gray-500">Desmarque as multas que não quer incluir nesta ND.</p>
+  {% if vencimento %}
+  <div class="mb-4 max-w-xs">
+    <label for="nd-vencimento" class="mb-1 block text-sm font-medium">Vencimento da ND</label>
+    <input type="date" id="nd-vencimento" name="vencimento" required min="{% now 'Y-m-d' %}"
+           value="{% if vencimento.digitado %}{{ vencimento.digitado }}{% else %}{{ vencimento.sugerido|date:'Y-m-d' }}{% endif %}"
+           aria-describedby="nd-vencimento-ajuda"
+           class="w-full rounded border border-gray-300 px-2 py-2">
+    <p id="nd-vencimento-ajuda" class="mt-1 text-xs text-gray-500">
+      Sugerido: {{ vencimento.sugerido|date:"l, d/m"|lower }} — {{ vencimento.explicacao }}. Pode trocar a data.
+    </p>
+  </div>
+  {% endif %}
   <div class="flex flex-wrap items-center gap-3">
     <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Emitir ND</button>
     <a href="{% url 'multas:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>

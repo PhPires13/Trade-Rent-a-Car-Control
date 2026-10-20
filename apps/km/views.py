@@ -2,15 +2,18 @@ from datetime import date, timedelta
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
-from apps.formatos import brl
+from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 
+from .correcao import apagar_leitura, corrigir_leitura, suspeita_do_km
 from .excedente import gerar_cobranca_excedente
+from .forms import CorrecaoLeituraForm, data_nao_futura, km_digitado
 from .models import RegistroKm, primeiro_dia_do_mes, veiculos_com_leitura_pendente
 
 
@@ -99,9 +102,36 @@ def _clientes_das_leituras(registros):
     return clientes
 
 
+def _pendentes_anotados(mes, veiculos=None):
+    """Pendentes do mês com a última leitura antes dele (dica do número esperado).
+
+    `veiculos` troca a base (ex.: o carro de uma linha que já tem leitura no mês).
+    """
+    anteriores = RegistroKm.objects.filter(veiculo=OuterRef("pk"), mes_referencia__lt=mes).order_by(
+        "-mes_referencia"
+    )
+    base = veiculos_com_leitura_pendente(mes) if veiculos is None else veiculos
+    return base.annotate(
+        ultimo_km=Subquery(anteriores.values("km")[:1]),
+        ultima_leitura=Subquery(anteriores.values("data_leitura")[:1]),
+    )
+
+
+def _contexto_da_linha(mes):
+    """O que cada linha de pendente precisa além do próprio veículo."""
+    hoje = date.today()
+    return {"mes": mes, "data_sugerida": _data_sugerida(mes, hoje), "hoje": hoje}
+
+
 def lista_mensal(request):
     """Registro mensal de KM — pendências e leituras do mês (docs.md §4.8)."""
-    mes = _mes_da_query(request)
+    return _pagina_da_lista(request, _mes_da_query(request))
+
+
+def _pagina_da_lista(request, mes, estados=None):
+    """`estados` ({veiculo.pk: {...}}) devolve a linha com o que foi digitado e o
+    aviso de KM fora do normal, quando o registro não foi gravado.
+    """
     registros = list(
         RegistroKm.objects.filter(mes_referencia=mes)
         .select_related("veiculo", "cobranca_excedente")
@@ -110,77 +140,197 @@ def lista_mensal(request):
     clientes = _clientes_das_leituras(registros)
     for registro in registros:
         registro.cliente = clientes[registro.pk]
-    # Última leitura antes do mês — a tela mostra como dica do número esperado.
-    anteriores = RegistroKm.objects.filter(veiculo=OuterRef("pk"), mes_referencia__lt=mes).order_by(
-        "-mes_referencia"
-    )
-    pendentes = veiculos_com_leitura_pendente(mes).annotate(
-        ultimo_km=Subquery(anteriores.values("km")[:1]),
-        ultima_leitura=Subquery(anteriores.values("data_leitura")[:1]),
-    )
+    pendentes = list(_pendentes_anotados(mes))
+    for veiculo in pendentes:
+        veiculo.estado = (estados or {}).get(veiculo.pk)
     return render(
         request,
         "km/lista.html",
-        {
-            "mes": mes,
-            "registros": registros,
-            "pendentes": pendentes,
-            "data_sugerida": _data_sugerida(mes, date.today()),
-        },
+        {"registros": registros, "pendentes": pendentes, **_contexto_da_linha(mes)},
     )
 
 
-def _avisar_reencadeamento(request, veiculo, registro):
-    """Leitura de mês esquecido reapoia o mês seguinte — avisa o que mudou."""
+def _aviso_reencadeamento(registro):
+    """Leitura de mês esquecido reapoia o mês seguinte — texto do que mudou."""
     seguinte = registro.seguinte_reencadeado
     if seguinte is None:
-        return
+        return None
     aviso = (
-        f"A leitura de {seguinte.mes_referencia:%m/%Y} de {veiculo.placa} foi recalculada: "
-        f"KM anterior agora é {registro.km} e o KM utilizado dela caiu para "
-        f"{seguinte.km_utilizado}."
+        f"A leitura de {seguinte.mes_referencia:%m/%Y} de {registro.veiculo.placa} foi "
+        f"recalculada: KM anterior agora é {milhar(registro.km)} e o KM utilizado dela caiu "
+        f"para {milhar(seguinte.km_utilizado)}."
     )
     if seguinte.cobranca_excedente_id:
         aviso += (
             " Ela já tinha cobrança de excedente de km — confira no Financeiro e cancele "
             "se ficou em duplicidade."
         )
-    messages.warning(request, aviso)
+    return aviso
+
+
+def _linha_nao_gravada(request, veiculo, mes, estado):
+    """Volta a linha com o que foi digitado e o aviso/erro — sem perder nada."""
+    if request.htmx:
+        # Sem o filtro de pendente: numa leitura repetida o carro já saiu da lista,
+        # mas a linha ainda precisa da "Última: ..." para não ficar em branco.
+        veiculo = _pendentes_anotados(mes, Veiculo.objects.filter(pk=veiculo.pk)).first()
+        veiculo.estado = estado
+        return render(request, "km/_pendente.html", {"veiculo": veiculo, **_contexto_da_linha(mes)})
+    if estado.get("erro"):
+        messages.error(request, f"{veiculo.placa}: {estado['erro']}")
+        return _volta_para_lista(mes)
+    # KM fora do normal sem JS: a página inteira volta com a linha em âmbar.
+    return _pagina_da_lista(request, mes, estados={veiculo.pk: estado})
 
 
 def registrar(request, veiculo_id):
+    """Grava a leitura de uma linha de pendentes.
+
+    Pelo htmx (celular no pátio) devolve só a linha: "✓ registrado" ou o aviso,
+    sem recarregar a página. Sem htmx, volta para a lista como sempre.
+    """
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
     if request.method != "POST":
         return redirect("km:lista")
+    request.htmx = request.headers.get("HX-Request") == "true"
     # O mês visto na tela vem escondido no formulário da linha; se faltar, o
     # mês da própria leitura serve de volta.
     mes_da_tela = _mes_do_valor(request.POST.get("mes"))
+    estado = {
+        "km": request.POST.get("km", ""),
+        "data_leitura": request.POST.get("data_leitura", ""),
+        "observacoes": request.POST.get("observacoes", ""),
+    }
     try:
         data_leitura = date.fromisoformat(request.POST["data_leitura"])
+        mes_da_tela = mes_da_tela or primeiro_dia_do_mes(data_leitura)
         registro = RegistroKm(
             veiculo=veiculo,
             mes_referencia=primeiro_dia_do_mes(data_leitura),
-            data_leitura=data_leitura,
-            km=int(request.POST["km"]),
-            observacoes=request.POST.get("observacoes", ""),
+            data_leitura=data_nao_futura(data_leitura),
+            km=km_digitado(request.POST["km"]),
+            observacoes=estado["observacoes"],
         )
-        registro.full_clean()
-        registro.save()
-        mes_da_tela = mes_da_tela or registro.mes_referencia
-        messages.success(request, f"KM de {veiculo.placa} registrado: {registro.km} km.")
-        _avisar_reencadeamento(request, veiculo, registro)
-        cobranca = gerar_cobranca_excedente(registro)
-        if cobranca:
-            messages.warning(
-                request,
-                f"Franquia estourada — cobrança de excedente de {brl(cobranca.valor)} "
-                f"gerada para {cobranca.cliente.nome} (cancele no Financeiro se não for cobrar).",
+        existente = RegistroKm.objects.filter(
+            veiculo=veiculo, mes_referencia=registro.mes_referencia
+        ).first()
+        if existente is not None:
+            # Toque duplo ou duas abas: diz o que já está gravado e onde corrigir.
+            raise ValidationError(
+                f"{veiculo.placa} já tem leitura em {registro.mes_referencia:%m/%Y} "
+                f"({milhar(existente.km)} km em {existente.data_leitura:%d/%m/%Y}). "
+                f"Se o número está errado, use Corrigir em Leituras do mês."
             )
+        registro.full_clean()
+        aviso = suspeita_do_km(registro)
+        # A caixinha vale só para o número avisado: trocou o KM, confere de novo.
+        if aviso and request.POST.get("confirmo") != str(registro.km):
+            estado["aviso"] = aviso
+            estado["km_avisado"] = registro.km
+            return _linha_nao_gravada(request, veiculo, mes_da_tela, estado)
+        try:
+            with transaction.atomic():
+                registro.save()
+        except IntegrityError:
+            raise ValidationError(
+                f"{veiculo.placa} acabou de ganhar leitura em {registro.mes_referencia:%m/%Y} "
+                f"por outra tela. Recarregue a página para ver."
+            ) from None
     except ValidationError as erro:
-        messages.error(request, f"{veiculo.placa}: {'; '.join(erro.messages)}")
+        estado["erro"] = "; ".join(erro.messages)
+        return _linha_nao_gravada(
+            request, veiculo, mes_da_tela or primeiro_dia_do_mes(date.today()), estado
+        )
     except (KeyError, ValueError):
-        messages.error(request, f"{veiculo.placa}: preencha a data e o KM corretamente.")
+        estado["erro"] = "preencha a data e o KM (só números)."
+        return _linha_nao_gravada(
+            request, veiculo, mes_da_tela or primeiro_dia_do_mes(date.today()), estado
+        )
+
+    sucesso = f"KM de {veiculo.placa} registrado: {milhar(registro.km)} km"
+    if registro.km_utilizado is not None:
+        sucesso += f" (rodou {milhar(registro.km_utilizado)} km desde a leitura anterior)"
+    avisos = [_aviso_reencadeamento(registro)]
+    cobranca = gerar_cobranca_excedente(registro)
+    if cobranca:
+        avisos.append(
+            f"Franquia estourada — cobrança de excedente de {brl(cobranca.valor)} "
+            f"gerada para {cobranca.cliente.nome} (cancele no Financeiro se não for cobrar)."
+        )
+    avisos = [aviso for aviso in avisos if aviso]
+    if request.htmx:
+        return render(
+            request,
+            "km/_pendente_ok.html",
+            {
+                "registro": registro,
+                "sucesso": sucesso,
+                "avisos": avisos,
+                "mes": mes_da_tela,
+                "faltam": veiculos_com_leitura_pendente(mes_da_tela).count(),
+            },
+        )
+    messages.success(request, f"{sucesso}.")
+    for aviso in avisos:
+        messages.warning(request, aviso)
     return _volta_para_lista(mes_da_tela)
+
+
+def corrigir(request, registro_id):
+    """Corrige ou apaga uma leitura digitada errada (proposta de UX nº 4, opção C)."""
+    registro = get_object_or_404(RegistroKm.objects.select_related("veiculo"), pk=registro_id)
+    veiculo = registro.veiculo
+    voltar_para_lista = (request.POST.get("voltar") or request.GET.get("voltar")) == "lista"
+
+    def voltar():
+        if voltar_para_lista:
+            return _volta_para_lista(registro.mes_referencia)
+        return redirect("km:historico", veiculo.pk)
+
+    aviso = None
+    if request.method == "POST" and "apagar" in request.POST:
+        try:
+            avisos = apagar_leitura(registro)
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+            return redirect(request.get_full_path())
+        messages.success(
+            request,
+            f"Leitura de {registro.mes_referencia:%m/%Y} de {veiculo.placa} apagada "
+            f"({milhar(registro.km)} km).",
+        )
+        for texto in avisos:
+            messages.warning(request, texto)
+        return voltar()
+
+    km_errado = registro.km
+    form = CorrecaoLeituraForm(request.POST or None, instance=registro)
+    if request.method == "POST" and form.is_valid():
+        aviso = suspeita_do_km(form.instance)
+        if aviso is None or form.confirmou():
+            avisos = corrigir_leitura(form.instance, km_errado)
+            messages.success(
+                request,
+                f"Leitura de {registro.mes_referencia:%m/%Y} de {veiculo.placa} corrigida: "
+                f"{milhar(km_errado)} → {milhar(registro.km)} km.",
+            )
+            for texto in avisos:
+                messages.warning(request, texto)
+            return voltar()
+    return render(
+        request,
+        "km/corrigir.html",
+        {
+            "registro": registro,
+            "veiculo": veiculo,
+            "km_errado": km_errado,
+            "form": form,
+            "aviso": aviso,
+            "km_avisado": form.cleaned_data.get("km") if aviso else None,
+            "voltar_para_lista": voltar_para_lista,
+            "cobranca": registro.cobranca_excedente,
+        },
+    )
 
 
 def historico(request, veiculo_id):

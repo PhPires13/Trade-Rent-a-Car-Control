@@ -182,3 +182,46 @@ def contagem_alertas_por_veiculo(veiculos):
         if alertas:
             contagens[veiculo_id] = alertas
     return contagens
+
+
+# --- Carro na oficina (selo derivado, sem mexer no status do carro) ---
+
+
+def manutencoes_em_aberto():
+    """Manutenções com entrada na oficina e sem data de saída: o carro ainda está lá."""
+    return Manutencao.objects.filter(data_entrada__isnull=False, data_saida__isnull=True)
+
+
+def oficina_por_veiculo(ids):
+    """{veiculo_id: Manutencao em aberto mais antiga} numa query — para selos em listas."""
+    em_aberto = {}
+    for manutencao in (
+        manutencoes_em_aberto()
+        .filter(veiculo_id__in=ids)
+        .select_related("oficina", "veiculo")
+        .order_by("-data_entrada", "-pk")
+    ):
+        em_aberto[manutencao.veiculo_id] = manutencao  # sobrescreve: fica a mais antiga
+    return em_aberto
+
+
+def pode_voltar_a_disponivel(veiculo, ignorar=None):
+    """O carro pode sair de "Em manutenção" para "Disponível"?
+
+    Só quando está marcado em manutenção, não tem alocação ativa, não está
+    emprestado como substituto e não tem outra manutenção ainda em aberto.
+    """
+    from apps.alocacoes.models import Alocacao, TrocaTemporaria
+
+    if veiculo.status != Veiculo.Status.EM_MANUTENCAO:
+        return False
+    if Alocacao.objects.filter(veiculo=veiculo, status=Alocacao.Status.ATIVA).exists():
+        return False
+    if TrocaTemporaria.objects.filter(
+        veiculo_substituto=veiculo, data_devolucao__isnull=True
+    ).exists():
+        return False
+    outras = manutencoes_em_aberto().filter(veiculo=veiculo)
+    if ignorar is not None:
+        outras = outras.exclude(pk=ignorar.pk)
+    return not outras.exists()

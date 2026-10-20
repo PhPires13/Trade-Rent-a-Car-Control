@@ -3,26 +3,26 @@
 {% block titulo %}Clientes — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<div class="mb-6 flex items-center justify-between">
+<div class="mb-6 flex items-center justify-between gap-2">
   <h1 class="text-2xl font-bold">Clientes</h1>
   <a href="{% url 'pessoas:novo' %}"
-     class="rounded bg-marca-amarelo px-3 py-1.5 text-sm font-semibold text-marca-preto hover:brightness-95">
+     class="inline-flex min-h-11 items-center rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:min-h-0 sm:px-3 sm:py-1.5">
     + Novo cliente
   </a>
 </div>
 
 <form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm" role="search">
-  <label for="busca-cliente" class="sr-only">Buscar cliente pelo nome</label>
-  <input type="search" name="q" id="busca-cliente" value="{{ busca }}" placeholder="Buscar pelo nome…"
-         class="w-full rounded border border-gray-300 px-3 py-1.5 sm:w-64">
+  <label for="busca-cliente" class="sr-only">Buscar cliente pelo nome, CPF ou telefone</label>
+  <input type="search" name="q" id="busca-cliente" value="{{ busca }}" placeholder="Nome, CPF ou telefone…"
+         class="w-full rounded border border-gray-300 px-3 py-2.5 text-base sm:w-64 sm:py-1.5 sm:text-sm">
   <label for="filtro-status" class="sr-only">Situação</label>
-  <select name="status" id="filtro-status" onchange="this.form.submit()" class="rounded border border-gray-300 px-2 py-1.5">
+  <select name="status" id="filtro-status" onchange="this.form.submit()" class="min-w-0 flex-1 rounded border border-gray-300 px-2 py-2.5 sm:flex-none sm:py-1.5">
     <option value="">Ativos e inadimplentes</option>
     {% for valor, rotulo in statuses %}
     <option value="{{ valor }}" {% if status == valor %}selected{% endif %}>{{ rotulo }}</option>
     {% endfor %}
   </select>
-  <button class="rounded bg-marca-preto px-3 py-1.5 text-white">Buscar</button>
+  <button class="min-h-11 rounded bg-marca-preto px-4 py-2 font-semibold text-white sm:min-h-0 sm:px-3 sm:py-1.5 sm:font-normal">Buscar</button>
   {% if busca or status %}<a href="{% url 'pessoas:lista' %}" class="text-gray-600 underline">limpar</a>{% endif %}
 </form>
 
@@ -52,7 +52,7 @@
         🚗 <a href="{% url 'alocacoes:timeline' card.alocacao_ativa.veiculo.pk %}" class="underline">{{ card.alocacao_ativa.veiculo.placa }}</a>
         <span class="text-gray-500">{{ card.alocacao_ativa.veiculo.marca_modelo }}</span>
       {% else %}
-        <span class="text-gray-400">Sem carro</span>
+        <span class="text-gray-600">Sem carro</span>
         {% if card.cliente.status != "inativo" %}
         · <a href="{% url 'alocacoes:nova' %}?cliente={{ card.cliente.pk }}" class="text-gray-700 underline">alocar um carro</a>
         {% endif %}
@@ -62,7 +62,7 @@
     {% if card.telefone_digitos %}
     <p class="mt-1 text-sm">
       <a href="https://wa.me/{{ card.telefone_digitos }}" target="_blank" rel="noopener"
-         class="text-green-700 underline">📱 {{ card.cliente.telefone }}</a>
+         class="inline-flex min-h-11 items-center text-green-700 underline sm:min-h-0">📱 {{ card.cliente.telefone }}</a>
     </p>
     {% endif %}
 
@@ -99,6 +99,10 @@
   <div class="rounded-lg bg-white p-8 text-center shadow md:col-span-2 lg:col-span-3">
     {% if busca or status %}
       <p class="text-gray-600">Nenhum cliente encontrado com esse filtro.</p>
+      {% if busca and not status %}
+      <p class="mt-1 text-sm text-gray-600">Clientes inativos não aparecem aqui.
+        <a href="{% url 'buscar' %}?q={{ busca|urlencode }}" class="underline">Procurar em todos os cadastros</a></p>
+      {% endif %}
       <a href="{% url 'pessoas:lista' %}" class="mt-2 inline-block text-sm underline">Ver todos os clientes</a>
     {% else %}
       <p class="text-gray-600">Nenhum cliente cadastrado ainda.</p>

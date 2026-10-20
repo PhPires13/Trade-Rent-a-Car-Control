@@ -7,13 +7,14 @@ from django.core.exceptions import ValidationError
 from django.db.models import Count
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.campos import FormularioBR, dinheiro_br
 from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
 
-from . import crlv, desmobilizacao
+from . import alertas, crlv, desmobilizacao
 from .models import Categoria, Fornecedor, Veiculo, normalizar_placa
 
 
@@ -51,6 +52,7 @@ def _quem_esta_com_o_carro(veiculo):
         "valor_semanal": valor,
         # o dono do contrato pode estar rodando com um substituto (carro na oficina)
         "substituto_em_uso": alocacao.troca_ativa if alocacao else None,
+        "impedimento_venda": _impedimento_venda(alocacao, troca),
     }
 
 
@@ -136,7 +138,33 @@ def detalhe(request, veiculo_id):
         "total_sinistros": veiculo.sinistros.count(),
     }
     contexto.update(_quem_esta_com_o_carro(veiculo))
+    contexto["pendencias"] = alertas.pendencias_do_veiculo(veiculo)
     return render(request, "frota/detalhe.html", contexto)
+
+
+def _impedimento_venda(alocacao, troca):
+    """Por que o carro ainda não pode ser vendido — a regra de registrar_venda, explicada antes.
+
+    Recebe o que _quem_esta_com_o_carro já buscou (sem consultas extras): a
+    alocação ativa do carro ou a troca em aberto em que ele é o substituto — a
+    troca do próprio carro na oficina só existe com a alocação dele ativa.
+    Devolve {"texto", "url", "acao"} ou None quando a venda está liberada.
+    """
+    if alocacao:
+        return {
+            "texto": f"Este carro está com {alocacao.cliente.nome} desde "
+            f"{alocacao.data_inicio:%d/%m/%Y}. Encerre a alocação antes de vender.",
+            "url": reverse("alocacoes:encerrar", args=[alocacao.pk]),
+            "acao": "Encerrar a alocação",
+        }
+    if troca:
+        return {
+            "texto": f"Este carro está emprestado a {troca.alocacao.cliente.nome} (troca) desde "
+            f"{troca.data_retirada:%d/%m/%Y}. Registre a devolução antes de vender.",
+            "url": reverse("alocacoes:troca_devolver", args=[troca.pk]),
+            "acao": "Registrar a devolução",
+        }
+    return None
 
 
 #: Seções da tela de cadastro, na ordem em que aparecem — também definem os campos

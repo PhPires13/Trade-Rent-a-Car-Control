@@ -7,6 +7,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.alocacoes.models import Alocacao
+from apps.busca import nome_casa, numero_casa, parece_numero, sem_acento, so_digitos
 from apps.campos import FormularioBR
 from apps.financeiro.models import (
     ZERO,
@@ -225,14 +226,23 @@ def lista(request):
         clientes = clientes.filter(status=status)
     else:
         clientes = clientes.exclude(status=Cliente.Status.INATIVO)
+    clientes = list(clientes)
     if busca:
-        clientes = clientes.filter(nome__icontains=busca)
+        # sem acento/maiúscula; números servem para CPF/CNPJ e telefone
+        texto = sem_acento(busca)
+        digitos = so_digitos(busca) if parece_numero(busca) else ""
+        clientes = [
+            c
+            for c in clientes
+            if nome_casa(texto, c.nome)
+            or (digitos and (numero_casa(digitos, c.cpf_cnpj) or numero_casa(digitos, c.telefone)))
+        ]
     hoje = date.today()
     return render(
         request,
         "pessoas/lista.html",
         {
-            "cards": _cards_em_lote(list(clientes), hoje),
+            "cards": _cards_em_lote(clientes, hoje),
             "status": status,
             "busca": busca,
             "statuses": Cliente.Status.choices,

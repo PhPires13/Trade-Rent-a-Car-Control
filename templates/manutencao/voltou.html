@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block titulo %}Carro voltou da oficina — {{ veiculo.placa }}{% endblock %}
+
+{% block conteudo %}
+<a href="{% if volta %}{{ volta }}{% else %}{% url 'manutencao:historico' veiculo.pk %}{% endif %}" class="text-sm text-gray-600 underline">← Voltar</a>
+<h1 class="mb-1 mt-2 text-2xl font-bold">Carro voltou da oficina — {{ veiculo.placa }}</h1>
+<p class="mb-6 text-sm text-gray-600">
+  {{ manutencao.descricao|truncatechars:80 }}{% if manutencao.oficina %} · {{ manutencao.oficina }}{% endif %}<br>
+  Na oficina desde {{ manutencao.data_entrada|date:"d/m/Y" }} ({{ manutencao.dias_parado }} dia{{ manutencao.dias_parado|pluralize }} até hoje).
+  {% if veiculo.status == "em_manutencao" %}Ao salvar, o carro volta a ficar <strong>disponível</strong> para alugar (se não estiver com motorista).{% endif %}
+</p>
+
+<form method="post" class="form-cadastro max-w-md space-y-4 rounded-lg bg-white p-4 shadow sm:p-6">
+  {% csrf_token %}
+  {% if volta %}<input type="hidden" name="volta" value="{{ volta }}">{% endif %}
+  {% include "_erros_form.html" %}
+  {% include "manutencao/_campos.html" %}
+  <div class="flex flex-wrap gap-3">
+    <button class="w-full rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 sm:w-auto sm:py-2">Confirmar saída da oficina</button>
+    <a href="{% url 'manutencao:editar' manutencao.pk %}" class="px-4 py-2 text-sm text-gray-600 underline">Editar tudo</a>
+  </div>
+</form>
+
+<style>
+  .form-cadastro input, .form-cadastro select { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.5rem 0.6rem; }
+</style>
+{% endblock %}

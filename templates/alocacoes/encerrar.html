@@ -4,74 +4,154 @@
 
 {% block conteudo %}
 <a href="{% url 'alocacoes:lista' %}" class="text-sm text-gray-600 underline">← Alocações</a>
-<h1 class="mb-1 mt-2 text-2xl font-bold">Encerrar alocação</h1>
-<p class="mb-6 text-sm text-gray-600">Use quando o cliente devolveu o carro de vez.</p>
+<h1 class="mb-1 mt-2 text-2xl font-bold">Devolução do carro</h1>
+<p class="mb-4 text-sm text-gray-600">Use quando o cliente devolveu o carro de vez. Siga os passos na ordem — o que falta aparece em amarelo.</p>
 
-<div class="grid max-w-3xl gap-6 md:grid-cols-2">
-  <div class="space-y-4">
-    <dl class="rounded-lg border-l-4 border-marca-amarelo bg-white p-5 text-sm shadow">
-      <div class="mb-2">
-        <dt class="text-gray-500">Carro</dt>
-        <dd class="text-base font-bold">{{ alocacao.veiculo.placa }} <span class="font-normal text-gray-600">{{ alocacao.veiculo.marca_modelo }}</span></dd>
-      </div>
-      <div class="mb-2">
-        <dt class="text-gray-500">Cliente</dt>
-        <dd class="font-semibold">{{ alocacao.cliente.nome }}</dd>
-      </div>
-      <div class="grid grid-cols-2 gap-2">
-        <div><dt class="text-gray-500">Desde</dt><dd>{{ alocacao.data_inicio|date:"d/m/Y" }}</dd></div>
-        <div><dt class="text-gray-500">KM na entrega</dt><dd>{{ alocacao.km_entrega|milhar }} km</dd></div>
-        <div><dt class="text-gray-500">Valor/semana</dt><dd>{{ alocacao.valor_semanal|brl }}</dd></div>
-        <div><dt class="text-gray-500">Caução retida</dt><dd>{% if caucao %}{{ caucao.saldo|brl }}{% else %}—{% endif %}</dd></div>
-      </div>
-    </dl>
-
-    <div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-700">
-      <p class="mb-1 font-semibold">O que acontece ao encerrar</p>
-      <ul class="list-inside list-disc space-y-1">
-        <li>O carro volta a ficar <strong>disponível</strong> para alugar.</li>
-        <li>Semanas com vencimento a partir da data de devolução que <strong>ainda não foram pagas</strong> são canceladas.</li>
-        {% if caucao and caucao.saldo > 0 %}
-        <li>Em seguida você vai para a tela da <strong>caução</strong> ({{ caucao.saldo|brl }}) para descontar débitos e devolver o restante.</li>
-        {% endif %}
-        <li>Não dá para desfazer — confira a data e o KM antes.</li>
-      </ul>
+<dl class="mb-6 max-w-3xl rounded-lg border-l-4 border-marca-amarelo bg-white p-4 text-sm shadow sm:p-5">
+  <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+    <div>
+      <dt class="sr-only">Carro</dt>
+      <dd class="text-base font-bold">{{ alocacao.veiculo.placa }} <span class="font-normal text-gray-600">{{ alocacao.veiculo.marca_modelo }}</span></dd>
+    </div>
+    <div>
+      <dt class="sr-only">Cliente</dt>
+      <dd class="font-semibold"><a href="{% url 'pessoas:detalhe' alocacao.cliente.pk %}" class="underline">{{ alocacao.cliente.nome }}</a></dd>
     </div>
   </div>
-
-  {% if troca_ativa %}
-  <div class="h-fit rounded-lg border-l-4 border-red-500 bg-red-50 p-5 text-sm text-red-900">
-    <p class="font-semibold">Antes de encerrar, devolva o carro substituto.</p>
-    <p class="mt-1">{{ alocacao.cliente.nome }} está com o substituto {{ troca_ativa.veiculo_substituto.placa }} desde {{ troca_ativa.data_retirada|date:"d/m/Y" }}.</p>
-    <a href="{% url 'alocacoes:troca_devolver' troca_ativa.pk %}"
-       class="mt-3 inline-block rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Devolver substituto</a>
+  <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <div><dt class="text-gray-500">Desde</dt><dd>{{ alocacao.data_inicio|date:"d/m/Y" }}</dd></div>
+    <div><dt class="text-gray-500">KM na entrega</dt><dd>{{ alocacao.km_entrega|milhar }} km</dd></div>
+    <div><dt class="text-gray-500">Valor/semana</dt><dd>{{ alocacao.valor_semanal|brl }}</dd></div>
+    <div><dt class="text-gray-500">Caução retida</dt><dd>{% if caucao %}{{ caucao.saldo|brl }}{% else %}—{% endif %}</dd></div>
   </div>
-  {% else %}
-  <form method="post" class="h-fit space-y-4 rounded-lg bg-white p-6 shadow"
+</dl>
+
+{% if troca_ativa %}
+<div class="mb-6 max-w-3xl rounded-lg border-l-4 border-red-500 bg-red-50 p-5 text-sm text-red-900">
+  <p class="font-semibold">Antes de encerrar, devolva o carro substituto.</p>
+  <p class="mt-1">{{ alocacao.cliente.nome }} está com o substituto {{ troca_ativa.veiculo_substituto.placa }} desde {{ troca_ativa.data_retirada|date:"d/m/Y" }}.</p>
+  <a href="{% url 'alocacoes:troca_devolver' troca_ativa.pk %}"
+     class="mt-3 block rounded bg-marca-amarelo px-4 py-3 text-center font-semibold text-marca-preto hover:brightness-95 sm:inline-block sm:py-2">Devolver substituto</a>
+</div>
+{% else %}
+<div class="max-w-3xl space-y-4">
+  {# Passo 1 — vistoria de devolução #}
+  <section class="rounded-lg p-4 shadow sm:p-5 {% if vistoria_devolucao %}bg-white{% else %}border-2 border-yellow-400 bg-yellow-50{% endif %}">
+    <div class="flex items-start gap-3">
+      {% if vistoria_devolucao %}
+      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-green-600 font-bold text-white" aria-label="Feito">✓</span>
+      {% else %}
+      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-yellow-600 text-sm font-bold text-yellow-800" aria-label="Falta fazer">1</span>
+      {% endif %}
+      <div class="min-w-0 flex-1">
+        <h2 class="font-semibold">Vistoria de devolução</h2>
+        {% if vistoria_devolucao %}
+        <p class="text-sm text-gray-700">Feita em {{ vistoria_devolucao.data|date:"d/m/Y" }}{% if vistoria_devolucao.km %} — {{ vistoria_devolucao.km|milhar }} km{% endif %}.</p>
+        {% else %}
+        <p class="text-sm text-yellow-900"><strong>Ainda não feita.</strong> Confira o carro com o cliente presente: marcas, combustível e KM.</p>
+        <a href="{{ url_vistoria_devolucao }}"
+           class="mt-2 block rounded bg-marca-amarelo px-4 py-3 text-center font-semibold text-marca-preto hover:brightness-95 sm:inline-block sm:py-2 sm:text-sm">Fazer a vistoria de devolução</a>
+        {% endif %}
+        {% if vistoria_entrega or vistoria_devolucao %}
+        <div class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+          <div class="rounded bg-gray-50 p-2">
+            <p class="text-xs font-semibold uppercase text-gray-500">Marcas na entrega</p>
+            {% if vistoria_entrega %}
+            <p class="whitespace-pre-line">{{ vistoria_entrega.avarias|default:"Nenhuma anotada." }}</p>
+            {% if vistoria_entrega.foto %}<a href="{{ vistoria_entrega.foto.url }}" target="_blank" rel="noopener" class="text-xs underline">ver checklist da entrega</a>{% endif %}
+            {% else %}<p class="text-gray-500">Sem vistoria de entrega.</p>{% endif %}
+          </div>
+          <div class="rounded bg-gray-50 p-2">
+            <p class="text-xs font-semibold uppercase text-gray-500">Marcas na devolução</p>
+            {% if vistoria_devolucao %}
+            <p class="whitespace-pre-line">{{ vistoria_devolucao.avarias|default:"Nenhuma anotada." }}</p>
+            {% if vistoria_devolucao.foto %}<a href="{{ vistoria_devolucao.foto.url }}" target="_blank" rel="noopener" class="text-xs underline">ver checklist da devolução</a>{% endif %}
+            {% else %}<p class="text-gray-500">—</p>{% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <form method="post" class="space-y-4"
         onsubmit="return confirm('Encerrar a alocação de {{ alocacao.veiculo.placa|escapejs }} com {{ alocacao.cliente.nome|escapejs }}? Não dá para desfazer.')">
     {% csrf_token %}
-    <div>
-      <label class="mb-1 block text-sm font-medium" for="data_termino">Data em que o carro voltou</label>
-      <input type="date" name="data_termino" id="data_termino"
-             value="{% firstof request.POST.data_termino hoje|date:'Y-m-d' %}"
-             min="{{ alocacao.data_inicio|date:'Y-m-d' }}" required>
-    </div>
-    <div>
-      <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM no painel na devolução</label>
-      <input type="number" name="km_devolucao" id="km_devolucao" inputmode="numeric"
-             value="{{ request.POST.km_devolucao }}" min="{{ alocacao.km_entrega }}"
-             placeholder="saiu com {{ alocacao.km_entrega|milhar }}" required>
-      <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da entrega ({{ alocacao.km_entrega|milhar }} km).</p>
-    </div>
-    <div class="flex items-center gap-3 pt-2">
-      <button class="rounded bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700">Encerrar alocação</button>
-      <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Voltar sem encerrar</a>
-    </div>
+    {# Passo 2 — data e KM final #}
+    <section class="rounded-lg bg-white p-4 shadow sm:p-5">
+      <div class="flex items-start gap-3">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-gray-400 text-sm font-bold text-gray-600">2</span>
+        <div class="min-w-0 flex-1 space-y-3">
+          <h2 class="font-semibold">Data e KM final</h2>
+          <div>
+            <label class="mb-1 block text-sm font-medium" for="data_termino">Data em que o carro voltou</label>
+            <input type="date" name="data_termino" id="data_termino"
+                   value="{% firstof request.POST.data_termino data_sugerida|date:'Y-m-d' %}"
+                   min="{{ alocacao.data_inicio|date:'Y-m-d' }}" required>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM no painel na devolução</label>
+            <input type="number" name="km_devolucao" id="km_devolucao" inputmode="numeric"
+                   value="{% firstof request.POST.km_devolucao km_sugerido %}" min="{{ alocacao.km_entrega }}"
+                   placeholder="saiu com {{ alocacao.km_entrega|milhar }}" required>
+            {% if km_sugerido and not request.POST.km_devolucao %}
+            <p class="mt-1 text-xs text-blue-900">Preenchido com o KM da vistoria de devolução — confira.</p>
+            {% endif %}
+            <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da entrega ({{ alocacao.km_entrega|milhar }} km).</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# Passo 3 — caução e débitos #}
+    <section class="rounded-lg p-4 shadow sm:p-5 {% if debitos > 0 %}border-2 border-red-300 bg-red-50{% else %}bg-white{% endif %}">
+      <div class="flex items-start gap-3">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-gray-400 text-sm font-bold text-gray-600">3</span>
+        <div class="min-w-0 flex-1 text-sm">
+          <h2 class="text-base font-semibold">Caução: devolver ou descontar</h2>
+          {% if debitos > 0 %}
+          <p class="mt-1 text-red-900"><strong>{{ alocacao.cliente.nome }} deve {{ debitos|brl }} hoje.</strong>
+            Receba agora ou desconte da caução no próximo passo.</p>
+          <a href="{% url 'financeiro:receber' %}?cliente={{ alocacao.cliente.pk }}"
+             class="mt-2 block rounded border border-red-300 bg-white px-4 py-3 text-center font-semibold text-red-800 hover:bg-red-50 sm:inline-block sm:py-2">Receber pagamento</a>
+          {% else %}
+          <p class="mt-1 text-gray-700">Sem débitos em aberto hoje.</p>
+          {% endif %}
+          {% if caucao and caucao.saldo > 0 %}
+          <p class="mt-2 text-gray-700">Há <strong>{{ caucao.saldo|brl }}</strong> de caução retida. Ao confirmar, você vai direto para a tela da caução para <strong>descontar</strong> o que o cliente deve e <strong>devolver</strong> o restante.</p>
+          {% else %}
+          <p class="mt-2 text-gray-500">Nenhuma caução retida — nada a devolver.</p>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    {# Passo 4 — confirmar #}
+    <section class="rounded-lg bg-white p-4 shadow sm:p-5">
+      <div class="flex items-start gap-3">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-gray-400 text-sm font-bold text-gray-600">4</span>
+        <div class="min-w-0 flex-1 text-sm">
+          <h2 class="text-base font-semibold">Confirmar a devolução</h2>
+          <ul class="mt-1 list-inside list-disc space-y-1 text-gray-700">
+            <li>O carro volta a ficar <strong>disponível</strong> para alugar.</li>
+            <li>Semanas com vencimento a partir da data de devolução que <strong>ainda não foram pagas</strong> são canceladas.</li>
+            <li>Não dá para desfazer — confira a data e o KM antes.</li>
+          </ul>
+          {% if not vistoria_devolucao %}
+          <p class="mt-2 rounded bg-yellow-100 px-2 py-1.5 text-yellow-900">Atenção: a vistoria de devolução ainda não foi registrada.</p>
+          {% endif %}
+          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button class="rounded bg-red-600 px-4 py-3 font-bold text-white hover:bg-red-700 sm:py-2">Encerrar alocação</button>
+            <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-center text-gray-600 underline">Voltar sem encerrar</a>
+          </div>
+        </div>
+      </div>
+    </section>
   </form>
-  {% endif %}
 </div>
+{% endif %}
 
 <style>
-  form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }
+  form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.5rem 0.6rem; }
 </style>
 {% endblock %}

@@ -4,8 +4,10 @@ from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Count, Exists, F, OuterRef, Q
 
 from apps.financeiro.models import Cobranca, ItemNotaDebito, NotaDebito
+from apps.formatos import brl
 
 from .models import Multa
 
@@ -74,3 +76,119 @@ def alertas_fici(hoje=None):
         .select_related("veiculo", "cliente")
         .order_by("fici_prazo")
     )
+
+
+# --- Atalhos da lista: as tarefas reais de quem cuida das multas (auditoria UX #11) ---
+
+#: ordem e rótulo dos botões-atalho no topo da lista
+TAREFAS = (
+    ("indicar", "Indicar condutor"),
+    ("pagar", "Pagar ao órgão"),
+    ("cobrar", "Cobrar do cliente"),
+    ("concluidas", "Concluídas"),
+)
+
+
+def _filtros_tarefa():
+    """Q de cada tarefa — espera o queryset anotado por `com_tarefas`.
+
+    "Cobrar do cliente" espelha `Multa.repasse == "A cobrar"` no banco: sem ND,
+    responsável cliente/condutor, com valor e resultado que não anulou a multa.
+    "Concluídas" é o que não está em nenhuma das outras três.
+    """
+    anulada = Q(resultado__in=Multa.RESULTADOS_ANULADORES)
+    indicar = Q(fici_status=Multa.Fici.PENDENTE) & ~anulada
+    pagar = Q(pagamento=Multa.Pagamento.PENDENTE, valor__gt=0) & ~anulada
+    cobrar = (
+        Q(_tem_nd=False, valor__gt=0)
+        & Q(responsavel__in=[Multa.Responsavel.CLIENTE, Multa.Responsavel.CONDUTOR])
+        & ~anulada
+    )
+    return {
+        "indicar": indicar,
+        "pagar": pagar,
+        "cobrar": cobrar,
+        "concluidas": ~indicar & ~pagar & ~cobrar,
+    }
+
+
+def com_tarefas(multas):
+    """Anota o que os filtros de tarefa precisam (se a multa já entrou em ND)."""
+    return multas.annotate(_tem_nd=Exists(ItemNotaDebito.objects.filter(multa=OuterRef("pk"))))
+
+
+def filtrar_tarefa(multas, tarefa):
+    """Aplica o atalho; "indicar" vem pelo prazo mais próximo (sem prazo por último)."""
+    filtros = _filtros_tarefa()
+    if tarefa not in filtros:
+        return multas
+    multas = com_tarefas(multas).filter(filtros[tarefa])
+    if tarefa == "indicar":
+        multas = multas.order_by(F("fici_prazo").asc(nulls_last=True), "-data_infracao")
+    return multas
+
+
+def contar_tarefas(multas, hoje=None):
+    """Contadores dos botões-atalho numa consulta só, mais as de prazo já vencido."""
+    hoje = hoje or date.today()
+    filtros = _filtros_tarefa()
+    contas = {nome: Count("pk", filter=filtro) for nome, filtro in filtros.items()}
+    contas["indicar_vencidas"] = Count("pk", filter=filtros["indicar"] & Q(fici_prazo__lt=hoje))
+    return com_tarefas(multas).aggregate(**contas)
+
+
+# --- Histórico simples da página de editar (auditoria UX #10) ---
+
+
+def _texto_do_valor(campo, registro, valor):
+    """Valor de um campo do histórico em texto de gente ("Pago", "R$ 195,30", "05/09/2026")."""
+    if valor in (None, ""):
+        return "vazio"
+    if campo.choices:
+        return str(dict(campo.flatchoices).get(valor, valor))
+    if campo.is_relation:
+        try:
+            return str(getattr(registro, campo.name))
+        except campo.related_model.DoesNotExist:
+            return "(apagado)"
+    if isinstance(valor, date):
+        return f"{valor:%d/%m/%Y}"
+    if campo.get_internal_type() == "DecimalField":
+        return brl(valor)
+    return str(valor)
+
+
+def historico(multa, limite=20):
+    """Quem mudou o quê e quando — do mais recente para o mais antigo.
+
+    Lê os registros do simple_history e devolve só o que mudou de um para o
+    outro, com o nome do campo e os valores em texto comum.
+    """
+    registros = list(multa.history.select_related("history_user")[: limite + 1])
+    eventos = []
+    for atual, anterior in zip(registros, registros[1:] + [None], strict=True):
+        if len(eventos) == limite:
+            break
+        mudancas = []
+        if anterior is not None:
+            for mudanca in atual.diff_against(anterior).changes:
+                campo = Multa._meta.get_field(mudanca.field)
+                mudancas.append(
+                    {
+                        "campo": str(campo.verbose_name).capitalize(),
+                        "antes": _texto_do_valor(campo, anterior, mudanca.old),
+                        "depois": _texto_do_valor(campo, atual, mudanca.new),
+                    }
+                )
+            if not mudancas:
+                continue  # salvou sem mudar nada
+        usuario = atual.history_user
+        eventos.append(
+            {
+                "quando": atual.history_date,
+                "quem": (usuario.get_full_name() or usuario.username) if usuario else "",
+                "criacao": atual.history_type == "+",
+                "mudancas": mudancas,
+            }
+        )
+    return eventos

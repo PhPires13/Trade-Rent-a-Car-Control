@@ -6,34 +6,43 @@
 <h1 class="mb-4 text-2xl font-bold">Busca{% if consulta %}: “{{ consulta }}”{% endif %}</h1>
 
 <form method="get" action="" class="mb-6 flex max-w-lg gap-2" role="search">
-  <input type="search" name="q" value="{{ consulta }}" placeholder="placa, modelo ou nome do cliente" aria-label="Buscar"
-         class="flex-1 rounded border border-gray-300 px-3 py-2" {% if not consulta %}autofocus{% endif %}>
-  <button class="rounded bg-marca-preto px-4 py-2 font-semibold text-white hover:brightness-125">Buscar</button>
+  <input type="search" name="q" value="{{ consulta }}" placeholder="placa, nome, CPF, telefone ou nº da multa" aria-label="Buscar"
+         class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2.5 text-base" {% if not consulta %}autofocus{% endif %}>
+  <button class="min-h-11 rounded bg-marca-preto px-4 py-2 font-semibold text-white hover:brightness-125">Buscar</button>
 </form>
 
 {% if not consulta %}
-<p class="text-gray-500">Digite uma placa (ex.: <strong>ABC1D23</strong>), o modelo do carro ou o nome do cliente.</p>
-{% elif not veiculos and not clientes %}
+<div class="max-w-lg text-gray-600">
+  <p>Você pode digitar:</p>
+  <ul class="mt-1 list-inside list-disc space-y-0.5 text-sm">
+    <li>a placa (ex.: <strong>ABC1D23</strong>) ou o modelo do carro;</li>
+    <li>o nome do cliente ou de um condutor autorizado — com ou sem acento;</li>
+    <li>CPF, CNPJ ou telefone — com ou sem pontos e traços;</li>
+    <li>o nº do AIT da multa ou o nº do BO do sinistro.</li>
+  </ul>
+</div>
+{% elif not total %}
 <div class="max-w-lg rounded-lg bg-white p-5 shadow">
   <p class="font-semibold">Nenhum resultado para “{{ consulta }}”.</p>
   <ul class="mt-2 list-inside list-disc space-y-0.5 text-sm text-gray-600">
     <li>Tente só uma parte da placa (ex.: os 4 últimos caracteres) ou do nome.</li>
-    <li>Confira se não há erro de digitação.</li>
-    <li>A busca procura carros (placa ou modelo) e clientes (nome).</li>
+    <li>Para CPF, telefone, AIT ou BO, digite pelo menos 4 números.</li>
+    <li>A busca procura carros, clientes, condutores, multas (AIT) e sinistros (BO).</li>
   </ul>
   <p class="mt-3 flex flex-wrap gap-3 text-sm">
     <a href="{% url 'frota:hub' %}" class="underline">ver toda a frota</a>
     <a href="{% url 'pessoas:lista' %}" class="underline">ver todos os clientes</a>
+    <a href="{% url 'multas:lista' %}" class="underline">ver as multas</a>
   </p>
 </div>
 {% else %}
-<p class="mb-4 text-sm text-gray-500">
-  Encontrados: {{ veiculos|length }} veículo{{ veiculos|length|pluralize }} e {{ clientes|length }} cliente{{ clientes|length|pluralize }}{% if veiculos|length == 20 or clientes|length == 20 %} — mostrando os 20 primeiros de cada; refine a busca para achar mais rápido{% endif %}.
+<p class="mb-4 text-sm text-gray-600">
+  {{ total }} resultado{{ total|pluralize }}{% if cortado %} — mostrando os 20 primeiros de cada grupo; refine a busca para achar mais rápido{% endif %}.
 </p>
 {% endif %}
 
 {% if veiculos %}
-<h2 class="mb-2 font-semibold">Veículos <span class="text-sm font-normal text-gray-400">({{ veiculos|length }})</span></h2>
+<h2 class="mb-2 font-semibold">Veículos <span class="text-sm font-normal text-gray-600">({{ veiculos|length }})</span></h2>
 <ul class="mb-8 space-y-2">
   {% for veiculo in veiculos %}
   <li class="rounded-lg bg-white p-3 shadow">
@@ -46,13 +55,55 @@
 {% endif %}
 
 {% if clientes %}
-<h2 class="mb-2 font-semibold">Clientes <span class="text-sm font-normal text-gray-400">({{ clientes|length }})</span></h2>
-<ul class="space-y-2">
-  {% for cliente in clientes %}
+<h2 class="mb-2 font-semibold">Clientes <span class="text-sm font-normal text-gray-600">({{ clientes|length }})</span></h2>
+<ul class="mb-8 space-y-2">
+  {% for achado in clientes %}
   <li class="rounded-lg bg-white p-3 shadow">
-    <a href="{% url 'pessoas:detalhe' cliente.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
-      {{ cliente.nome }}</a>
-    <span class="text-gray-600">{{ cliente.get_status_display }}{% if cliente.telefone %} · {{ cliente.telefone }}{% endif %}</span>
+    <a href="{% url 'pessoas:detalhe' achado.cliente.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
+      {{ achado.cliente.nome }}</a>
+    <span class="text-gray-600">{{ achado.cliente.get_status_display }}{% if achado.cliente.telefone %} · {{ achado.cliente.telefone }}{% endif %}</span>
+    {% if achado.motivo %}<span class="block text-sm text-gray-600">achado pelo {{ achado.motivo }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if condutores %}
+<h2 class="mb-2 font-semibold">Condutores sem cliente ligado <span class="text-sm font-normal text-gray-600">({{ condutores|length }})</span></h2>
+<ul class="mb-8 space-y-2">
+  {% for condutor in condutores %}
+  <li class="rounded-lg bg-white p-3 shadow">
+    <a href="{% url 'pessoas:condutor_editar' condutor.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
+      {{ condutor.nome }}</a>
+    {% if condutor.contato %}<span class="text-gray-600">{{ condutor.contato }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if multas %}
+<h2 class="mb-2 font-semibold">Multas <span class="text-sm font-normal text-gray-600">({{ multas|length }})</span></h2>
+<ul class="mb-8 space-y-2">
+  {% for multa in multas %}
+  <li class="rounded-lg bg-white p-3 shadow">
+    <a href="{% url 'multas:editar' multa.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
+      {% if multa.ait %}AIT {{ multa.ait }}{% else %}Processo {{ multa.num_processamento }}{% endif %}</a>
+    <span class="text-gray-600">{{ multa.veiculo.placa }} · {{ multa.data_infracao|date:"d/m/Y" }}{% if multa.valor %} · {{ multa.valor|brl }}{% endif %}</span>
+    {% if multa.cliente %}<span class="block text-sm text-gray-600">com {{ multa.cliente.nome }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if sinistros %}
+<h2 class="mb-2 font-semibold">Sinistros <span class="text-sm font-normal text-gray-600">({{ sinistros|length }})</span></h2>
+<ul class="mb-8 space-y-2">
+  {% for sinistro in sinistros %}
+  <li class="rounded-lg bg-white p-3 shadow">
+    <a href="{% url 'sinistros:editar' sinistro.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
+      BO {{ sinistro.boletim_ocorrencia }}</a>
+    <span class="text-gray-600">{{ sinistro.veiculo.placa }} · {{ sinistro.get_tipo_display }} em {{ sinistro.data|date:"d/m/Y" }} · {{ sinistro.get_status_display }}</span>
+    {% if sinistro.cliente %}<span class="block text-sm text-gray-600">com {{ sinistro.cliente.nome }}</span>{% endif %}
   </li>
   {% endfor %}
 </ul>

@@ -196,7 +196,8 @@ def test_telas_de_manutencao_renderizam(usuario_logado, veiculo, oleo):
         km=90_000,
         descricao="Troca de óleo",
     )
-    resposta = usuario_logado.get("/manutencao/preventivas/")
+    # "Em dia" só aparece em "Ver todas": a tela abre no que precisa de atenção
+    resposta = usuario_logado.get("/manutencao/preventivas/?ver=todas")
     assert resposta.status_code == 200
     # o status calculado precisa aparecer renderizado (regressão: classe chamada pelo template)
     assert "Em dia" in resposta.content.decode()

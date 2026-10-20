@@ -12,7 +12,8 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import OuterRef, Q, Subquery, Sum
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.formatos import brl
@@ -34,6 +35,19 @@ ENCARGO_CURTO = Decimal("0.05")
 ENCARGO_LONGO = Decimal("0.10")
 ENCARGO_DIAS_CORTE = 4
 DIAS_PARA_INADIMPLENCIA = 1
+#: Mesmo cliente + valor + data dentro desta janela = toque duplo no Confirmar.
+JANELA_RECEBIMENTO_REPETIDO = timedelta(minutes=2)
+
+
+class RecebimentoRepetido(ValidationError):
+    """O mesmo pagamento acabou de ser lançado (toque duplo, 4G lento)."""
+
+    def __init__(self, recebimento):
+        super().__init__(
+            "Este pagamento já foi lançado agora há pouco — não foi lançado de novo. "
+            "Se for mesmo um segundo pagamento igual, espere 2 minutos e lance outra vez."
+        )
+        self.recebimento = recebimento
 
 
 def _proximo_vencimento(alocacao):
@@ -196,17 +210,36 @@ def aplicar_encargo(cobranca, valor, hoje=None):
 
 @transaction.atomic
 def registrar_recebimento(
-    cliente, data, valor, forma, aplicacoes, sobra_destino="credito", observacoes=""
+    cliente,
+    data,
+    valor,
+    forma,
+    aplicacoes,
+    sobra_destino="credito",
+    observacoes="",
+    bloquear_repetido=False,
 ):
     """Lança um pagamento e distribui nas cobranças, com travas (docs.md §4.3).
 
     aplicacoes: lista de (cobranca, valor). Travas: nenhuma aplicação acima do
     saldo da cobrança; total aplicado nunca acima do recebido. Sobra vira
     crédito do cliente ou reforço de caução.
+
+    bloquear_repetido (tela de receber): o mesmo cliente + valor + data lançado
+    há menos de 2 minutos levanta RecebimentoRepetido — toque duplo no
+    Confirmar com internet lenta não vira pagamento em dobro.
     """
     valor = Decimal(valor)
     if valor <= ZERO:
         raise ValidationError("Valor recebido deve ser maior que zero.")
+    if forma not in Recebimento.Forma.values:
+        raise ValidationError('Escolha em "Como pagou" a forma do pagamento.')
+    if bloquear_repetido:
+        # trava a linha do cliente: dois Confirmar simultâneos esperam um pelo outro
+        Cliente.objects.select_for_update().filter(pk=cliente.pk).first()
+        repetido = _recebimento_recente(cliente, data, valor)
+        if repetido:
+            raise RecebimentoRepetido(repetido)
     total = sum((Decimal(v) for _, v in aplicacoes), ZERO)
     if total > valor:
         raise ValidationError(
@@ -255,7 +288,9 @@ def registrar_recebimento(
                 valor=sobra,
                 data=data,
                 forma=forma if forma != Recebimento.Forma.CREDITO else "",
-                observacoes="Sobra de recebimento",
+                # a caução não tem vínculo com o recebimento: o nº no texto é o
+                # que permite ao "Desfazer" achar este reforço depois
+                observacoes=_marca_reforco(recebimento),
             )
         else:
             MovimentoCredito.objects.create(
@@ -279,12 +314,221 @@ def _caucao_ativa(cliente):
     )
 
 
+def _marca_reforco(recebimento):
+    return f"Sobra do recebimento nº {recebimento.pk}"
+
+
+def _reforco_do_recebimento(recebimento):
+    return (
+        MovimentacaoCaucao.objects.filter(
+            tipo=MovimentacaoCaucao.Tipo.REFORCO, observacoes=_marca_reforco(recebimento)
+        )
+        .select_related("caucao")
+        .first()
+    )
+
+
+def anotar_lancamento(queryset):
+    """Anota `lancado_em` (quando o pagamento foi digitado) em lote.
+
+    O Recebimento não guarda a hora do lançamento — `data` é o dia em que o
+    cliente pagou; o momento do registro vem do histórico (simple_history).
+    """
+    historico = Recebimento.history.model.objects.filter(
+        id=OuterRef("pk"), history_type="+"
+    ).order_by("history_date")
+    return queryset.annotate(lancado_em=Subquery(historico.values("history_date")[:1]))
+
+
+def _recebimento_recente(cliente, data, valor):
+    desde = timezone.now() - JANELA_RECEBIMENTO_REPETIDO
+    return (
+        anotar_lancamento(Recebimento.objects.filter(cliente=cliente, data=data, valor=valor))
+        .filter(lancado_em__gte=desde)
+        .order_by("-pk")
+        .first()
+    )
+
+
+def pode_desfazer(recebimento, hoje=None):
+    """Desfazer só vale no mesmo dia do lançamento (decisão do dono, proposta UX nº 1).
+
+    Assim nunca se mexe num mês já passado à contabilidade (DAS) e o erro
+    de digitação do dia se corrige sem a Retaguarda.
+    """
+    hoje = hoje or timezone.localdate()
+    lancado_em = getattr(recebimento, "lancado_em", None)
+    if not hasattr(recebimento, "lancado_em"):  # sem anotar_lancamento: busca no histórico
+        primeiro = recebimento.history.filter(history_type="+").order_by("history_date").first()
+        lancado_em = primeiro.history_date if primeiro else None
+    return lancado_em is not None and timezone.localdate(lancado_em) == hoje
+
+
+def _era_judicial(cobranca):
+    """A cobrança quitada estava em cobrança judicial antes de virar PAGO?
+
+    Lido do histórico ANTES de apagar as aplicações — o sinal de exclusão
+    (signals.py) já recalcula o status e grava uma versão nova.
+    """
+    if cobranca.status != Cobranca.Status.PAGO:
+        return False
+    anterior = (
+        cobranca.history.exclude(status=Cobranca.Status.PAGO).order_by("-history_date").first()
+    )
+    return bool(anterior and anterior.status == Cobranca.Status.JUDICIAL)
+
+
+def _devolver_saldo(cobranca, judicial):
+    """Reabre a cobrança que o recebimento desfeito tinha quitado (ou abatido).
+
+    Cobrança judicial que virou PAGO volta a ser judicial.
+    """
+    cobranca.refresh_from_db(fields=["status"])
+    if judicial and cobranca.status != Cobranca.Status.JUDICIAL:
+        cobranca.status = Cobranca.Status.JUDICIAL
+        cobranca.save(update_fields=["status"])
+    cobranca.atualizar_status()
+
+
+@transaction.atomic
+def desfazer_recebimento(recebimento, hoje=None):
+    """Apaga um lançamento feito hoje e volta tudo como estava antes dele.
+
+    Devolve o saldo às cobranças, remove o crédito (ou o uso de crédito) e o
+    reforço de caução gerados por ele e recalcula a inadimplência. O
+    histórico (simple_history) guarda o registro apagado para auditoria.
+    """
+    if not pode_desfazer(recebimento, hoje):
+        raise ValidationError(
+            "Só dá para desfazer no mesmo dia em que o pagamento foi lançado. "
+            "Para corrigir um lançamento de outro dia, use a Retaguarda."
+        )
+    cliente = Cliente.objects.select_for_update().get(pk=recebimento.cliente_id)
+    if not Recebimento.objects.filter(pk=recebimento.pk).exists():
+        # dois "Desfazer" ao mesmo tempo: o outro já apagou enquanto este esperava a trava
+        raise ValidationError("Este lançamento já foi desfeito.")
+    movimentos = recebimento.movimentos_credito.aggregate(
+        entrada=Sum("valor", filter=Q(tipo=MovimentoCredito.Tipo.ENTRADA)),
+        uso=Sum("valor", filter=Q(tipo=MovimentoCredito.Tipo.USO)),
+    )
+    entrada = movimentos["entrada"] or ZERO
+    # o saldo depois de desfazer: sai a sobra que ele gerou, volta o crédito que ele usou
+    if MovimentoCredito.saldo_do_cliente(cliente) - entrada + (movimentos["uso"] or ZERO) < ZERO:
+        raise ValidationError(
+            f"O crédito de {brl(entrada)} que este pagamento gerou já foi usado. "
+            "Desfaça primeiro o pagamento que usou esse crédito."
+        )
+    reforco = _reforco_do_recebimento(recebimento)
+    if reforco and reforco.valor > reforco.caucao.saldo:
+        raise ValidationError(
+            f"O reforço de caução de {brl(reforco.valor)} que este pagamento gerou já foi "
+            "usado ou devolvido — não dá para desfazer por aqui."
+        )
+    cobrancas = [a.cobranca for a in recebimento.aplicacoes.select_related("cobranca")]
+    judiciais = {c.pk for c in cobrancas if _era_judicial(c)}
+    recebimento.movimentos_credito.all().delete()
+    if reforco:
+        reforco.delete()
+    recebimento.delete()  # as aplicações vão junto (CASCADE)
+    for cobranca in cobrancas:
+        _devolver_saldo(cobranca, judicial=cobranca.pk in judiciais)
+    atualizar_inadimplencia(cliente)
+    return cobrancas
+
+
+def resumo_recebimento(recebimento):
+    """O que um lançamento fez, para o aviso pós-lançamento e o recibo.
+
+    quitadas/parciais: (cobrança, valor aplicado); sobra: (valor, destino);
+    devido: quanto o cliente ainda deve depois dele.
+    """
+    quitadas, parciais = [], []
+    aplicacoes = recebimento.aplicacoes.select_related("cobranca").order_by(
+        "cobranca__vencimento", "cobranca__pk"
+    )
+    for aplicacao in aplicacoes:
+        destino = quitadas if aplicacao.cobranca.status == Cobranca.Status.PAGO else parciais
+        destino.append((aplicacao.cobranca, aplicacao.valor))
+    sobra = None
+    entrada = recebimento.movimentos_credito.filter(tipo=MovimentoCredito.Tipo.ENTRADA).first()
+    if entrada:
+        sobra = (entrada.valor, "credito")
+    else:
+        reforco = _reforco_do_recebimento(recebimento)
+        if reforco:
+            sobra = (reforco.valor, "caucao")
+    devidas = Cobranca.com_quitacao_anotada(
+        recebimento.cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS)
+    )
+    return {
+        "recebimento": recebimento,
+        "quitadas": quitadas,
+        "parciais": parciais,
+        "sobra": sobra,
+        "devido": sum((c.saldo for c in devidas), ZERO),
+        "credito": MovimentoCredito.saldo_do_cliente(recebimento.cliente),
+    }
+
+
+def dias_pagamento_por_cliente():
+    """{cliente_id: dia da semana (0 = segunda)} de quem tem dia de pagamento.
+
+    Vale o dia da alocação ativa (é nele que o aluguel é cobrado); sem
+    alocação ativa, o dia do cadastro do cliente. Duas consultas, para a
+    tela da ND ajustar o vencimento ao trocar o cliente.
+    """
+    dias = {
+        pk: dia
+        for pk, dia in Cliente.objects.filter(dia_vencimento__isnull=False).values_list(
+            "pk", "dia_vencimento"
+        )
+    }
+    ativas = Alocacao.objects.filter(status=Alocacao.Status.ATIVA).order_by("data_inicio")
+    dias.update(ativas.values_list("cliente_id", "dia_vencimento"))  # a mais recente vence
+    return dias
+
+
+def dia_pagamento(cliente):
+    """Dia da semana em que o cliente paga, ou None (mesma regra de cima)."""
+    alocacao = (
+        cliente.alocacoes.filter(status=Alocacao.Status.ATIVA).order_by("-data_inicio").first()
+    )
+    if alocacao is not None:
+        return alocacao.dia_vencimento
+    return cliente.dia_vencimento
+
+
+def proximo_dia_pagamento(cliente, a_partir_de, dia=...):
+    """Vencimento padrão da ND (proposta #6, opção A): o próximo dia de pagamento.
+
+    Sempre depois de `a_partir_de` — nunca no mesmo dia, senão a ND vira
+    "atrasada" no dia seguinte e o motorista fica inadimplente sem ninguém
+    decidir. Sem dia de pagamento conhecido: 7 dias depois.
+    `dia` evita a consulta quando a tela já tem o dia em mãos.
+    """
+    if dia is ...:
+        dia = dia_pagamento(cliente)
+    if dia is None:
+        return a_partir_de + timedelta(days=7)
+    return a_partir_de + timedelta(days=(dia - a_partir_de.weekday()) % 7 or 7)
+
+
 @transaction.atomic
 def emitir_nota_debito(cliente, data_emissao, itens, vencimento=None, observacoes=""):
-    """Emite ND com numeração automática e cria a cobrança única (docs.md §4.3)."""
+    """Emite ND com numeração automática e cria a cobrança única (docs.md §4.3).
+
+    Sem vencimento informado, vence no próximo dia de pagamento do cliente.
+    """
     itens = [(descricao, Decimal(valor)) for descricao, valor in itens if Decimal(valor) > ZERO]
     if not itens:
         raise ValidationError("A nota de débito precisa de pelo menos um item com valor.")
+    if vencimento is None:
+        vencimento = proximo_dia_pagamento(cliente, data_emissao)
+    elif vencimento < data_emissao:
+        raise ValidationError(
+            f"O vencimento ({vencimento:%d/%m/%Y}) não pode ser antes da data de emissão "
+            f"({data_emissao:%d/%m/%Y})."
+        )
     nd = NotaDebito(
         cliente=cliente,
         data_emissao=data_emissao,
@@ -302,7 +546,7 @@ def emitir_nota_debito(cliente, data_emissao, itens, vencimento=None, observacoe
         origem=Cobranca.Origem.NOTA_DEBITO,
         descricao=f"Nota de débito ND {nd.numero:03d}",
         valor=nd.total,  # do banco: itens já arredondados a centavos (ex.: "10,555")
-        vencimento=vencimento or data_emissao,
+        vencimento=vencimento,
         nota_debito=nd,
     )
     return nd

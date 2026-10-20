@@ -52,12 +52,12 @@
              value="{{ dados.valor|default:'' }}" required>
     </div>
     <div>
-      <label for="venda-comprador" class="mb-1 block text-sm font-medium">Comprador <span class="font-normal text-gray-400">(opcional)</span></label>
+      <label for="venda-comprador" class="mb-1 block text-sm font-medium">Comprador <span class="font-normal text-gray-600">(opcional)</span></label>
       <input id="venda-comprador" type="text" name="comprador" placeholder="nome de quem comprou" value="{{ dados.comprador|default:'' }}">
     </div>
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div>
-        <label for="venda-custos" class="mb-1 block text-sm font-medium">Custos da venda (R$) <span class="font-normal text-gray-400">(opcional)</span></label>
+        <label for="venda-custos" class="mb-1 block text-sm font-medium">Custos da venda (R$) <span class="font-normal text-gray-600">(opcional)</span></label>
         <input id="venda-custos" type="text" name="custos" inputmode="decimal" placeholder="ex.: 1.200,00" value="{{ dados.custos|default:'' }}">
         <p class="mt-1 text-xs text-gray-500">Comissão, transferência, despachante…</p>
       </div>

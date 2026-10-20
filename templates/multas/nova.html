@@ -1,36 +1,126 @@
 {% extends "base.html" %}
 
-{% block titulo %}Nova multa — Trade Rent a Car{% endblock %}
+{% block titulo %}{% if multa %}Editar multa{% else %}Nova multa{% endif %} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
+{% if multa %}
+<a href="{% url 'multas:lista' %}{% if volta %}?{{ volta }}{% endif %}" class="mb-2 inline-block py-1 text-sm underline">← Voltar para as multas</a>
+<h1 class="mb-1 text-2xl font-bold">Editar multa</h1>
+<p class="mb-6 text-sm text-gray-500">
+  {{ multa.veiculo.placa }} — infração de {{ multa.data_infracao|date:"d/m/Y" }}{% if multa.cliente %} · cliente {{ multa.cliente.nome }}{% endif %}.
+  Situação agora: <strong>{{ multa.repasse }}</strong>.
+</p>
+{% else %}
 <h1 class="mb-1 text-2xl font-bold">Nova multa</h1>
 <p class="mb-6 text-sm text-gray-500">
   Copie os dados da notificação que chegou do órgão. O sistema descobre sozinho qual cliente estava com o carro
-  na data da infração. O <strong>AIT</strong> é o número do auto de infração impresso na notificação.
+  na data da infração.
 </p>
+{% endif %}
 
-<form method="post" class="max-w-2xl space-y-4 rounded-lg bg-white p-6 shadow">
+<form method="post" class="max-w-2xl space-y-6"
+      x-data="{ tipo: '{{ form.tipo_condutor.value|default:'cliente'|escapejs }}' }">
   {% csrf_token %}
   {% include "_erros_form.html" %}
-  <div class="grid gap-4 sm:grid-cols-2">
-    {% for field in form %}
-    <div {% if field.name == "descricao" or field.name == "observacoes" %}class="sm:col-span-2"{% endif %}>
-      <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
-      {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+  {% if multa %}<input type="hidden" name="volta" value="{{ volta }}">{% endif %}
+
+  {% if multa %}
+  <fieldset class="rounded-lg border-l-4 border-marca-amarelo bg-white p-5 shadow">
+    <legend class="sr-only">Situação da multa</legend>
+    <h2 class="mb-3 text-lg font-semibold">Situação da multa</h2>
+    <div class="grid gap-4 sm:grid-cols-2">
+      {% include "multas/_campo.html" with field=form.resultado largo=True %}
+      {% include "multas/_campo.html" with field=form.fici_status %}
+      {% include "multas/_campo.html" with field=form.fici_data_indicacao %}
+      {% include "multas/_campo.html" with field=form.pagamento %}
+      {% include "multas/_campo.html" with field=form.pago_por %}
+      <datalist id="opcoes-pago-por"><option value="Empresa"><option value="Cliente"></datalist>
     </div>
-    {% endfor %}
-  </div>
-  <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar</button>
-    <a href="{% url 'multas:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  </fieldset>
+  {% endif %}
+
+  <fieldset class="rounded-lg bg-white p-5 shadow">
+    <legend class="sr-only">O que veio na notificação</legend>
+    <h2 class="mb-3 text-lg font-semibold">1. O que veio na notificação</h2>
+    <div class="grid gap-4 sm:grid-cols-2">
+      {% include "multas/_campo.html" with field=form.veiculo %}
+      {% include "multas/_campo.html" with field=form.data_infracao %}
+      <div id="quem-estava" class="rounded bg-gray-50 px-3 py-2 text-sm sm:col-span-2" aria-live="polite"
+           hx-get="{% url 'multas:quem_estava' %}"
+           hx-trigger="load, change from:#id_veiculo, change from:#id_data_infracao, change from:#id_cliente"
+           hx-include="#id_veiculo, #id_data_infracao, #id_cliente, #id_condutor_autorizado">
+        <p class="text-gray-500">Escolha o carro e a data da infração para ver com quem o carro estava.</p>
+      </div>
+      {% include "multas/_campo.html" with field=form.orgao %}
+      {% include "multas/_campo.html" with field=form.valor %}
+      {% include "multas/_campo.html" with field=form.descricao largo=True %}
+      {% include "multas/_campo.html" with field=form.codigo %}
+      {% include "multas/_campo.html" with field=form.pontos %}
+      {% include "multas/_campo.html" with field=form.ait %}
+      {% include "multas/_campo.html" with field=form.num_processamento %}
+    </div>
+  </fieldset>
+
+  <fieldset class="rounded-lg border-2 border-amber-300 bg-amber-50 p-5 shadow">
+    <legend class="sr-only">Prazo para indicar o motorista</legend>
+    <h2 class="mb-1 text-lg font-semibold">2. Prazo para indicar o motorista</h2>
+    <p class="mb-3 text-sm text-gray-600">Indicando quem dirigia dentro do prazo, os pontos vão para o motorista e a empresa não leva a multa extra (NIC).</p>
+    <div class="grid gap-4 sm:grid-cols-2">
+      {% include "multas/_campo.html" with field=form.fici_prazo largo=True %}
+      {% include "multas/_campo.html" with field=form.tipo_condutor %}
+      <div x-show="tipo === 'outro'" x-cloak>
+        <label class="mb-1 block text-sm font-medium" for="{{ form.condutor_autorizado.id_for_label }}">{{ form.condutor_autorizado.label }}</label>
+        <div id="caixa-condutor">{{ form.condutor_autorizado }}</div>
+        <p class="mt-1 text-xs text-gray-500">{{ form.condutor_autorizado.help_text }}</p>
+        {% for erro in form.condutor_autorizado.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="rounded-lg bg-white p-5 shadow">
+    <legend class="sr-only">Quem paga</legend>
+    <h2 class="mb-3 text-lg font-semibold">3. Quem paga</h2>
+    <div class="grid gap-4 sm:grid-cols-2">
+      {% include "multas/_campo.html" with field=form.responsavel %}
+      {% include "multas/_campo.html" with field=form.cliente %}
+      {% include "multas/_campo.html" with field=form.observacoes largo=True %}
+    </div>
+  </fieldset>
+
+  <div class="flex flex-wrap items-center gap-3">
+    <button class="w-full rounded bg-marca-amarelo px-5 py-3 font-bold text-marca-preto hover:brightness-95 sm:w-auto">{% if multa %}Salvar alterações{% else %}Registrar multa{% endif %}</button>
+    <a href="{% url 'multas:lista' %}{% if volta %}?{{ volta }}{% endif %}" class="px-4 py-3 text-sm text-gray-600 underline">Cancelar</a>
   </div>
 </form>
 
+{% if multa %}
+<section class="mt-8 max-w-2xl rounded-lg bg-white p-5 shadow">
+  <h2 class="mb-3 text-lg font-semibold">Histórico desta multa</h2>
+  {% if historico %}
+  <ol class="space-y-3 text-sm">
+    {% for evento in historico %}
+    <li class="border-l-2 border-gray-200 pl-3">
+      <p class="text-xs text-gray-500">{{ evento.quando|date:"d/m/Y \à\s H:i" }}{% if evento.quem %} · {{ evento.quem }}{% endif %}</p>
+      {% if evento.criacao %}<p>Multa registrada.</p>{% endif %}
+      {% if evento.mudancas %}
+      <ul class="mt-0.5 space-y-0.5">
+        {% for mudanca in evento.mudancas %}
+        <li><span class="font-medium">{{ mudanca.campo }}</span>: {{ mudanca.antes }} → {{ mudanca.depois }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="text-sm text-gray-500">Nenhuma alteração registrada ainda.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <style>
   form input, form select, form textarea {
-    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
+    width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.5rem 0.6rem; background: #fff;
   }
 </style>
 {% endblock %}

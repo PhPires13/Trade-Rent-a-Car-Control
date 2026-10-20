@@ -1,0 +1,7 @@
+{# Botão "Condutor indicado" — uso: include com multa, volta e grande (cartão do celular) #}
+<form method="post" action="{% url 'multas:indicar_fici' multa.pk %}"
+      onsubmit="return confirm('Confirmar que o condutor da multa {{ multa.veiculo.placa|escapejs }} de {{ multa.data_infracao|date:"d/m/Y" }} já foi indicado ao órgão (FICI)?')">
+  {% csrf_token %}<input type="hidden" name="volta" value="{{ volta }}">
+  <button class="whitespace-nowrap rounded bg-green-600 font-semibold text-white hover:bg-green-700 {% if grande %}w-full px-4 py-3 text-base{% else %}px-2 py-1{% endif %}"
+          title="Marca que você já informou ao órgão quem estava dirigindo">Condutor indicado</button>
+</form>

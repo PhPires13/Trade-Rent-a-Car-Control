@@ -1,12 +1,18 @@
 from django.urls import path
 
-from . import views
+from . import devedores, views
 
 app_name = "financeiro"
 
 urlpatterns = [
     path("", views.cobrancas, name="cobrancas"),
     path("receber/", views.receber, name="receber"),
+    path("quem-deve/", devedores.quem_deve, name="quem_deve"),
+    path(
+        "recebimento/<int:recebimento_id>/desfazer/",
+        views.desfazer_recebimento,
+        name="desfazer_recebimento",
+    ),
     path("cobranca/<int:cobranca_id>/encargo/", views.aplicar_encargo, name="aplicar_encargo"),
     path("cobranca/<int:cobranca_id>/judicial/", views.marcar_judicial, name="marcar_judicial"),
     path(
