@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from simple_history.models import HistoricalRecords
 
 from apps.frota.models import Veiculo
@@ -68,18 +68,20 @@ class RegistroKm(models.Model):
         encadear = update_fields is None or bool(
             self.CAMPOS_DE_ENCADEAMENTO.intersection(update_fields)
         )
-        if encadear:
-            self.km_anterior, self.dias = self._encadeamento_com_o_anterior()
-            if update_fields is not None:
-                kwargs["update_fields"] = list(set(update_fields) | {"km_anterior", "dias"})
-        super().save(*args, **kwargs)
-        if self.km > self.veiculo.km_atual:
-            self.veiculo.km_atual = self.km
-            self.veiculo.save(update_fields=["km_atual"])
-        if encadear:
-            # Lançamento retroativo ou edição pelo admin entram no meio da
-            # cadeia: o mês seguinte fica com KM ANT/dias da leitura errada.
-            self.seguinte_reencadeado = self._reencadear_seguinte()
+        # Leitura, KM atual do carro e mês seguinte reencadeado: tudo ou nada.
+        with transaction.atomic():
+            if encadear:
+                self.km_anterior, self.dias = self._encadeamento_com_o_anterior()
+                if update_fields is not None:
+                    kwargs["update_fields"] = list(set(update_fields) | {"km_anterior", "dias"})
+            super().save(*args, **kwargs)
+            if self.km > self.veiculo.km_atual:
+                self.veiculo.km_atual = self.km
+                self.veiculo.save(update_fields=["km_atual"])
+            if encadear:
+                # Lançamento retroativo ou edição pelo admin entram no meio da
+                # cadeia: o mês seguinte fica com KM ANT/dias da leitura errada.
+                self.seguinte_reencadeado = self._reencadear_seguinte()
 
     @property
     def km_utilizado(self):

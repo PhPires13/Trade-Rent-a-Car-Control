@@ -22,7 +22,7 @@
     <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <tbody class="divide-y divide-gray-100">
-        {% for m in caucao.movimentacoes.all %}
+        {% for m in movimentacoes %}
         <tr>
           <td class="px-2 py-1.5">{{ m.data|date:"d/m/Y" }}</td>
           <td class="px-2 py-1.5">{{ m.get_tipo_display }}{% if m.cobranca %} <span class="text-xs text-gray-500">({{ m.cobranca.descricao }})</span>{% endif %}</td>

@@ -1,6 +1,7 @@
 from datetime import date
 
 from django import forms
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
@@ -9,6 +10,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from apps.campos import FormularioBR
+from apps.financeiro.models import Caucao
 from apps.formatos import brl
 from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente
@@ -96,6 +98,29 @@ class TrocaForm(FormularioBR, forms.ModelForm):
         )
 
 
+class VistoriaForm(forms.ModelForm):
+    class Meta:
+        model = Vistoria
+        fields = ["tipo", "data", "km", "combustivel", "avarias", "notas", "foto"]
+        widgets = {
+            "data": forms.DateInput(attrs={"type": "date"}),
+            "avarias": forms.Textarea(attrs={"rows": 4}),
+            "notas": forms.Textarea(attrs={"rows": 2}),
+            "foto": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
+        }
+
+
+def _caucao_com_saldo(alocacao):
+    """Caução da alocação com o saldo já somado numa consulta só, ou None."""
+    return Caucao.com_saldos_anotados(Caucao.objects.filter(alocacao=alocacao)).first()
+
+
+def _avisar_erro_de_devolucao(request, erro):
+    """Mensagem do formulário de data + KM (encerrar alocação / devolver substituto)."""
+    mensagens = getattr(erro, "messages", ["Preencha a data e o KM corretamente."])
+    messages.error(request, "; ".join(mensagens))
+
+
 def lista(request):
     mostrar = request.GET.get("mostrar", "ativas")
     alocacoes = Alocacao.objects.select_related("veiculo", "cliente").prefetch_related(
@@ -116,10 +141,7 @@ def nova(request):
         inicial["cliente"] = cliente_id
     form = AlocacaoForm(request.POST or None, initial=inicial)
     if request.method == "POST" and form.is_valid():
-        alocacao = form.save(commit=False)
-        if alocacao.dia_vencimento is None:
-            alocacao.dia_vencimento = alocacao.data_inicio.weekday()
-        alocacao.save()
+        alocacao = form.save()  # sem dia de vencimento, o save usa o dia do início
         cliente = alocacao.cliente
         if cliente.cnh_validade and cliente.cnh_validade < date.today():
             messages.warning(
@@ -161,9 +183,11 @@ def nova(request):
 
 def editar(request, alocacao_id):
     """Ajusta valores e condições de uma alocação sem mexer no vínculo carro↔cliente."""
-    alocacao = get_object_or_404(Alocacao, pk=alocacao_id)
+    alocacao = get_object_or_404(
+        Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
+    )
     if alocacao.status != Alocacao.Status.ATIVA:
-        # Contrato encerrado é registro histórico — não se altera (revisão etapa 8).
+        # Contrato encerrado é registro histórico — não se altera.
         messages.error(request, "Alocação encerrada não pode ser editada.")
         return redirect("alocacoes:lista")
     form = AlocacaoEdicaoForm(request.POST or None, instance=alocacao)
@@ -194,7 +218,7 @@ def encerrar(request, alocacao_id):
                 request, f"Alocação encerrada — {alocacao.veiculo.placa} está disponível."
             )
             # Encerrar dispara o acerto de caução quando há saldo retido (docs.md §4.2/§4.4).
-            caucao = getattr(alocacao, "caucao", None)
+            caucao = _caucao_com_saldo(alocacao)
             if caucao and caucao.saldo > 0:
                 messages.warning(
                     request,
@@ -204,22 +228,23 @@ def encerrar(request, alocacao_id):
                 return redirect("financeiro:caucao_detalhe", caucao.pk)
             return redirect("alocacoes:lista")
         except (ValidationError, KeyError, ValueError) as erro:
-            mensagens = getattr(erro, "messages", ["Preencha a data e o KM corretamente."])
-            messages.error(request, "; ".join(mensagens))
+            _avisar_erro_de_devolucao(request, erro)
     return render(
         request,
         "alocacoes/encerrar.html",
         {
             "alocacao": alocacao,
             "hoje": date.today(),
-            "caucao": getattr(alocacao, "caucao", None),
+            "caucao": _caucao_com_saldo(alocacao),
             "troca_ativa": alocacao.troca_ativa,
         },
     )
 
 
 def troca_nova(request, alocacao_id):
-    alocacao = get_object_or_404(Alocacao, pk=alocacao_id)
+    alocacao = get_object_or_404(
+        Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
+    )
     form = TrocaForm(request.POST or None, initial={"data_retirada": date.today()})
     if request.method == "POST" and form.is_valid():
         troca = form.save(commit=False)
@@ -240,7 +265,12 @@ def troca_nova(request, alocacao_id):
 
 
 def troca_devolver(request, troca_id):
-    troca = get_object_or_404(TrocaTemporaria, pk=troca_id)
+    troca = get_object_or_404(
+        TrocaTemporaria.objects.select_related(
+            "veiculo_substituto", "alocacao__veiculo", "alocacao__cliente"
+        ),
+        pk=troca_id,
+    )
     if troca.data_devolucao:
         messages.warning(
             request, f"O substituto {troca.veiculo_substituto.placa} já foi devolvido."
@@ -255,8 +285,7 @@ def troca_devolver(request, troca_id):
             messages.success(request, f"Substituto {troca.veiculo_substituto.placa} devolvido.")
             return redirect("alocacoes:lista")
         except (ValidationError, KeyError, ValueError) as erro:
-            mensagens = getattr(erro, "messages", ["Preencha a data e o KM corretamente."])
-            messages.error(request, "; ".join(mensagens))
+            _avisar_erro_de_devolucao(request, erro)
     return render(request, "alocacoes/troca_devolver.html", {"troca": troca, "hoje": date.today()})
 
 
@@ -276,8 +305,6 @@ def contrato(request, alocacao_id):
     imprimir → PDF pelo navegador. Campos da empresa vêm do settings
     (EMPRESA_*) e ficam em branco para preencher à mão quando não configurados.
     """
-    from django.conf import settings
-
     alocacao = get_object_or_404(
         Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
     )
@@ -299,39 +326,6 @@ def contrato(request, alocacao_id):
     )
 
 
-class VistoriaForm(forms.ModelForm):
-    class Meta:
-        model = Vistoria
-        fields = ["tipo", "data", "km", "combustivel", "avarias", "notas", "foto"]
-        widgets = {
-            "data": forms.DateInput(attrs={"type": "date"}),
-            "avarias": forms.Textarea(attrs={"rows": 4}),
-            "notas": forms.Textarea(attrs={"rows": 2}),
-            "foto": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
-        }
-
-
-#: Itens impressos no checklist em branco — uma linha por região do carro.
-ITENS_CHECKLIST = [
-    "Para-choque dianteiro",
-    "Para-choque traseiro",
-    "Capô",
-    "Teto",
-    "Porta-malas / tampa",
-    "Lateral esquerda (portas e paralamas)",
-    "Lateral direita (portas e paralamas)",
-    "Retrovisores",
-    "Vidros e para-brisa",
-    "Faróis e lanternas",
-    "Pneus e rodas (4 + estepe)",
-    "Bancos e forros",
-    "Painel e comandos",
-    "Tapetes / interior",
-    "Macaco, chave de roda e triângulo",
-    "Documento do carro no porta-luvas",
-]
-
-
 def vistoria_imprimir(request, alocacao_id):
     """Checklist de vistoria em branco para imprimir e preencher à mão."""
     alocacao = get_object_or_404(
@@ -342,7 +336,7 @@ def vistoria_imprimir(request, alocacao_id):
         "alocacoes/vistoria_imprimir.html",
         {
             "alocacao": alocacao,
-            "itens": ITENS_CHECKLIST,
+            "itens": checklist.ITENS_CHECKLIST,
             "hoje": date.today(),
             "combustiveis": Vistoria.Combustivel.choices,
         },

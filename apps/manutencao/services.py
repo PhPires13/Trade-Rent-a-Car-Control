@@ -11,6 +11,15 @@ MARGEM_ALERTA_KM = 1_000
 #: Um carro de app roda ~300 km/dia: 1.000 km de margem viram só 3 dias de aviso.
 #: A previsão em dias (média do próprio carro) antecipa o alerta a tempo de agendar.
 MARGEM_ALERTA_DIAS = 14
+#: Carros que saem do acompanhamento das preventivas (painel, quadro e hub da frota).
+STATUS_FORA_DO_ACOMPANHAMENTO = (Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO)
+
+
+def frota_acompanhada():
+    """Veículos de locação cujas preventivas são acompanhadas: fora vendidos e inativos."""
+    return Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO).exclude(
+        status__in=STATUS_FORA_DO_ACOMPANHAMENTO
+    )
 
 
 @dataclass
@@ -49,6 +58,11 @@ class StatusPreventiva:
         if self.faltam_km <= MARGEM_ALERTA_KM or (dias is not None and dias <= MARGEM_ALERTA_DIAS):
             return self.PROXIMA
         return self.OK
+
+    @property
+    def em_alerta(self):
+        """Vencida ou próxima — o que entra no painel e na contagem do hub."""
+        return self.status in (self.VENCIDA, self.PROXIMA)
 
 
 def _itens_preventivos():
@@ -93,9 +107,9 @@ def _medias_km_dia(ids):
     return medias
 
 
-def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias=None):
+def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias):
     """Regra dos intervalos — única fonte da aritmética das preventivas."""
-    media = (medias or {}).get(veiculo.pk)
+    media = medias.get(veiculo.pk)
     resultado = []
     for item in itens:
         intervalo = personalizados.get((veiculo.pk, item.pk)) or item.intervalo_km_padrao
@@ -119,23 +133,8 @@ def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias=None):
     return resultado
 
 
-def resumo_preventivas(veiculo):
-    """Status de cada item preventivo do plano para um veículo (tela de um carro)."""
-    itens = _itens_preventivos()
-    return _status_do_veiculo(
-        veiculo,
-        itens,
-        _intervalos_personalizados([veiculo.pk]),
-        _ultimas_manutencoes([veiculo.pk], itens),
-        _medias_km_dia([veiculo.pk]),
-    )
-
-
 def resumos_por_veiculo(veiculos):
-    """{veiculo_id: [StatusPreventiva]} em 3 queries fixas, seja qual for a frota.
-
-    Versão em lote de resumo_preventivas para o painel e as listagens.
-    """
+    """{veiculo_id: [StatusPreventiva]} em 4 queries fixas, seja qual for a frota."""
     ids = [v.pk for v in veiculos]
     if not ids:
         return {}
@@ -149,43 +148,37 @@ def resumos_por_veiculo(veiculos):
     }
 
 
+def resumo_preventivas(veiculo):
+    """Status de cada item preventivo do plano para um veículo só."""
+    return resumos_por_veiculo([veiculo])[veiculo.pk]
+
+
 def preventivas_em_alerta():
-    """(veiculo, [StatusPreventiva vencida/próxima]) para a frota de locação ativa."""
-    veiculos = list(
-        Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO).exclude(
-            status__in=[Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO]
-        )
-    )
+    """(veiculo, [StatusPreventiva vencida/próxima]) para a frota acompanhada."""
+    veiculos = list(frota_acompanhada())
     resumos = resumos_por_veiculo(veiculos)
     alertas = []
     for veiculo in veiculos:
-        criticas = [
-            p
-            for p in resumos[veiculo.pk]
-            if p.status in (StatusPreventiva.VENCIDA, StatusPreventiva.PROXIMA)
-        ]
+        criticas = [p for p in resumos[veiculo.pk] if p.em_alerta]
         if criticas:
             alertas.append((veiculo, criticas))
     return alertas
 
 
 def contagem_alertas_por_veiculo(veiculos):
-    """{veiculo_id: nº de preventivas vencidas/próximas} em 3 queries fixas.
+    """{veiculo_id: nº de preventivas vencidas/próximas} em 4 queries fixas.
 
     Versão enxuta de resumos_por_veiculo para listagens (o hub da frota);
-    segue a mesma regra do painel: só locação, fora vendidos e inativos.
+    segue a mesma regra do painel (frota_acompanhada), aplicada em memória.
     """
     elegiveis = [
         v
         for v in veiculos
-        if v.uso == Veiculo.Uso.LOCACAO
-        and v.status not in (Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO)
+        if v.uso == Veiculo.Uso.LOCACAO and v.status not in STATUS_FORA_DO_ACOMPANHAMENTO
     ]
     contagens = {}
     for veiculo_id, resumo in resumos_por_veiculo(elegiveis).items():
-        alertas = sum(
-            1 for p in resumo if p.status in (StatusPreventiva.VENCIDA, StatusPreventiva.PROXIMA)
-        )
+        alertas = sum(1 for p in resumo if p.em_alerta)
         if alertas:
             contagens[veiculo_id] = alertas
     return contagens

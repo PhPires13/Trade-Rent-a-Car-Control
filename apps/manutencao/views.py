@@ -11,7 +11,7 @@ from apps.frota.models import Veiculo
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
 from .repasse import gerar_repasse
-from .services import StatusPreventiva, resumos_por_veiculo
+from .services import StatusPreventiva, frota_acompanhada, resumos_por_veiculo
 
 
 class ManutencaoForm(FormularioBR, forms.ModelForm):
@@ -58,7 +58,7 @@ class ItemPreventivaForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 0 seria descartado no cálculo (falsy) e mentiria na tela — revisão etapa 8.
+        # 0 seria descartado no cálculo (falsy) e mentiria na tela.
         self.fields["intervalo_km_padrao"].validators.append(MinValueValidator(1))
         self.fields["intervalo_km_padrao"].widget.attrs["min"] = 1
 
@@ -92,10 +92,10 @@ class IntervaloPersonalizadoForm(forms.ModelForm):
 
 
 def _pk_do_post(request, chave):
-    """IDs de POST adulterados viram 404, nao 500 (revisao etapa 8)."""
+    """IDs de POST adulterados viram 404, não 500."""
     valor = (request.POST.get(chave) or "").strip()
     if not valor.isdigit():
-        raise Http404("Registro invalido.")
+        raise Http404("Registro inválido.")
     return int(valor)
 
 
@@ -156,13 +156,8 @@ def plano(request):
 
 def preventivas(request):
     """Plano de preventivas da frota — status por veículo × item (docs.md §4.5)."""
-    veiculos = (
-        Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO)
-        .exclude(status__in=[Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO])
-        .order_by("placa")
-    )
-    veiculos = list(veiculos)
-    resumos = resumos_por_veiculo(veiculos)  # 3 queries fixas, não 6 por veículo
+    veiculos = list(frota_acompanhada().order_by("placa"))
+    resumos = resumos_por_veiculo(veiculos)  # queries fixas, não 6 por veículo
     quadro = [(veiculo, resumos[veiculo.pk]) for veiculo in veiculos]
     return render(
         request,

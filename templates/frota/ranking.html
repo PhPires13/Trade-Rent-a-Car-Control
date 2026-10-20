@@ -59,7 +59,7 @@
       <div title="Tudo que o carro já rendeu, descontados os gastos com ele."><div class="text-gray-500">Já rendeu (líquido)</div><div class="font-semibold">{{ f.resultado_operacional|brl }}</div></div>
       <div title="Quanto do valor investido já voltou para o caixa. A meta para vender é ~75%.">
         <div class="text-gray-500">Do investimento já voltou</div>
-        <div class="font-black {% if f.percentual_recuperado and f.percentual_recuperado >= 0.75 %}text-orange-600{% endif %}">
+        <div class="font-black {% if f.na_janela_de_venda %}text-orange-600{% endif %}">
           {% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}
           <span class="text-xs font-normal text-gray-400">meta ~75%</span>
         </div>

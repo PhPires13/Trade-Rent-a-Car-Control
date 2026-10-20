@@ -1,4 +1,6 @@
-from django.db import models
+from datetime import date
+
+from django.db import models, transaction
 from simple_history.models import HistoricalRecords
 
 from apps.frota.models import Veiculo
@@ -31,10 +33,6 @@ class ItemPreventiva(models.Model):
 
     def __str__(self):
         return self.nome
-
-    @property
-    def eh_preventiva(self):
-        return self.intervalo_km_padrao is not None
 
 
 class IntervaloPersonalizado(models.Model):
@@ -185,17 +183,18 @@ class Manutencao(models.Model):
         return f"{self.veiculo.placa} — {rotulo} em {self.data:%d/%m/%Y}"
 
     def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        if self.km and self.km > self.veiculo.km_atual:
-            self.veiculo.km_atual = self.km
-            self.veiculo.save(update_fields=["km_atual"])
+        # A manutenção e o KM atual do carro andam juntos: ou grava os dois, ou nenhum.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if self.km and self.km > self.veiculo.km_atual:
+                self.veiculo.km_atual = self.km
+                self.veiculo.save(update_fields=["km_atual"])
 
     @property
     def dias_parado(self):
+        """Dias na oficina; enquanto não sai, conta até hoje."""
         if not self.data_entrada:
             return 0
-        from datetime import date
-
         fim = self.data_saida or date.today()
         return (fim - self.data_entrada).days
 

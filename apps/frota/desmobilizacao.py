@@ -12,20 +12,25 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
+from django.utils.text import capfirst
 
-from apps.alocacoes.models import TrocaTemporaria
+from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import ZERO, AplicacaoRecebimento, MovimentacaoCaucao
 from apps.formatos import brl
+from apps.manutencao.models import Manutencao
+from apps.multas.models import Multa
+from apps.sinistros.models import AuxilioMotorista
 
 from .models import Veiculo
 
-# Limites configuráveis da recomendação (pontos em aberto nº 4 do docs.md)
+# Limites configuráveis da recomendação (docs.md §8, ponto em aberto nº 4)
 FAIXA_ALVO_RECUPERACAO = Decimal("0.75")  # ~70–80% confirmado pelos donos
 JANELA_INDICADORES_DIAS = 180
 LIMIAR_DIAS_PARADO = 20
 LIMIAR_ESPORADICAS = 2
 FATOR_CUSTO_ACIMA_DA_MEDIA = Decimal("1.5")
 
+#: pontos de alerta → nível da recomendação (3 ou mais = vender)
 NIVEIS = {0: "manter", 1: "observar", 2: "preparar", 3: "vender"}
 
 
@@ -71,6 +76,12 @@ class FichaFinanceira:
         if not self.investido:
             return None
         return self.resultado_operacional / self.investido
+
+    @property
+    def na_janela_de_venda(self):
+        """Já devolveu a faixa-alvo do investimento (~75%) — o principal sinal de venda."""
+        perc = self.percentual_recuperado
+        return perc is not None and perc >= FAIXA_ALVO_RECUPERACAO
 
     @property
     def custo_por_km_6m(self):
@@ -122,7 +133,7 @@ def _janela_de_manutencoes(ids, inicio_janela):
         entrada = linha["manutencoes__data_entrada"]
         if entrada:
             dias += ((linha["manutencoes__data_saida"] or hoje) - entrada).days
-        esporadicas += 1 if linha["manutencoes__tipo"] == "esporadica" else 0
+        esporadicas += 1 if linha["manutencoes__tipo"] == Manutencao.Tipo.ESPORADICA else 0
         janela[linha["pk"]] = (custo, dias, esporadicas)
     return janela
 
@@ -174,11 +185,15 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         "valor",
     )
     auxilios = _somas_da_frota(
-        ids, "sinistros__auxilios__valor", sinistros__auxilios__status="recebido"
+        ids,
+        "sinistros__auxilios__valor",
+        sinistros__auxilios__status=AuxilioMotorista.Status.RECEBIDO,
     )
     manutencoes = _somas_da_frota(ids, "manutencoes__custo_real")
     franquias = _somas_da_frota(ids, "sinistros__franquia_valor")
-    multas_empresa = _somas_da_frota(ids, "multas__valor", multas__responsavel="empresa")
+    multas_empresa = _somas_da_frota(
+        ids, "multas__valor", multas__responsavel=Multa.Responsavel.EMPRESA
+    )
     janela = _janela_de_manutencoes(ids, inicio_janela)
     km_rodado = _km_rodado_na_janela(ids, inicio_janela)
 
@@ -217,10 +232,10 @@ def montar_ficha(veiculo, hoje=None):
 def avaliar(ficha, media_custo_km_frota=None):
     """Aplica os critérios e registra os motivos — recomendação sempre explicável."""
     pontos = 0
-    perc = ficha.percentual_recuperado
-    if perc is not None and perc >= FAIXA_ALVO_RECUPERACAO:
+    if ficha.na_janela_de_venda:
         ficha.motivos.append(
-            f"Recuperou {perc:.0%} do investimento (janela de venda: ≥{FAIXA_ALVO_RECUPERACAO:.0%})"
+            f"Recuperou {ficha.percentual_recuperado:.0%} do investimento "
+            f"(janela de venda: ≥{FAIXA_ALVO_RECUPERACAO:.0%})"
         )
         pontos += 2
     custo_km = ficha.custo_por_km_6m
@@ -277,15 +292,35 @@ def ranking_da_frota(hoje=None):
     media = sum(custos, ZERO) / len(custos) if custos else None
     for ficha in fichas:
         avaliar(ficha, media)
-    ordem = {"vender": 0, "preparar": 1, "observar": 2, "manter": 3}
-    fichas.sort(key=lambda f: (ordem[f.nivel], -(f.percentual_recuperado or Decimal("-9"))))
+    pontos_do_nivel = {nivel: pontos for pontos, nivel in NIVEIS.items()}
+    fichas.sort(
+        key=lambda f: (-pontos_do_nivel[f.nivel], -(f.percentual_recuperado or Decimal("-9")))
+    )
     return fichas, media
+
+
+#: Campos que a venda grava — validados antes do save (casas decimais, tamanho, KM ≥ 0).
+CAMPOS_DA_VENDA = ("data_venda", "valor_venda", "custos_venda", "comprador", "km_venda")
+
+
+def _validar_campos_da_venda(veiculo):
+    """Erro legível em vez de erro 500 do banco (KM negativo, valor ou comprador grandes demais)."""
+    outros = [campo.name for campo in Veiculo._meta.fields if campo.name not in CAMPOS_DA_VENDA]
+    try:
+        veiculo.clean_fields(exclude=outros)
+    except ValidationError as erro:
+        raise ValidationError(
+            [
+                f"{capfirst(Veiculo._meta.get_field(campo).verbose_name)}: {' '.join(mensagens)}"
+                for campo, mensagens in erro.message_dict.items()
+            ]
+        ) from None
 
 
 @transaction.atomic
 def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None):
     """Vende o veículo — só sem alocação ativa nem troca aberta (docs.md §4.9)."""
-    if veiculo.alocacoes.filter(status="ativa").exists():
+    if veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).exists():
         raise ValidationError("Encerre a alocação ativa antes de vender o veículo.")
     if TrocaTemporaria.objects.filter(
         Q(veiculo_substituto=veiculo) | Q(alocacao__veiculo=veiculo),
@@ -302,6 +337,7 @@ def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None):
     veiculo.comprador = comprador
     veiculo.custos_venda = custos
     veiculo.km_venda = km
+    _validar_campos_da_venda(veiculo)
     if km and km > veiculo.km_atual:
         veiculo.km_atual = km
     veiculo.status = Veiculo.Status.VENDIDO

@@ -165,6 +165,13 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - [x] **Frota secundária/Relatórios/Busca**: venda aceita "45.000,00" (antes quebrava) com aviso de irreversível e resumo do carro, ranking "Quando vender cada carro" com legenda dos níveis, preço da categoria voltava em branco ao editar, busca sem resultado com dicas
 - [x] **344 testes passando** (+22); telas verificadas no navegador (desktop e celular)
 
+### Etapa 13 — Refatoração: qualidade, performance e confiabilidade
+- 6 frentes (financeiro, frota, alocações/pessoas, km/manutenção, multas/sinistros/relatórios, compartilhado), cada uma com revisão adversarial.
+- Performance: telas de receber, extrato, caução, cobranças, NDs e frota com número de consultas constante (anotações em lote em vez de consulta por linha).
+- Confiabilidade: validação de valores negativos/inválidos (caução, desconto, venda), judicial só a partir de cobrança em aberto, 404 em vez de erro 500 em parâmetros inválidos, histórico sem versões repetidas pela rotina diária.
+- Código morto e duplicações removidos (enums no lugar de textos soltos, fonte única para regras repetidas).
+- Testes gravam uploads numa pasta temporária; `midia/` fora do git.
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:

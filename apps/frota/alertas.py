@@ -10,7 +10,12 @@ from .models import Veiculo
 DIAS_ALERTA_VIGENCIA = 30
 
 
+def _alerta(data, hoje, descricao):
+    return {"data": data, "vencido": data < hoje, "descricao": descricao}
+
+
 def vigencias_a_vencer(hoje=None):
+    """Alertas vencidos ou vencendo nos próximos 30 dias, do mais antigo ao mais novo."""
     hoje = hoje or date.today()
     limite = hoje + timedelta(days=DIAS_ALERTA_VIGENCIA)
     alertas = []
@@ -18,48 +23,34 @@ def vigencias_a_vencer(hoje=None):
     # IPVA em aberto (sem data de pagamento) vencendo — decisão nº 21 / tabela do §5
     for veiculo in frota.filter(ipva_vencimento__lte=limite, ipva_pago_em__isnull=True):
         alertas.append(
-            {
-                "data": veiculo.ipva_vencimento,
-                "vencido": veiculo.ipva_vencimento < hoje,
-                "descricao": f"IPVA do {veiculo.placa}"
+            _alerta(
+                veiculo.ipva_vencimento,
+                hoje,
+                f"IPVA do {veiculo.placa}"
                 + (f" ({veiculo.ipva_ano})" if veiculo.ipva_ano else "")
                 + (f" — {brl(veiculo.ipva_valor)}" if veiculo.ipva_valor else ""),
-            }
+            )
         )
     for veiculo in frota.filter(licenciamento_vencimento__lte=limite):
         alertas.append(
-            {
-                "data": veiculo.licenciamento_vencimento,
-                "vencido": veiculo.licenciamento_vencimento < hoje,
-                "descricao": f"Licenciamento do {veiculo.placa}",
-            }
+            _alerta(veiculo.licenciamento_vencimento, hoje, f"Licenciamento do {veiculo.placa}")
         )
     for veiculo in frota.filter(rastreador_vigencia_fim__lte=limite):
         alertas.append(
-            {
-                "data": veiculo.rastreador_vigencia_fim,
-                "vencido": veiculo.rastreador_vigencia_fim < hoje,
-                "descricao": f"Rastreador do {veiculo.placa}"
+            _alerta(
+                veiculo.rastreador_vigencia_fim,
+                hoje,
+                f"Rastreador do {veiculo.placa}"
                 + (f" ({veiculo.rastreador_fornecedor})" if veiculo.rastreador_fornecedor else ""),
-            }
+            )
         )
     for veiculo in frota.filter(bateria_garantia_fim__lte=limite):
         alertas.append(
-            {
-                "data": veiculo.bateria_garantia_fim,
-                "vencido": veiculo.bateria_garantia_fim < hoje,
-                "descricao": f"Garantia da bateria do {veiculo.placa}",
-            }
+            _alerta(veiculo.bateria_garantia_fim, hoje, f"Garantia da bateria do {veiculo.placa}")
         )
     for cliente in Cliente.objects.filter(
         status__in=[Cliente.Status.ATIVO, Cliente.Status.INADIMPLENTE],
         cnh_validade__lte=limite,
     ):
-        alertas.append(
-            {
-                "data": cliente.cnh_validade,
-                "vencido": cliente.cnh_validade < hoje,
-                "descricao": f"CNH de {cliente.nome}",
-            }
-        )
+        alertas.append(_alerta(cliente.cnh_validade, hoje, f"CNH de {cliente.nome}"))
     return sorted(alertas, key=lambda a: a["data"])

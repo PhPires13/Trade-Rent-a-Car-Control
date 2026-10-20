@@ -1,24 +1,12 @@
 {# Itens do menu — `estilo` = "topo" (barra) ou "movel" (lista); seção atual destacada. #}
-{% if estilo == "topo" %}
-  {% url 'painel' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if nome == 'painel' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if nome == 'painel' %}aria-current="page"{% endif %}>Painel</a>
-  {% url 'frota:hub' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'frota' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'frota' %}aria-current="page"{% endif %}>Frota</a>
-  {% url 'pessoas:lista' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'pessoas' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'pessoas' %}aria-current="page"{% endif %}>Clientes</a>
-  {% url 'alocacoes:lista' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'alocacoes' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'alocacoes' %}aria-current="page"{% endif %}>Alocações</a>
-  {% url 'financeiro:cobrancas' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'financeiro' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'financeiro' %}aria-current="page"{% endif %}>Financeiro</a>
-  {% url 'km:lista' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'km' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'km' %}aria-current="page"{% endif %}>KM</a>
-  {% url 'manutencao:preventivas' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'manutencao' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'manutencao' %}aria-current="page"{% endif %}>Manutenção</a>
-  {% url 'multas:lista' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'multas' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'multas' %}aria-current="page"{% endif %}>Multas</a>
-  {% url 'sinistros:lista' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'sinistros' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'sinistros' %}aria-current="page"{% endif %}>Sinistros</a>
-  {% url 'relatorios:relatorios' as u %}<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if ns == 'relatorios' %}bg-gray-800 text-marca-amarelo{% endif %}" {% if ns == 'relatorios' %}aria-current="page"{% endif %}>Relatórios</a>
-{% else %}
-  {% url 'painel' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if nome == 'painel' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Painel</a>
-  {% url 'frota:hub' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'frota' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Frota</a>
-  {% url 'pessoas:lista' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'pessoas' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Clientes</a>
-  {% url 'alocacoes:lista' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'alocacoes' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Alocações</a>
-  {% url 'financeiro:cobrancas' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'financeiro' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Financeiro</a>
-  {% url 'km:lista' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'km' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">KM</a>
-  {% url 'manutencao:preventivas' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'manutencao' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Manutenção</a>
-  {% url 'multas:lista' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'multas' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Multas</a>
-  {% url 'sinistros:lista' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'sinistros' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Sinistros</a>
-  {% url 'relatorios:relatorios' as u %}<a href="{{ u }}" class="rounded px-3 py-2 {% if ns == 'relatorios' %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">Relatórios</a>
-{% endif %}
+{# Fonte única das seções: para incluir uma nova, basta uma linha aqui (vale para os dois menus). #}
+{% include "_menu_link.html" with destino="painel" secao="painel" rotulo="Painel" %}
+{% include "_menu_link.html" with destino="frota:hub" secao="frota" rotulo="Frota" %}
+{% include "_menu_link.html" with destino="pessoas:lista" secao="pessoas" rotulo="Clientes" %}
+{% include "_menu_link.html" with destino="alocacoes:lista" secao="alocacoes" rotulo="Alocações" %}
+{% include "_menu_link.html" with destino="financeiro:cobrancas" secao="financeiro" rotulo="Financeiro" %}
+{% include "_menu_link.html" with destino="km:lista" secao="km" rotulo="KM" %}
+{% include "_menu_link.html" with destino="manutencao:preventivas" secao="manutencao" rotulo="Manutenção" %}
+{% include "_menu_link.html" with destino="multas:lista" secao="multas" rotulo="Multas" %}
+{% include "_menu_link.html" with destino="sinistros:lista" secao="sinistros" rotulo="Sinistros" %}
+{% include "_menu_link.html" with destino="relatorios:relatorios" secao="relatorios" rotulo="Relatórios" %}

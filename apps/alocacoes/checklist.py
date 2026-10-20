@@ -1,15 +1,36 @@
-"""Leitura da foto do checklist de vistoria preenchido (base: apps/documentos.py).
+"""Checklist de vistoria: itens impressos e leitura da foto preenchida.
 
-O sistema imprime o checklist em branco, o preenchimento é à mão na entrega ou
-devolução, e a foto do papel preenchido é lida para carregar os dados no
-formulário de vistoria — validação humana antes de salvar.
+O sistema imprime o checklist em branco (ITENS_CHECKLIST), o preenchimento é à
+mão na entrega ou devolução, e a foto do papel preenchido é lida para carregar
+os dados no formulário de vistoria — validação humana antes de salvar (base:
+apps/documentos.py).
 """
 
-from apps.documentos import (  # noqa: F401 — reexporta p/ views e testes
+from apps.documentos import (  # noqa: F401 — reexporta p/ views
     disponivel,
     extrair_estruturado,
     validar_upload,
 )
+
+#: Itens impressos no checklist em branco — uma linha por região do carro.
+ITENS_CHECKLIST = [
+    "Para-choque dianteiro",
+    "Para-choque traseiro",
+    "Capô",
+    "Teto",
+    "Porta-malas / tampa",
+    "Lateral esquerda (portas e paralamas)",
+    "Lateral direita (portas e paralamas)",
+    "Retrovisores",
+    "Vidros e para-brisa",
+    "Faróis e lanternas",
+    "Pneus e rodas (4 + estepe)",
+    "Bancos e forros",
+    "Painel e comandos",
+    "Tapetes / interior",
+    "Macaco, chave de roda e triângulo",
+    "Documento do carro no porta-luvas",
+]
 
 ESQUEMA = {
     "type": "object",

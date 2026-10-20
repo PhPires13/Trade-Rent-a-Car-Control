@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from django.db import models
@@ -149,26 +150,28 @@ class Cobranca(models.Model):
         Judicial congela o fluxo normal, mas quitação total vira PAGO —
         senão a cobrança judicial recebida ficaria devendo para sempre.
         A volta ao fluxo normal é decisão do dono (view reabrir_judicial).
+        Só grava quando o status muda — a rotina diária passa por todas as
+        cobranças em aberto e não deve gerar versão repetida no histórico.
         """
-        from datetime import date
-
         hoje = hoje or date.today()
         # as aplicações podem ter mudado desde o fetch — não confiar em anotação
         self.__dict__.pop("_total_quitado_anotado", None)
         if self.status == self.Status.CANCELADA:
             return
-        if self.status == self.Status.JUDICIAL:
-            if self.saldo <= ZERO:
-                self.status = self.Status.PAGO
-                self.save(update_fields=["status"])
+        quitado = self.total_quitado  # calculado uma vez (2 consultas)
+        if quitado >= self.valor:
+            novo = self.Status.PAGO
+        elif self.status == self.Status.JUDICIAL:
             return
-        if self.saldo <= ZERO:
-            self.status = self.Status.PAGO
-        elif self.total_quitado > ZERO:
-            self.status = self.Status.ATRASADO if self.vencimento < hoje else self.Status.PARCIAL
+        elif self.vencimento < hoje:
+            novo = self.Status.ATRASADO
+        elif quitado > ZERO:
+            novo = self.Status.PARCIAL
         else:
-            self.status = self.Status.ATRASADO if self.vencimento < hoje else self.Status.PENDENTE
-        self.save(update_fields=["status"])
+            novo = self.Status.PENDENTE
+        if novo != self.status:
+            self.status = novo
+            self.save(update_fields=["status"])
 
 
 class Recebimento(models.Model):
@@ -196,10 +199,6 @@ class Recebimento(models.Model):
 
     def __str__(self):
         return f"{brl(self.valor)} de {self.cliente.nome} em {self.data:%d/%m/%Y}"
-
-    @property
-    def total_aplicado(self):
-        return self.aplicacoes.aggregate(t=Sum("valor"))["t"] or ZERO
 
 
 class AplicacaoRecebimento(models.Model):
@@ -247,18 +246,21 @@ class MovimentoCredito(models.Model):
     def __str__(self):
         return f"{self.get_tipo_display()}: {brl(self.valor)} — {self.cliente.nome}"
 
-    @staticmethod
-    def saldo_do_cliente(cliente):
-        entradas = cliente.creditos.filter(tipo="entrada").aggregate(t=Sum("valor"))["t"] or ZERO
-        usos = cliente.creditos.filter(tipo="uso").aggregate(t=Sum("valor"))["t"] or ZERO
-        return entradas - usos
+    @classmethod
+    def saldo_do_cliente(cls, cliente):
+        """Entradas − usos, numa consulta só."""
+        somas = cliente.creditos.aggregate(
+            entradas=Sum("valor", filter=Q(tipo=cls.Tipo.ENTRADA)),
+            usos=Sum("valor", filter=Q(tipo=cls.Tipo.USO)),
+        )
+        return (somas["entradas"] or ZERO) - (somas["usos"] or ZERO)
 
 
 class NotaDebito(models.Model):
     """ND — cobrança numerada que agrupa repasses do motorista (docs.md §4.3).
 
-    Numeração automática dando sequência à atual; na etapa 5 as multas
-    entram como itens.
+    Numeração automática dando sequência à atual; multas repassadas entram
+    como itens (ItemNotaDebito.multa).
     """
 
     numero = models.PositiveIntegerField("número", unique=True)
@@ -287,6 +289,9 @@ class NotaDebito(models.Model):
 
     @property
     def total(self):
+        # lista de NDs usa prefetch_related("itens"): soma em memória, sem query por linha
+        if "itens" in getattr(self, "_prefetched_objects_cache", {}):
+            return sum((item.valor for item in self.itens.all()), ZERO)
         return self.itens.aggregate(t=Sum("valor"))["t"] or ZERO
 
 

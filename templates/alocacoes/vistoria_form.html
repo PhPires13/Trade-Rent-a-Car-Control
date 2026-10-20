@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load humanize %}
 
 {% block titulo %}Vistoria — {{ alocacao.veiculo.placa }} — Trade Rent a Car{% endblock %}
 
@@ -58,7 +57,7 @@
     <li class="flex items-center justify-between py-2">
       <span>
         {{ vistoria.get_tipo_display }} — {{ vistoria.data|date:"d/m/Y" }}
-        {% if vistoria.km %}· {{ vistoria.km|intcomma }} km{% endif %}
+        {% if vistoria.km %}· {{ vistoria.km|milhar }} km{% endif %}
         {% if vistoria.combustivel %}· ⛽ {{ vistoria.get_combustivel_display }}{% endif %}
       </span>
       {% if vistoria.foto %}<a href="{{ vistoria.foto.url }}" target="_blank" rel="noopener" class="text-xs underline">ver foto</a>{% endif %}

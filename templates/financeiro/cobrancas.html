@@ -90,7 +90,7 @@
           </a>
           {% endif %}
           {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.status != "judicial" %}
-            {% if cobranca.origem == "excedente_km" or cobranca.origem == "encargo" or cobranca.origem == "outro" %}
+            {% if cobranca.origem in origens_cancelaveis %}
             <form method="post" action="{% url 'financeiro:cancelar' cobranca.pk %}"
                   onsubmit="return confirm('Cancelar esta cobrança? Ela não será cobrada do cliente.')">
               {% csrf_token %}

@@ -6,7 +6,8 @@ from uuid import uuid4
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.http import HttpResponse
+from django.db.models import Exists, OuterRef
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import urlencode
 
@@ -15,27 +16,45 @@ from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
 from . import services, whatsapp
-from .models import ZERO, Caucao, Cobranca, MovimentacaoCaucao, MovimentoCredito, NotaDebito
+from .models import (
+    ZERO,
+    Caucao,
+    Cobranca,
+    MovimentacaoCaucao,
+    MovimentoCredito,
+    NotaDebito,
+    Recebimento,
+)
 from .periodos import ano_mes
-
-#: Alias de compatibilidade — a fonte única dos conjuntos de status é o modelo
-#: (Cobranca.STATUS_EM_ABERTO / Cobranca.STATUS_DEVIDOS); não remover sem
-#: checar quem importa daqui.
-ABERTAS = Cobranca.STATUS_EM_ABERTO
 
 COBRANCAS_POR_PAGINA = 50
 
+#: Origens que o dono pode decidir não cobrar: excedente de km, encargo por
+#: atraso (decisão nº 13, "ajustável caso a caso") e cobranças avulsas.
+ORIGENS_CANCELAVEIS = [
+    Cobranca.Origem.EXCEDENTE_KM,
+    Cobranca.Origem.ENCARGO,
+    Cobranca.Origem.OUTRO,
+]
 
-def _decimal_br(texto):
-    """Parser único de dinheiro brasileiro (apps/campos.py)."""
-    return dinheiro_br(texto)
+
+def _cobrancas_devidas(cliente):
+    """O que o cliente ainda deve (judicial inclusa), com o saldo anotado em lote."""
+    return list(
+        Cobranca.com_quitacao_anotada(
+            cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS).order_by("vencimento")
+        )
+    )
 
 
 def cobrancas(request):
     """Painel de cobranças com filtros, paginação e sugestão de encargo (docs.md §4.3)."""
+    encargo_ativo = Cobranca.objects.filter(cobranca_origem=OuterRef("pk")).exclude(
+        status=Cobranca.Status.CANCELADA
+    )
     qs = Cobranca.com_quitacao_anotada(
         Cobranca.objects.select_related("cliente", "alocacao__veiculo")
-    )
+    ).annotate(tem_encargo_ativo=Exists(encargo_ativo))
     status = request.GET.get("status", "abertas")
     origem = request.GET.get("origem", "")
     if status == "abertas":
@@ -57,7 +76,7 @@ def cobrancas(request):
             services.sugerir_encargo(cobranca, hoje)
             if cobranca.status == Cobranca.Status.ATRASADO
             and cobranca.origem != Cobranca.Origem.ENCARGO
-            and not cobranca.encargos.exclude(status=Cobranca.Status.CANCELADA).exists()
+            and not cobranca.tem_encargo_ativo
             else None
         )
         cobranca.link_whatsapp = (
@@ -78,6 +97,7 @@ def cobrancas(request):
             "origem": origem,
             "origens": Cobranca.Origem.choices,
             "statuses": Cobranca.Status.choices,
+            "origens_cancelaveis": ORIGENS_CANCELAVEIS,
         },
     )
 
@@ -86,7 +106,7 @@ def aplicar_encargo(request, cobranca_id):
     cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
     if request.method == "POST":
         try:
-            valor = _decimal_br(request.POST["valor"])
+            valor = dinheiro_br(request.POST["valor"])
             services.aplicar_encargo(cobranca, valor)
             messages.success(request, f"Encargo de {brl(valor)} aplicado.")
         except (ValidationError, KeyError, InvalidOperation) as erro:
@@ -106,6 +126,10 @@ def aplicar_encargo(request, cobranca_id):
 def marcar_judicial(request, cobranca_id):
     cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
     if request.method == "POST":
+        if cobranca.status not in Cobranca.STATUS_EM_ABERTO:
+            # paga/cancelada/já judicial: não reabrir dívida encerrada por clique repetido
+            messages.error(request, "Só cobrança em aberto pode ir para cobrança judicial.")
+            return redirect("financeiro:cobrancas")
         cobranca.status = Cobranca.Status.JUDICIAL
         cobranca.save(update_fields=["status"])
         messages.success(request, f"'{cobranca.descricao}' marcada como cobrança judicial.")
@@ -129,14 +153,6 @@ def reabrir_judicial(request, cobranca_id):
                 f"(status: {cobranca.get_status_display()}).",
             )
     return redirect("financeiro:cobrancas")
-
-
-#: Origens que o dono pode decidir não cobrar (flexibilidade das decisões nº 13 e da etapa 9).
-ORIGENS_CANCELAVEIS = [
-    Cobranca.Origem.EXCEDENTE_KM,
-    Cobranca.Origem.ENCARGO,
-    Cobranca.Origem.OUTRO,
-]
 
 
 def cancelar(request, cobranca_id):
@@ -170,16 +186,16 @@ def receber(request):
     cobrancas_abertas = []
     cliente_id = request.GET.get("cliente") or request.POST.get("cliente")
     if cliente_id:
+        if not cliente_id.isdigit():
+            raise Http404("Cliente inválido.")
         cliente = get_object_or_404(Cliente, pk=cliente_id)
-        cobrancas_abertas = list(
-            cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS).order_by("vencimento")
-        )
+        cobrancas_abertas = _cobrancas_devidas(cliente)
     post = None
     if request.method == "POST" and cliente:
         post = request.POST
         try:
             try:
-                valor = _decimal_br(post.get("valor", ""))
+                valor = dinheiro_br(post.get("valor", ""))
             except InvalidOperation:
                 raise ValidationError(
                     "Valor recebido inválido — digite só números, com vírgula "
@@ -197,7 +213,7 @@ def receber(request):
                 if not bruto:
                     continue
                 try:
-                    aplicacoes.append((cobranca, _decimal_br(bruto)))
+                    aplicacoes.append((cobranca, dinheiro_br(bruto)))
                 except InvalidOperation:
                     raise ValidationError(
                         f"Valor a aplicar inválido em '{cobranca.descricao}' (ex.: 650,00)."
@@ -215,6 +231,9 @@ def receber(request):
             return redirect(f"{request.path}?cliente={cliente.pk}")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
+            # a transação foi desfeita, mas os objetos em memória podem ter status
+            # de uma aplicação que não valeu: a tela volta com o que está no banco
+            cobrancas_abertas = _cobrancas_devidas(cliente)
     credito = MovimentoCredito.saldo_do_cliente(cliente) if cliente else ZERO
     linhas = [
         (cobranca, post.get(f"aplicar_{cobranca.pk}", "") if post else "")
@@ -230,12 +249,7 @@ def receber(request):
             "credito": credito,
             "hoje": date.today(),
             "post": post,
-            "formas": [
-                ("pix", "Pix"),
-                ("dinheiro", "Dinheiro"),
-                ("transferencia", "Transferência"),
-                ("credito", "Crédito do cliente"),
-            ],
+            "formas": Recebimento.Forma.choices,
         },
     )
 
@@ -267,7 +281,7 @@ def nd_nova(request):
             descricoes = post.getlist("item_descricao")
             valores = post.getlist("item_valor")
             itens = [
-                (descricao.strip(), _decimal_br(valor))
+                (descricao.strip(), dinheiro_br(valor))
                 for descricao, valor in zip(descricoes, valores, strict=False)
                 if descricao.strip() and valor.strip()
             ]
@@ -322,14 +336,21 @@ def caucoes(request):
 
 
 def caucao_detalhe(request, caucao_id):
-    caucao = get_object_or_404(Caucao, pk=caucao_id)
+    caucao = get_object_or_404(
+        Caucao.com_saldos_anotados(
+            Caucao.objects.select_related("alocacao__cliente", "alocacao__veiculo")
+        ),
+        pk=caucao_id,
+    )
     cliente = caucao.alocacao.cliente
-    # judicial entra: acordo pode ser quitado descontando da caução retida
-    pendentes = cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS).order_by("vencimento")
     if request.method == "POST":
         try:
             tipo = request.POST["tipo"]
-            valor = _decimal_br(request.POST["valor"])
+            if tipo not in MovimentacaoCaucao.Tipo.values:
+                raise ValidationError('Escolha em "O que aconteceu?" o tipo da movimentação.')
+            valor = dinheiro_br(request.POST["valor"])
+            if valor <= ZERO:
+                raise ValidationError("O valor deve ser maior que zero.")
             data = date.fromisoformat(request.POST["data"])
             if tipo == "desconto":
                 cobranca = get_object_or_404(Cobranca, pk=request.POST["cobranca"], cliente=cliente)
@@ -366,7 +387,13 @@ def caucao_detalhe(request, caucao_id):
     return render(
         request,
         "financeiro/caucao_detalhe.html",
-        {"caucao": caucao, "pendentes": pendentes, "hoje": date.today()},
+        {
+            "caucao": caucao,
+            "movimentacoes": caucao.movimentacoes.select_related("cobranca"),
+            # judicial entra: acordo pode ser quitado descontando da caução retida
+            "pendentes": _cobrancas_devidas(cliente),
+            "hoje": date.today(),
+        },
     )
 
 
@@ -398,7 +425,9 @@ def extrato_cliente(request, cliente_id):
         "financeiro/extrato_cliente.html",
         {
             "cliente": cliente,
-            "cobrancas": cliente.cobrancas.order_by("-vencimento")[:100],
+            "cobrancas": Cobranca.com_quitacao_anotada(cliente.cobrancas.order_by("-vencimento"))[
+                :100
+            ],
             "recebimentos": cliente.recebimentos.prefetch_related("aplicacoes__cobranca")[:50],
             "credito": MovimentoCredito.saldo_do_cliente(cliente),
         },

@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load humanize %}
 
 {% block titulo %}Painel — Trade Rent a Car{% endblock %}
 
@@ -149,11 +148,11 @@
     <ul class="space-y-2 text-sm">
       {% for veiculo, itens in alertas_preventivas %}
       <li class="rounded border-l-4 border-red-400 bg-red-50 px-3 py-2">
-        <span class="font-semibold">{{ veiculo.placa }}</span> ({{ veiculo.km_atual|intcomma }} km):
+        <span class="font-semibold">{{ veiculo.placa }}</span> ({{ veiculo.km_atual|milhar }} km):
         {% for p in itens %}
           {{ p.item.nome }}
-          {% if p.faltam_km <= 0 %}<span class="font-semibold text-red-700">vencida há {{ p.faltam_km|intcomma|cut:"-" }} km</span>
-          {% else %}<span class="text-yellow-800">faltam {{ p.faltam_km|intcomma }} km{% if p.dias_restantes is not None %} (≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }}){% endif %}</span>{% endif %}
+          {% if p.faltam_km <= 0 %}<span class="font-semibold text-red-700">vencida há {{ p.faltam_km|milhar|cut:"-" }} km</span>
+          {% else %}<span class="text-yellow-800">faltam {{ p.faltam_km|milhar }} km{% if p.dias_restantes is not None %} (≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }}){% endif %}</span>{% endif %}
           {% if not forloop.last %} · {% endif %}
         {% endfor %}
       </li>

@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load humanize %}
 
 {% block titulo %}Busca — Trade Rent a Car{% endblock %}
 
@@ -40,7 +39,7 @@
   <li class="rounded-lg bg-white p-3 shadow">
     <a href="{% url 'frota:detalhe' veiculo.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
       {{ veiculo.placa }}</a>
-    <span class="text-gray-600">{{ veiculo.marca_modelo }} · {{ veiculo.get_status_display }} · {{ veiculo.km_atual|intcomma }} km</span>
+    <span class="text-gray-600">{{ veiculo.marca_modelo }} · {{ veiculo.get_status_display }} · {{ veiculo.km_atual|milhar }} km</span>
   </li>
   {% endfor %}
 </ul>

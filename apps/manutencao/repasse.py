@@ -16,7 +16,7 @@ def gerar_repasse(manutencao, vencimento=None):
         raise ValidationError("O responsável pelo custo não é o cliente.")
     if not manutencao.valor_cobrado_cliente:
         raise ValidationError("Informe o valor cobrado do cliente.")
-    if manutencao.cobranca_repasse:
+    if manutencao.cobranca_repasse_id:
         raise ValidationError("Repasse já gerado para esta manutenção.")
     cliente = cliente_vigente(manutencao.veiculo, manutencao.data)
     if not cliente:

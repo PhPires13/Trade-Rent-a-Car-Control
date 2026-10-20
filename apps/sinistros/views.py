@@ -1,13 +1,13 @@
 from datetime import date
-from decimal import InvalidOperation
 
 from django import forms
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import urlencode
 
-from apps.campos import FormularioBR, dinheiro_br
+from apps.campos import CampoDinheiro, FormularioBR
 from apps.formatos import brl
 
 from .models import AuxilioMotorista, Sinistro
@@ -45,6 +45,16 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         self.fields[
             "cliente"
         ].help_text = "Deixe vazio para preencher com quem estava com o carro na data"
+
+
+def _valor_digitado(request):
+    """Valor opcional do POST ("1.518,00"), validado como o campo do auxílio.
+
+    Só o dinheiro_br aceitava "99999999" ou "1e10": o número era gravado e a
+    lista de sinistros passava a dar erro ao lê-lo de volta. Vazio → None.
+    """
+    campo = AuxilioMotorista._meta.get_field("valor").formfield(form_class=CampoDinheiro)
+    return campo.clean(request.POST.get("valor", "").strip())
 
 
 def lista(request):
@@ -86,16 +96,17 @@ def solicitar_auxilio(request, sinistro_id):
     sinistro = get_object_or_404(Sinistro, pk=sinistro_id)
     if request.method == "POST":
         try:
-            valor = request.POST.get("valor", "").strip()
-            AuxilioMotorista.objects.create(
-                sinistro=sinistro,
-                valor=dinheiro_br(valor) if valor else None,
-                status=AuxilioMotorista.Status.SOLICITADO,
-                data_solicitacao=date.today(),
-            )
-            messages.success(request, "Auxílio motorista registrado como solicitado.")
-        except InvalidOperation:
-            messages.error(request, "Valor inválido — digite no formato 1.412,00.")
+            valor = _valor_digitado(request)
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+            return redirect("sinistros:lista")
+        AuxilioMotorista.objects.create(
+            sinistro=sinistro,
+            valor=valor,
+            status=AuxilioMotorista.Status.SOLICITADO,
+            data_solicitacao=date.today(),
+        )
+        messages.success(request, "Auxílio motorista registrado como solicitado.")
     return redirect("sinistros:lista")
 
 
@@ -103,16 +114,17 @@ def receber_auxilio(request, auxilio_id):
     auxilio = get_object_or_404(AuxilioMotorista, pk=auxilio_id)
     if request.method == "POST":
         try:
-            valor = request.POST.get("valor", "").strip()
-            if valor:
-                auxilio.valor = dinheiro_br(valor)
-            auxilio.status = AuxilioMotorista.Status.RECEBIDO
-            auxilio.data_recebimento = date.today()
-            auxilio.save()
-            messages.success(
-                request,
-                f"Auxílio de {brl(auxilio.valor)} recebido — outro crédito, fora da base do DAS.",
-            )
-        except InvalidOperation:
-            messages.error(request, "Valor inválido.")
+            valor = _valor_digitado(request)
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+            return redirect("sinistros:lista")
+        if valor is not None:  # vazio mantém o valor informado na solicitação
+            auxilio.valor = valor
+        auxilio.status = AuxilioMotorista.Status.RECEBIDO
+        auxilio.data_recebimento = date.today()
+        auxilio.save()
+        messages.success(
+            request,
+            f"Auxílio de {brl(auxilio.valor)} recebido — outro crédito, fora da base do DAS.",
+        )
     return redirect("sinistros:lista")

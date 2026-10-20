@@ -11,7 +11,6 @@ from apps.campos import FormularioBR
 from apps.financeiro.models import (
     ZERO,
     AplicacaoRecebimento,
-    Caucao,
     Cobranca,
     MovimentacaoCaucao,
     MovimentoCredito,
@@ -58,7 +57,7 @@ class ClienteForm(FormularioBR, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # "Inadimplente" é marcado/desmarcado pela rotina diária conforme os atrasos —
-        # marcação manual seria revertida à noite (revisão etapa 8). Aqui só Ativo/Inativo.
+        # marcação manual seria revertida à noite. Aqui só Ativo/Inativo.
         choices = [
             (valor, rotulo)
             for valor, rotulo in Cliente.Status.choices
@@ -113,47 +112,23 @@ def _telefone_whatsapp(texto):
     return f"55{digitos}"
 
 
-def _saldo_devedor(cliente):
-    cobrancas = cliente.cobrancas.filter(status__in=COBRANCAS_EM_ABERTO)
-    return sum((cobranca.saldo for cobranca in cobrancas), ZERO)
+#: Sinal de cada tipo de movimentação no saldo retido da caução (espelha Caucao.saldo).
+SINAL_MOVIMENTACAO_CAUCAO = {
+    MovimentacaoCaucao.Tipo.RECEBIMENTO: 1,
+    MovimentacaoCaucao.Tipo.REFORCO: 1,
+    MovimentacaoCaucao.Tipo.DESCONTO: -1,
+    MovimentacaoCaucao.Tipo.DEVOLUCAO: -1,
+}
 
 
-def _saldo_caucao(cliente):
-    caucoes = Caucao.objects.filter(alocacao__cliente=cliente)
-    return sum((caucao.saldo for caucao in caucoes), ZERO)
+def _saldos_em_lote(ids):
+    """Saldo devedor, crédito e caução de vários clientes com queries fixas.
 
-
-def _alocacao_ativa(cliente):
-    return (
-        cliente.alocacoes.filter(status=Alocacao.Status.ATIVA)
-        .select_related("veiculo")
-        .prefetch_related("trocas__veiculo_substituto")
-        .first()
-    )
-
-
-def _resumo(cliente, hoje):
-    """Bloco de números e alertas usado no detalhe (um cliente só)."""
-    validade = cliente.cnh_validade
-    return {
-        "cliente": cliente,
-        "alocacao_ativa": _alocacao_ativa(cliente),
-        "saldo_devedor": _saldo_devedor(cliente),
-        "credito": MovimentoCredito.saldo_do_cliente(cliente),
-        "caucao": _saldo_caucao(cliente),
-        "telefone_digitos": _telefone_whatsapp(cliente.telefone),
-        "cnh_vencida": bool(validade and validade < hoje),
-        "cnh_a_vencer": bool(validade and hoje <= validade <= hoje + timedelta(days=30)),
-    }
-
-
-def _cards_em_lote(clientes, hoje):
-    """Monta os cards da lista com queries fixas — nada por cliente (revisão etapa 8).
-
-    O saldo devedor replica Cobranca.saldo em conjunto: valor devido menos
-    aplicações de recebimento e descontos de caução das cobranças em aberto.
+    Fonte única dos números da lista e da ficha — nada é consultado por
+    cliente ou por cobrança. O saldo devedor replica Cobranca.saldo em
+    conjunto: valor devido menos aplicações de recebimento e descontos de
+    caução das cobranças em aberto. Devolve {cliente_id: {...}} para todos os ids.
     """
-    ids = [cliente.pk for cliente in clientes]
     devido = dict(
         Cobranca.objects.filter(cliente_id__in=ids, status__in=COBRANCAS_EM_ABERTO)
         .values_list("cliente_id")
@@ -182,41 +157,63 @@ def _cards_em_lote(clientes, hoje):
         sinal = 1 if tipo == MovimentoCredito.Tipo.ENTRADA else -1
         creditos[cliente_id] = creditos.get(cliente_id, ZERO) + sinal * total
     caucoes = {}
-    sinais = {"recebimento": 1, "reforco": 1, "desconto": -1, "devolucao": -1}
     for cliente_id, tipo, total in (
         MovimentacaoCaucao.objects.filter(caucao__alocacao__cliente_id__in=ids)
         .values_list("caucao__alocacao__cliente_id", "tipo")
         .annotate(total=Sum("valor"))
     ):
-        caucoes[cliente_id] = caucoes.get(cliente_id, ZERO) + sinais[tipo] * total
+        caucoes[cliente_id] = caucoes.get(cliente_id, ZERO) + (
+            SINAL_MOVIMENTACAO_CAUCAO[tipo] * total
+        )
+    return {
+        cliente_id: {
+            "saldo_devedor": devido.get(cliente_id, ZERO)
+            - recebido.get(cliente_id, ZERO)
+            - descontado.get(cliente_id, ZERO),
+            "credito": creditos.get(cliente_id, ZERO),
+            "caucao": caucoes.get(cliente_id, ZERO),
+        }
+        for cliente_id in ids
+    }
+
+
+def _card(cliente, hoje, saldos, alocacao_ativa):
+    """Números e alertas de um cliente — mesmo formato na lista e na ficha."""
+    validade = cliente.cnh_validade
+    return {
+        "cliente": cliente,
+        "alocacao_ativa": alocacao_ativa,
+        **saldos,
+        "telefone_digitos": _telefone_whatsapp(cliente.telefone),
+        "cnh_vencida": bool(validade and validade < hoje),
+        "cnh_a_vencer": bool(validade and hoje <= validade <= hoje + timedelta(days=30)),
+    }
+
+
+def _resumo(cliente, hoje):
+    """Bloco de números e alertas da ficha (um cliente só)."""
+    alocacao_ativa = (
+        cliente.alocacoes.filter(status=Alocacao.Status.ATIVA)
+        .select_related("veiculo")
+        .prefetch_related("trocas__veiculo_substituto")  # aviso de carro substituto
+        .first()
+    )
+    return _card(cliente, hoje, _saldos_em_lote([cliente.pk])[cliente.pk], alocacao_ativa)
+
+
+def _cards_em_lote(clientes, hoje):
+    """Cards da lista com queries fixas — nada por cliente."""
+    ids = [cliente.pk for cliente in clientes]
+    saldos = _saldos_em_lote(ids)
     alocacoes = {
         alocacao.cliente_id: alocacao
         for alocacao in Alocacao.objects.filter(
             cliente_id__in=ids, status=Alocacao.Status.ATIVA
         ).select_related("veiculo")
     }
-
-    cards = []
-    for cliente in clientes:
-        validade = cliente.cnh_validade
-        saldo = (
-            devido.get(cliente.pk, ZERO)
-            - recebido.get(cliente.pk, ZERO)
-            - descontado.get(cliente.pk, ZERO)
-        )
-        cards.append(
-            {
-                "cliente": cliente,
-                "alocacao_ativa": alocacoes.get(cliente.pk),
-                "saldo_devedor": saldo,
-                "credito": creditos.get(cliente.pk, ZERO),
-                "caucao": caucoes.get(cliente.pk, ZERO),
-                "telefone_digitos": _telefone_whatsapp(cliente.telefone),
-                "cnh_vencida": bool(validade and validade < hoje),
-                "cnh_a_vencer": bool(validade and hoje <= validade <= hoje + timedelta(days=30)),
-            }
-        )
-    return cards
+    return [
+        _card(cliente, hoje, saldos[cliente.pk], alocacoes.get(cliente.pk)) for cliente in clientes
+    ]
 
 
 def lista(request):

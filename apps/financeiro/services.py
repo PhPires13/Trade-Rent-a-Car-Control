@@ -293,13 +293,15 @@ def emitir_nota_debito(cliente, data_emissao, itens, vencimento=None, observacoe
         numero=None,
     )
     nd.save()
-    for descricao, valor in itens:
-        ItemNotaDebito.objects.create(nota_debito=nd, descricao=descricao, valor=valor)
+    ItemNotaDebito.objects.bulk_create(
+        ItemNotaDebito(nota_debito=nd, descricao=descricao, valor=valor)
+        for descricao, valor in itens
+    )
     Cobranca.objects.create(
         cliente=cliente,
         origem=Cobranca.Origem.NOTA_DEBITO,
         descricao=f"Nota de débito ND {nd.numero:03d}",
-        valor=nd.total,
+        valor=nd.total,  # do banco: itens já arredondados a centavos (ex.: "10,555")
         vencimento=vencimento or data_emissao,
         nota_debito=nd,
     )
@@ -325,6 +327,8 @@ def abrir_caucao(alocacao, valor_recebido=None, data=None, forma=""):
 def descontar_da_caucao(caucao, cobranca, valor, data, observacoes=""):
     """Desconto na caução quitando (total ou parcialmente) uma cobrança."""
     valor = Decimal(valor)
+    if valor <= ZERO:
+        raise ValidationError("O valor do desconto deve ser maior que zero.")
     if valor > caucao.saldo:
         raise ValidationError(f"Desconto acima do saldo da caução ({brl(caucao.saldo)}).")
     if valor > cobranca.saldo:
@@ -362,7 +366,7 @@ def resumo_fiscal(ano, mes):
 
     aplicacoes = AplicacaoRecebimento.objects.filter(
         recebimento__data__year=ano, recebimento__data__month=mes
-    ).select_related("cobranca", "recebimento")
+    ).select_related("cobranca")
     for aplicacao in aplicacoes:
         somar(aplicacao.cobranca, aplicacao.valor)
     descontos = MovimentacaoCaucao.objects.filter(
@@ -375,7 +379,9 @@ def resumo_fiscal(ano, mes):
         somar(movimentacao.cobranca, movimentacao.valor)
     caucao_recebida = (
         MovimentacaoCaucao.objects.filter(
-            data__year=ano, data__month=mes, tipo__in=["recebimento", "reforco"]
+            data__year=ano,
+            data__month=mes,
+            tipo__in=[MovimentacaoCaucao.Tipo.RECEBIMENTO, MovimentacaoCaucao.Tipo.REFORCO],
         ).aggregate(t=Sum("valor"))
     )["t"] or ZERO
     return {

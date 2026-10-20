@@ -77,6 +77,9 @@ class Multa(models.Model):
         EMPRESA = "empresa", "Empresa (absorve)"
         VENDEDOR = "vendedor", "Vendedor anterior (antes da aquisição)"
 
+    #: prefetch que deixa `repasse` sem consultas por linha nas listas
+    PREFETCH_REPASSE = "itens_nd__nota_debito__cobranca"
+
     # Resultados em que a multa deixa de ser devida — não há o que repassar.
     RESULTADOS_ANULADORES = (
         Resultado.ADVERTENCIA,
@@ -208,9 +211,15 @@ class Multa(models.Model):
                 }
             )
 
-    @property
-    def item_nd(self):
-        return getattr(self, "_item_nd_cache", None) or self.itens_nd.first()
+    def _primeiro_item_nd(self):
+        """Item de ND mais antigo da multa — o mesmo que itens_nd.first() devolve.
+
+        Quando a tela fez prefetch_related(PREFETCH_REPASSE), lê da memória:
+        sem isso a coluna "Repasse" custava duas consultas por linha da lista.
+        """
+        if "itens_nd" in getattr(self, "_prefetched_objects_cache", {}):
+            return min(self.itens_nd.all(), key=lambda item: item.pk, default=None)
+        return self.itens_nd.select_related("nota_debito").first()
 
     @property
     def repasse(self):
@@ -219,7 +228,7 @@ class Multa(models.Model):
         O vínculo com a ND é checado primeiro: multa já cobrada não pode sumir da
         tela porque o resultado mudou — a cobrança da ND continua de pé.
         """
-        item = self.itens_nd.select_related("nota_debito").first()
+        item = self._primeiro_item_nd()
         if item:
             cobranca = getattr(item.nota_debito, "cobranca", None)
             if cobranca and cobranca.status == "pago":

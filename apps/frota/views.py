@@ -17,31 +17,41 @@ from . import crlv, desmobilizacao
 from .models import Categoria, Fornecedor, Veiculo, normalizar_placa
 
 
+def _motorista_e_valor(alocacao, troca):
+    """(motorista, valor semanal) de quem roda com o carro — mesma regra no hub e no detalhe.
+
+    `alocacao` é a alocação ativa do próprio carro; `troca`, a troca em aberto em
+    que ele é o substituto emprestado. Sem nenhuma das duas: (None, None).
+    """
+    if alocacao:
+        return alocacao.cliente.nome, alocacao.valor_semanal
+    if troca:
+        return (
+            f"{troca.alocacao.cliente.nome} (substituto)",
+            troca.valor_semanal_ajustado or troca.alocacao.valor_semanal,
+        )
+    return None, None
+
+
 def _quem_esta_com_o_carro(veiculo):
     """Motorista atual do veículo — alocação ativa ou empréstimo como substituto."""
     alocacao = (
         veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).select_related("cliente").first()
     )
-    if alocacao:
+    troca = None
+    if not alocacao:
+        troca = (
+            veiculo.trocas_como_substituto.filter(data_devolucao__isnull=True)
+            .select_related("alocacao__cliente")
+            .first()
+        )
+    motorista, valor = _motorista_e_valor(alocacao, troca)
+    return {
+        "motorista": motorista,
+        "valor_semanal": valor,
         # o dono do contrato pode estar rodando com um substituto (carro na oficina)
-        return {
-            "motorista": alocacao.cliente.nome,
-            "valor_semanal": alocacao.valor_semanal,
-            "alocacao": alocacao,
-            "substituto_em_uso": alocacao.troca_ativa,
-        }
-    troca = (
-        veiculo.trocas_como_substituto.filter(data_devolucao__isnull=True)
-        .select_related("alocacao__cliente")
-        .first()
-    )
-    if troca:
-        return {
-            "motorista": f"{troca.alocacao.cliente.nome} (substituto)",
-            "valor_semanal": troca.valor_semanal_ajustado or troca.alocacao.valor_semanal,
-            "alocacao": troca.alocacao,
-        }
-    return {"motorista": None, "valor_semanal": None, "alocacao": None}
+        "substituto_em_uso": alocacao.troca_ativa if alocacao else None,
+    }
 
 
 def hub(request):
@@ -87,15 +97,9 @@ def hub(request):
 
     cards = []
     for veiculo in veiculos:
-        alocacao = alocacoes_ativas.get(veiculo.pk)
-        troca = trocas_ativas.get(veiculo.pk)
-        if alocacao:
-            motorista, valor = alocacao.cliente.nome, alocacao.valor_semanal
-        elif troca:
-            motorista = f"{troca.alocacao.cliente.nome} (substituto)"
-            valor = troca.valor_semanal_ajustado or troca.alocacao.valor_semanal
-        else:
-            motorista = valor = None
+        motorista, valor = _motorista_e_valor(
+            alocacoes_ativas.get(veiculo.pk), trocas_ativas.get(veiculo.pk)
+        )
         cards.append(
             {
                 "veiculo": veiculo,
@@ -135,65 +139,13 @@ def detalhe(request, veiculo_id):
     return render(request, "frota/detalhe.html", contexto)
 
 
-class VeiculoForm(FormularioBR, forms.ModelForm):
-    """Cadastro do veículo — os campos de venda são geridos pelo fluxo "Vender"."""
-
-    SECOES = (
-        (
-            "Identificação",
-            [
-                "documento",
-                "placa",
-                "renavam",
-                "chassi",
-                "marca_modelo",
-                "ano",
-                "categoria",
-                "uso",
-                "foto",
-            ],
-        ),
-        (
-            "IPVA e licenciamento",
-            [
-                "ipva_ano",
-                "ipva_valor",
-                "ipva_vencimento",
-                "ipva_pago_em",
-                "licenciamento_vencimento",
-            ],
-        ),
-        (
-            "Aquisição",
-            [
-                "data_aquisicao",
-                "valor_compra",
-                "custos_entrada",
-                "km_compra",
-                "km_atual",
-                "valor_venda_estimado",
-            ],
-        ),
-        (
-            "Proteção e vigências",
-            [
-                "mensalidade_protecao",
-                "chave_reserva",
-                "rastreador_fornecedor",
-                "rastreador_vigencia_fim",
-                "bateria_data_troca",
-                "bateria_fornecedor",
-                "bateria_garantia_fim",
-            ],
-        ),
-        ("Outros", ["observacoes"]),
-    )
-
-    class Meta:
-        model = Veiculo
-        # "status" fica de fora: é gerido pelos fluxos (alocar/encerrar/manutenção/vender);
-        # editar aqui dessincronizaria a alocação ativa e a venda (revisão etapa 8).
-        fields = [
+#: Seções da tela de cadastro, na ordem em que aparecem — também definem os campos
+#: do VeiculoForm (fonte única: campo fora daqui não é exibido nem salvo).
+SECOES_VEICULO = (
+    (
+        "Identificação",
+        [
+            "documento",
             "placa",
             "renavam",
             "chassi",
@@ -202,18 +154,32 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
             "categoria",
             "uso",
             "foto",
-            "documento",
+        ],
+    ),
+    (
+        "IPVA e licenciamento",
+        [
             "ipva_ano",
             "ipva_valor",
             "ipva_vencimento",
             "ipva_pago_em",
             "licenciamento_vencimento",
+        ],
+    ),
+    (
+        "Aquisição",
+        [
             "data_aquisicao",
             "valor_compra",
             "custos_entrada",
             "km_compra",
             "km_atual",
             "valor_venda_estimado",
+        ],
+    ),
+    (
+        "Proteção e vigências",
+        [
             "mensalidade_protecao",
             "chave_reserva",
             "rastreador_fornecedor",
@@ -221,19 +187,35 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
             "bateria_data_troca",
             "bateria_fornecedor",
             "bateria_garantia_fim",
-            "observacoes",
-        ]
+        ],
+    ),
+    ("Outros", ["observacoes"]),
+)
+
+_CAMPOS_DE_DATA_VEICULO = (
+    "data_aquisicao",
+    "ipva_vencimento",
+    "ipva_pago_em",
+    "licenciamento_vencimento",
+    "rastreador_vigencia_fim",
+    "bateria_data_troca",
+    "bateria_garantia_fim",
+)
+
+
+class VeiculoForm(FormularioBR, forms.ModelForm):
+    """Cadastro do veículo — os campos de venda são geridos pelo fluxo "Vender"."""
+
+    class Meta:
+        model = Veiculo
+        # "status" fica de fora: é gerido pelos fluxos (alocar/encerrar/manutenção/vender);
+        # editar aqui dessincronizaria a alocação ativa e a venda.
+        fields = [nome for _, nomes in SECOES_VEICULO for nome in nomes]
         widgets = {
             "foto": forms.ClearableFileInput(attrs={"accept": "image/*"}),
             "documento": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
-            "data_aquisicao": forms.DateInput(attrs={"type": "date"}),
-            "ipva_vencimento": forms.DateInput(attrs={"type": "date"}),
-            "ipva_pago_em": forms.DateInput(attrs={"type": "date"}),
-            "licenciamento_vencimento": forms.DateInput(attrs={"type": "date"}),
-            "rastreador_vigencia_fim": forms.DateInput(attrs={"type": "date"}),
-            "bateria_data_troca": forms.DateInput(attrs={"type": "date"}),
-            "bateria_garantia_fim": forms.DateInput(attrs={"type": "date"}),
             "observacoes": forms.Textarea(attrs={"rows": 3}),
+            **{nome: forms.DateInput(attrs={"type": "date"}) for nome in _CAMPOS_DE_DATA_VEICULO},
         }
 
     def clean_placa(self):
@@ -256,7 +238,7 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
 
     @property
     def secoes(self):
-        return [(titulo, [self[nome] for nome in nomes]) for titulo, nomes in self.SECOES]
+        return [(titulo, [self[nome] for nome in nomes]) for titulo, nomes in SECOES_VEICULO]
 
 
 def _formulario_veiculo(request, veiculo):

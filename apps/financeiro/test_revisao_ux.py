@@ -12,7 +12,6 @@ import pytest
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services
-from apps.financeiro import views as financeiro_views
 from apps.financeiro.models import (
     AplicacaoRecebimento,
     Cobranca,
@@ -150,7 +149,6 @@ def test_judicial_pode_ser_descontada_da_caucao(usuario_logado, cliente, db):
 
 def test_fonte_unica_dos_conjuntos_de_status():
     assert Cobranca.STATUS_DEVIDOS == [*Cobranca.STATUS_EM_ABERTO, Cobranca.Status.JUDICIAL]
-    assert financeiro_views.ABERTAS is Cobranca.STATUS_EM_ABERTO  # alias compatível
     assert pessoas_views.COBRANCAS_EM_ABERTO is Cobranca.STATUS_DEVIDOS
 
 

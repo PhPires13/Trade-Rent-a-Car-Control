@@ -1,9 +1,6 @@
 """Leitura automática da CNH no cadastro de motorista (base: apps/documentos.py)."""
 
-from apps.documentos import (  # noqa: F401 — reexporta p/ views e testes
-    TAMANHO_MAXIMO,
-    TIPOS_ACEITOS,
-    TIPOS_DE_IMAGEM,
+from apps.documentos import (  # noqa: F401 — reexporta p/ views
     disponivel,
     extrair_estruturado,
     validar_upload,

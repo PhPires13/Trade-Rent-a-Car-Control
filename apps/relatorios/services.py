@@ -24,7 +24,9 @@ def receitas_do_mes(ano, mes):
     """Créditos do mês nas três classes fiscais (decisão nº 11)."""
     fiscal = resumo_fiscal(ano, mes)
     auxilios = AuxilioMotorista.objects.filter(
-        status="recebido", data_recebimento__year=ano, data_recebimento__month=mes
+        status=AuxilioMotorista.Status.RECEBIDO,
+        data_recebimento__year=ano,
+        data_recebimento__month=mes,
     ).select_related("sinistro__veiculo")
     vendas = Veiculo.objects.filter(data_venda__year=ano, data_venda__month=mes)
     total_auxilios = sum((a.valor or ZERO for a in auxilios), ZERO)
@@ -157,7 +159,9 @@ def serie_mensal(ano, mes, quantidade=6):
         "valor",
     )
     auxilios = _somas_por_mes(
-        AuxilioMotorista.objects.filter(status="recebido", data_recebimento__range=(inicio, fim)),
+        AuxilioMotorista.objects.filter(
+            status=AuxilioMotorista.Status.RECEBIDO, data_recebimento__range=(inicio, fim)
+        ),
         "data_recebimento",
         "valor",
     )
@@ -265,8 +269,8 @@ def recebiveis_em_aberto():
 
 
 def resumo_da_frota(hoje=None):
-    fichas, media = ranking_da_frota(hoje)
-    return fichas, media
+    """(fichas, média da frota) do ranking de desmobilização."""
+    return ranking_da_frota(hoje)
 
 
 def caucoes_retidas():

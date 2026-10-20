@@ -21,3 +21,4 @@ class ManutencaoAdmin(SimpleHistoryAdmin):
     list_display = ["veiculo", "item", "tipo", "data", "km"]
     list_filter = ["tipo", "item"]
     search_fields = ["veiculo__placa", "descricao"]
+    list_select_related = ["veiculo", "item"]

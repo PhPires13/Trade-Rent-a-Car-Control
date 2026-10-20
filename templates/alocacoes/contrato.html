@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load humanize %}
 
 {% block titulo %}Contrato — {{ veiculo.placa }} × {{ cliente.nome }} — Trade Rent a Car{% endblock %}
 
@@ -42,7 +41,7 @@
     A LOCADORA cede em locação ao(à) LOCATÁRIO(A) o veículo
     <strong>{{ veiculo.marca_modelo }}</strong>, placa <strong>{{ veiculo.placa }}</strong>{% if veiculo.ano %},
     ano {{ veiculo.ano }}{% endif %}{% if veiculo.renavam %}, RENAVAM {{ veiculo.renavam }}{% endif %}{% if veiculo.chassi %}, chassi {{ veiculo.chassi }}{% endif %},
-    entregue em {{ alocacao.data_inicio|date:"d/m/Y" }} com {{ alocacao.km_entrega|intcomma }} km,
+    entregue em {{ alocacao.data_inicio|date:"d/m/Y" }} com {{ alocacao.km_entrega|milhar }} km,
     destinado a uso pessoal e profissional lícito, incluindo transporte por aplicativo.
   </p>
 
@@ -73,7 +72,7 @@
   <h3 class="mb-2 font-bold">Cláusula {% if alocacao.caucao_valor %}5ª{% else %}4ª{% endif %} — Quilometragem</h3>
   <p class="mb-3">
     {% if alocacao.limite_km == "limitado" %}
-    A locação inclui franquia de <strong>{{ alocacao.franquia_km_mensal|intcomma }} km por mês</strong>.
+    A locação inclui franquia de <strong>{{ alocacao.franquia_km_mensal|milhar }} km por mês</strong>.
     O quilômetro excedente será cobrado a
     <strong>{{ alocacao.taxa_km_excedido|brl:"R$ ____" }}/km</strong>, apurado nas leituras
     mensais de odômetro.

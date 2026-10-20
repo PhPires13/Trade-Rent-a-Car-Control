@@ -69,14 +69,7 @@
     {% for erro in form_item.non_field_errors %}
       <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{ erro }}</p>
     {% endfor %}
-    {% for field in form_item %}
-    <div>
-      <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
-      {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
-    </div>
-    {% endfor %}
+    {% include "manutencao/_campos.html" with form=form_item %}
     <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">
       Adicionar item
     </button>
@@ -136,14 +129,7 @@
     {% for erro in form_intervalo.non_field_errors %}
       <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{ erro }}</p>
     {% endfor %}
-    {% for field in form_intervalo %}
-    <div>
-      <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
-      {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
-    </div>
-    {% endfor %}
+    {% include "manutencao/_campos.html" with form=form_intervalo %}
     <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">
       Adicionar intervalo
     </button>

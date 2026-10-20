@@ -133,7 +133,7 @@ def test_painel_nao_cresce_com_a_frota(django_user_model, django_assert_max_num_
 
 @pytest.mark.django_db
 def test_assets_locais_sem_cdn(django_user_model):
-    """Etapa 9: Tailwind/HTMX/Alpine servidos localmente — funciona sem internet."""
+    """Tailwind/HTMX/Alpine/Chart.js servidos localmente — funciona sem internet."""
     from django.contrib.staticfiles import finders
 
     for asset in ["tailwind.js", "htmx.min.js", "alpine.min.js", "chart.umd.js"]:
@@ -144,3 +144,99 @@ def test_assets_locais_sem_cdn(django_user_model):
     conteudo = cliente_http.get("/").content.decode()
     assert "cdn." not in conteudo and "unpkg" not in conteudo
     assert "vendor/tailwind.js" in conteudo
+
+
+def _cobrancas_no_painel(quantidade):
+    """`quantidade` cobranças da semana com R$ 100 pagos e outras tantas em atraso."""
+    from apps.financeiro.models import AplicacaoRecebimento, Cobranca, Recebimento
+    from apps.pessoas.models import Cliente
+
+    hoje = date.today()
+    cliente = Cliente.objects.create(nome="Arlen", cpf_cnpj="111.222.333-44")
+    recebimento = Recebimento.objects.create(cliente=cliente, data=hoje, valor=Decimal("9999"))
+    for _ in range(quantidade):
+        da_semana = Cobranca.objects.create(
+            cliente=cliente,
+            origem=Cobranca.Origem.ALUGUEL,
+            descricao="Aluguel",
+            valor=Decimal("650.00"),
+            vencimento=hoje,
+        )
+        AplicacaoRecebimento.objects.create(
+            recebimento=recebimento, cobranca=da_semana, valor=Decimal("100.00")
+        )
+        Cobranca.objects.create(
+            cliente=cliente,
+            origem=Cobranca.Origem.ALUGUEL,
+            descricao="Aluguel antigo",
+            valor=Decimal("650.00"),
+            vencimento=hoje - timedelta(days=30),
+            status=Cobranca.Status.ATRASADO,
+        )
+
+
+@pytest.mark.django_db
+def test_painel_nao_cresce_com_as_cobrancas(usuario_logado, django_assert_max_num_queries):
+    """Recebido da semana e saldo em atraso somavam 2 queries por cobrança.
+
+    Com 10 cobranças da semana e 10 atrasadas eram 65 queries; agora o total
+    quitado vem anotado em lote (Cobranca.com_quitacao_anotada).
+    """
+    _cobrancas_no_painel(10)
+    with django_assert_max_num_queries(20):
+        resposta = usuario_logado.get("/")
+    contexto = resposta.context
+    assert contexto["semana_total"] == Decimal("6500.00")
+    assert contexto["semana_recebido"] == Decimal("1000.00")
+    assert contexto["percentual_semana"] == 15
+    assert contexto["atrasado_total"] == Decimal("6500.00")
+    assert "R$ 1.000,00" in resposta.content.decode()
+
+
+@pytest.mark.django_db
+def test_painel_conta_a_frota_por_status_e_a_ocupacao(usuario_logado):
+    """Contagens do bloco Frota numa query só — mesmos números de antes."""
+    from apps.frota.models import Veiculo
+
+    Status, Uso = Veiculo.Status, Veiculo.Uso
+    for indice, (status, uso) in enumerate(
+        [
+            (Status.ALOCADO, Uso.LOCACAO),
+            (Status.ALOCADO, Uso.LOCACAO),
+            (Status.DISPONIVEL, Uso.LOCACAO),
+            (Status.EM_MANUTENCAO, Uso.LOCACAO),
+            (Status.DISPONIVEL, Uso.FORA_LOCACAO),  # fora da ocupação, mas na frota
+            (Status.VENDIDO, Uso.LOCACAO),  # vendido some do painel
+        ]
+    ):
+        Veiculo.objects.create(placa=f"TQC{indice}A00", marca_modelo="Gol", status=status, uso=uso)
+    contexto = usuario_logado.get("/").context
+    assert contexto["total_veiculos"] == 5
+    assert contexto["veiculos_por_status"] == [
+        ("disponivel", "Disponível", 2),
+        ("alocado", "Alocado", 2),
+        ("em_manutencao", "Em manutenção", 1),
+        ("inativo", "Inativo", 0),
+    ]
+    assert contexto["ocupacao"] == 50  # 2 alugados de 4 carros de locação
+
+
+@pytest.mark.django_db
+def test_painel_sem_frota_nao_divide_por_zero(usuario_logado):
+    contexto = usuario_logado.get("/").context
+    assert contexto["total_veiculos"] == 0
+    assert contexto["ocupacao"] is None
+    assert contexto["percentual_semana"] == 0
+
+
+@pytest.mark.django_db
+def test_busca_so_com_hifen_nao_devolve_a_frota_inteira(usuario_logado):
+    """normalizar_placa("-") é "" — e placa__icontains="" casava com todo carro."""
+    from apps.frota.models import Veiculo
+
+    Veiculo.objects.create(placa="ABC1D23", marca_modelo="Gol")
+    resposta = usuario_logado.get("/buscar/", {"q": "-"})
+    assert resposta.status_code == 200  # antes: redirecionava para o único carro
+    assert resposta.context["veiculos"] == []
+    # a busca por placa com hífen continua achando
+    assert usuario_logado.get("/buscar/", {"q": "abc-1d23"}).status_code == 302

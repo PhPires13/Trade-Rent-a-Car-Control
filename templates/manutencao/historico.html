@@ -44,7 +44,7 @@
         </td>
         <td class="px-3 py-2">{% if m.data_entrada %}{{ m.dias_parado }} dia{{ m.dias_parado|pluralize }}{% else %}—{% endif %}</td>
         <td class="px-3 py-2">
-          {% if m.cobranca_repasse %}
+          {% if m.cobranca_repasse_id %}
             <span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Cobrado</span>
           {% elif m.responsavel == "cliente" and m.valor_cobrado_cliente %}
             <form method="post" action="{% url 'manutencao:repassar' m.pk %}"

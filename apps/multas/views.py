@@ -1,14 +1,14 @@
 from datetime import date
-from decimal import InvalidOperation
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import urlencode
 from django.views.decorators.cache import never_cache
 
-from apps.campos import dinheiro_br
+from apps.campos import CampoDinheiro
 from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
@@ -17,8 +17,20 @@ from .forms import MultaForm, OrgaoForm
 from .models import Multa, OrgaoAutuador
 
 
+def _valor_digitado(request):
+    """Valor opcional do POST ("1.250,00"), validado como o campo `Multa.valor`.
+
+    Só o dinheiro_br aceitava "99999999" ou "1e10": o banco recusava (ou gravava
+    um número que depois derrubava a lista). Vazio → None.
+    """
+    campo = Multa._meta.get_field("valor").formfield(form_class=CampoDinheiro)
+    return campo.clean(request.POST.get("valor", "").strip())
+
+
 def lista(request):
-    multas = Multa.objects.select_related("veiculo", "cliente", "orgao")
+    multas = Multa.objects.select_related("veiculo", "cliente", "orgao").prefetch_related(
+        Multa.PREFETCH_REPASSE
+    )
     veiculo = request.GET.get("veiculo")
     if veiculo:
         multas = multas.filter(veiculo__placa__icontains=veiculo)
@@ -65,11 +77,10 @@ def registrar_nic(request, multa_id):
     multa = get_object_or_404(Multa, pk=multa_id)
     if request.method == "POST":
         try:
-            valor = request.POST.get("valor", "").strip()
-            nic = services.registrar_nic(multa, valor=dinheiro_br(valor) if valor else None)
+            nic = services.registrar_nic(multa, valor=_valor_digitado(request))
             messages.warning(request, f"NIC registrada contra a empresa: {nic}.")
-        except (ValidationError, InvalidOperation) as erro:
-            messages.error(request, "; ".join(getattr(erro, "messages", ["Valor inválido."])))
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
     return redirect("multas:lista")
 
 
@@ -90,10 +101,18 @@ def gerar_nd(request):
     a_cobrar = []
     cliente_id = request.GET.get("cliente") or request.POST.get("cliente")
     if cliente_id:
+        if not cliente_id.isdigit():  # link adulterado dava erro 500 no filtro por pk
+            raise Http404("Cliente inválido.")
         cliente = get_object_or_404(Cliente, pk=cliente_id)
-        a_cobrar = [m for m in cliente.multas.select_related("veiculo") if m.repasse == "A cobrar"]
+        candidatas = cliente.multas.select_related("veiculo").prefetch_related(
+            Multa.PREFETCH_REPASSE
+        )
+        a_cobrar = [m for m in candidatas if m.repasse == "A cobrar"]
     if request.method == "POST" and cliente:
-        selecionadas = [m for m in a_cobrar if str(m.pk) in request.POST.getlist("multa")]
+        marcadas = [m.pk for m in a_cobrar if str(m.pk) in request.POST.getlist("multa")]
+        # recarrega sem o prefetch: o serviço reconfere `repasse` no banco, dentro da
+        # transação — com os itens em memória, dois envios seguidos gerariam ND em dobro
+        selecionadas = list(cliente.multas.select_related("veiculo").filter(pk__in=marcadas))
         try:
             nd = services.gerar_nd_de_multas(cliente, selecionadas, date.today())
             messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")

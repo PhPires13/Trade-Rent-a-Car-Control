@@ -10,6 +10,8 @@ from decimal import Decimal, InvalidOperation
 from django import forms
 from django.core.exceptions import ValidationError
 
+from apps.formatos import numero_br
+
 _MILHAR = re.compile(r"^[1-9]\d{0,2}(\.\d{3})+$")
 
 
@@ -20,14 +22,18 @@ def dinheiro_br(texto):
     - só com ponto(s) em grupos de 3 ("1.850", "12.000"): é milhar;
     - senão o ponto é decimal ("650.00", "0.50").
     """
-    texto = (texto or "").strip().replace("R$", "").replace(" ", "").replace(" ", "")
+    # espaço comum e o não separável (U+00A0) que vem ao copiar "R$ 1.250" de PDFs/sites
+    texto = (texto or "").strip().replace("R$", "").replace(" ", "").replace("\u00a0", "")
     if "," in texto:
         texto = texto.replace(".", "").replace(",", ".")
     elif _MILHAR.match(texto):
         texto = texto.replace(".", "")
     if not texto:
         raise InvalidOperation("vazio")
-    return Decimal(texto)
+    numero = Decimal(texto)
+    if not numero.is_finite():  # "nan"/"inf" passariam e quebrariam o banco e as telas
+        raise InvalidOperation(texto)
+    return numero
 
 
 def exibir_dinheiro(valor):
@@ -38,13 +44,9 @@ def exibir_dinheiro(valor):
         numero = Decimal(str(valor))
     except (InvalidOperation, ValueError):
         return valor
-    inteiro, _, centavos = f"{abs(numero):.2f}".partition(".")
-    grupos = []
-    while len(inteiro) > 3:
-        grupos.insert(0, inteiro[-3:])
-        inteiro = inteiro[:-3]
-    grupos.insert(0, inteiro)
-    return f"{'-' if numero < 0 else ''}{'.'.join(grupos)},{centavos}"
+    if not numero.is_finite():
+        return valor
+    return f"{'-' if numero < 0 else ''}{numero_br(numero)}"
 
 
 class CampoDinheiro(forms.DecimalField):

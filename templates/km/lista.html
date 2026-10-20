@@ -40,6 +40,7 @@
     </thead>
     <tbody class="divide-y divide-gray-100">
       {% for veiculo in pendentes %}
+      {# o chip do painel leva a /km/#pendente-<pk>: as classes target: destacam a linha #}
       <tr id="pendente-{{ veiculo.pk }}" class="scroll-mt-24 target:bg-yellow-50 target:ring-2 target:ring-inset target:ring-marca-amarelo">
         <td class="px-3 py-2 font-medium">
           <a href="{% url 'km:historico' veiculo.pk %}" class="underline decoration-marca-amarelo decoration-2">
@@ -132,8 +133,4 @@
     </tbody>
   </table>
 </div>
-<style>
-  /* chip do painel leva a /km/#pendente-<pk>: destaca a linha de destino */
-  tr:target { background-color: #fefce8; box-shadow: inset 4px 0 0 #facc15; }
-</style>
 {% endblock %}

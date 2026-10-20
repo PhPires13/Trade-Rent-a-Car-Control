@@ -1,4 +1,4 @@
-"""Revisão de UX (etapa 12): formato de dinheiro, entrada brasileira, login e cabeçalho."""
+"""UX compartilhada: formato de dinheiro, entrada brasileira, login, cabeçalho e menu."""
 
 from decimal import Decimal, InvalidOperation
 
@@ -103,3 +103,34 @@ def test_mensagem_de_erro_tem_estilo_de_erro(usuario_logado, db):
     ).content.decode()
     assert 'role="alert"' in html
     assert "bg-red-50" in html
+
+
+@pytest.mark.parametrize("texto", ["nan", "NaN", "inf", "-Infinity", "sNaN"])
+def test_dinheiro_br_recusa_valores_nao_numericos(texto):
+    """Decimal("nan") é aceito pelo Python e quebraria o banco e as telas."""
+    with pytest.raises(InvalidOperation):
+        dinheiro_br(texto)
+
+
+def test_dinheiro_br_aceita_espaco_nao_separavel():
+    # "R$ 1.250,00" copiado de sites/PDFs costuma vir com U+00A0 depois do R$
+    assert dinheiro_br("R$ 1.250,00") == Decimal("1250.00")
+
+
+def test_formatos_nunca_derrubam_a_pagina():
+    assert brl(Decimal("NaN")) == "NaN"
+    assert str(exibir_dinheiro(Decimal("NaN"))) == "NaN"
+    assert milhar(float("inf")) == "inf"
+
+
+def test_exibir_dinheiro_negativo_e_milhoes():
+    assert exibir_dinheiro(Decimal("-1234567.5")) == "-1.234.567,50"
+    assert brl(Decimal("1234567.5")) == "R$ 1.234.567,50"
+
+
+def test_menu_destaca_so_a_secao_atual(usuario_logado):
+    painel = usuario_logado.get("/").content.decode()
+    assert painel.count('aria-current="page"') == 1  # só o Painel, na barra do topo
+    assert 'aria-current="page">Painel<' in painel
+    busca = usuario_logado.get("/buscar/").content.decode()
+    assert 'aria-current="page"' not in busca  # busca não é seção do menu

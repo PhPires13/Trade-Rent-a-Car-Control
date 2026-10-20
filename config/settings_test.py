@@ -16,3 +16,8 @@ STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
+
+# uploads dos testes vão para uma pasta temporária, não para midia/ do projeto
+import tempfile  # noqa: E402
+
+MEDIA_ROOT = tempfile.mkdtemp(prefix="trade-testes-midia-")

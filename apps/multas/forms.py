@@ -50,7 +50,7 @@ class OrgaoForm(forms.ModelForm):
     """Cadastro do órgão com portal, credenciais e procedimento (docs.md §4.1).
 
     A senha nunca volta no HTML da edição (ficaria em claro no fonte e no
-    cache do navegador — revisão etapa 8); campo vazio mantém a senha atual.
+    cache do navegador — revisão de segurança); campo vazio mantém a senha atual.
 
     O login continua visível: é o identificador do cadastro no portal, não o
     segredo — quem opera precisa conferir com qual usuário está entrando, e a

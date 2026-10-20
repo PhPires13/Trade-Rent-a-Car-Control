@@ -1,0 +1,9 @@
+{# Campos de um formulário, um por linha — uso: {% include "manutencao/_campos.html" with form=... %} #}
+{% for field in form %}
+<div>
+  <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+  {{ field }}
+  {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
+  {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+</div>
+{% endfor %}

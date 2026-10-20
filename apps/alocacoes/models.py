@@ -9,7 +9,8 @@ from apps.pessoas.models import Cliente
 class Alocacao(models.Model):
     """Vínculo veículo↔cliente com valor semanal (docs.md §4.2).
 
-    A caução aqui é só o valor acordado; o extrato/movimentações entram na etapa 4.
+    `caucao_valor` é só o valor acordado em contrato; o dinheiro de fato
+    (depósito, descontos, devolução) fica em financeiro.Caucao (docs.md §4.4).
     """
 
     class Status(models.TextChoices):
@@ -127,9 +128,11 @@ class Alocacao(models.Model):
         self.save()
         from apps.financeiro.models import Cobranca  # import local evita ciclo de import
 
-        nao_usadas = self.cobrancas.filter(
-            origem=Cobranca.Origem.ALUGUEL, vencimento__gte=data_termino
-        ).exclude(status__in=[Cobranca.Status.CANCELADA, Cobranca.Status.JUDICIAL])
+        nao_usadas = Cobranca.com_quitacao_anotada(
+            self.cobrancas.filter(
+                origem=Cobranca.Origem.ALUGUEL, vencimento__gte=data_termino
+            ).exclude(status__in=[Cobranca.Status.CANCELADA, Cobranca.Status.JUDICIAL])
+        )
         for cobranca in nao_usadas:
             if cobranca.total_quitado <= 0:
                 cobranca.status = Cobranca.Status.CANCELADA
@@ -263,10 +266,6 @@ class TrocaTemporaria(models.Model):
             substituto.km_atual = km_devolucao
         substituto.save(update_fields=["status", "km_atual"])
 
-    @property
-    def ativa(self):
-        return self.data_devolucao is None
-
 
 class Vistoria(models.Model):
     """Checklist de entrada/saída do carro (km, combustível, marcas, notas).
@@ -320,8 +319,9 @@ class Vistoria(models.Model):
         return f"{self.get_tipo_display()} — {self.alocacao.veiculo.placa} em {self.data:%d/%m/%Y}"
 
     def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        veiculo = self.alocacao.veiculo
-        if self.km and self.km > veiculo.km_atual:
-            veiculo.km_atual = self.km
-            veiculo.save(update_fields=["km_atual"])
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            veiculo = self.alocacao.veiculo
+            if self.km and self.km > veiculo.km_atual:
+                veiculo.km_atual = self.km
+                veiculo.save(update_fields=["km_atual"])

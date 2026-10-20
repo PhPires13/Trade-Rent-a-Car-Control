@@ -11,6 +11,17 @@ from django import template
 
 register = template.Library()
 
+_PONTO_POR_VIRGULA = str.maketrans(",.", ".,")
+
+
+def numero_br(numero):
+    """Decimal → "1.234.567,50": milhar com ponto, 2 casas com vírgula, sem sinal.
+
+    Fonte única do agrupamento — usada por `brl` e pelo valor dos campos de
+    dinheiro (apps/campos.py). Quem chama decide o arredondamento e o sinal.
+    """
+    return f"{abs(numero):,.2f}".translate(_PONTO_POR_VIRGULA)
+
 
 def brl(valor, vazio="—"):
     """R$ 14.800,00 — milhar com ponto, centavos com vírgula, sempre 2 casas."""
@@ -20,14 +31,9 @@ def brl(valor, vazio="—"):
         numero = Decimal(str(valor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except (InvalidOperation, ValueError):
         return str(valor)
-    sinal = "-" if numero < 0 else ""
-    inteiro, centavos = f"{abs(numero):.2f}".split(".")
-    grupos = []
-    while len(inteiro) > 3:
-        grupos.insert(0, inteiro[-3:])
-        inteiro = inteiro[:-3]
-    grupos.insert(0, inteiro)
-    return f"{sinal}R$ {'.'.join(grupos)},{centavos}"
+    if not numero.is_finite():  # NaN: o filtro nunca pode derrubar a página
+        return str(valor)
+    return f"{'-' if numero < 0 else ''}R$ {numero_br(numero)}"
 
 
 def milhar(valor, vazio="—"):
@@ -36,7 +42,7 @@ def milhar(valor, vazio="—"):
         return vazio
     try:
         return f"{int(valor):,}".replace(",", ".")
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: int(infinito)
         return str(valor)
 
 

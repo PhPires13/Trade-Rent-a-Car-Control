@@ -16,6 +16,8 @@ from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import Cobranca
 from apps.formatos import brl
 
+from .models import RegistroKm
+
 DIAS_PRAZO_COBRANCA = 7
 #: A rotina diária só gera excedente de leituras recentes — evita uma enxurrada
 #: de cobranças retroativas na primeira execução após o deploy.
@@ -162,8 +164,6 @@ def gerar_cobranca_excedente(registro, hoje=None):
 
 def gerar_excedentes_pendentes(hoje=None):
     """Varre leituras recentes ainda sem cobrança de excedente (rotina diária)."""
-    from .models import RegistroKm
-
     hoje = hoje or date.today()
     criadas = []
     pendentes = (

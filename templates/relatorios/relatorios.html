@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize static %}
+{% load static %}
 
 {% block titulo %}Relatórios — Trade Rent a Car{% endblock %}
 
@@ -67,8 +67,7 @@
     <h2 class="mb-1 flex flex-wrap items-center justify-between gap-2 font-semibold">
       <span>Receitas do mês</span>
       <span class="flex gap-2 text-xs font-normal">
-        <a href="?mes={{ mes_str }}&exportar=receitas&formato=xlsx" class="whitespace-nowrap rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto hover:brightness-95" title="Baixar planilha do Excel (.xlsx) deste mês">⬇ Baixar planilha</a>
-        <a href="?mes={{ mes_str }}&exportar=receitas&formato=csv" class="whitespace-nowrap rounded bg-gray-200 px-2 py-1 hover:bg-gray-300" title="Baixar em CSV (texto simples)">CSV</a>
+        {% include "relatorios/_exportar.html" with tipo="receitas" %}
       </span>
     </h2>
     <p class="mb-3 text-xs text-gray-500">Regime de caixa. Só a receita de locação entra na base do DAS.</p>
@@ -87,8 +86,7 @@
     <h2 class="mb-1 flex flex-wrap items-center justify-between gap-2 font-semibold">
       <span>Despesas do mês</span>
       <span class="flex gap-2 text-xs font-normal">
-        <a href="?mes={{ mes_str }}&exportar=despesas&formato=xlsx" class="whitespace-nowrap rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto hover:brightness-95" title="Baixar planilha do Excel (.xlsx) deste mês">⬇ Baixar planilha</a>
-        <a href="?mes={{ mes_str }}&exportar=despesas&formato=csv" class="whitespace-nowrap rounded bg-gray-200 px-2 py-1 hover:bg-gray-300" title="Baixar em CSV (texto simples)">CSV</a>
+        {% include "relatorios/_exportar.html" with tipo="despesas" %}
       </span>
     </h2>
     <p class="mb-3 text-xs text-gray-500">Manutenções, franquias, mensalidades da proteção, multas absorvidas e custos de compra/venda.</p>
@@ -110,8 +108,7 @@
     <h2 class="mb-3 flex flex-wrap items-center justify-between gap-2 font-semibold">
       <span>Recebíveis em aberto</span>
       <span class="flex gap-2 text-xs font-normal">
-        <a href="?mes={{ mes_str }}&exportar=recebiveis&formato=xlsx" class="whitespace-nowrap rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto hover:brightness-95" title="Baixar planilha do Excel (.xlsx) deste mês">⬇ Baixar planilha</a>
-        <a href="?mes={{ mes_str }}&exportar=recebiveis&formato=csv" class="whitespace-nowrap rounded bg-gray-200 px-2 py-1 hover:bg-gray-300" title="Baixar em CSV (texto simples)">CSV</a>
+        {% include "relatorios/_exportar.html" with tipo="recebiveis" %}
       </span>
     </h2>
     <table class="w-full text-sm">
@@ -144,8 +141,7 @@
     <h2 class="mb-3 flex flex-wrap items-center justify-between gap-2 font-semibold">
       <span>Resumo da frota</span>
       <span class="flex gap-2 text-xs font-normal">
-        <a href="?mes={{ mes_str }}&exportar=frota&formato=xlsx" class="whitespace-nowrap rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto hover:brightness-95" title="Baixar planilha do Excel (.xlsx) deste mês">⬇ Baixar planilha</a>
-        <a href="?mes={{ mes_str }}&exportar=frota&formato=csv" class="whitespace-nowrap rounded bg-gray-200 px-2 py-1 hover:bg-gray-300" title="Baixar em CSV (texto simples)">CSV</a>
+        {% include "relatorios/_exportar.html" with tipo="frota" %}
         <a href="{% url 'frota:ranking' %}" class="whitespace-nowrap px-1 py-1 underline">quando vender →</a>
       </span>
     </h2>
