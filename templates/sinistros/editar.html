@@ -45,14 +45,37 @@
   {% elif sinistro.veiculo.status == "inativo" %}
     <p class="mb-3 text-sm text-gray-500">O carro está Inativo (não aparece para alugar) até ser recuperado.</p>
     <form method="post" action="{% url 'sinistros:carro_recuperado' sinistro.pk %}"
-          onsubmit="return confirm('Confirmar que {{ sinistro.veiculo.placa|escapejs }} foi recuperado? Ele volta a ficar Disponível.')">
+          onsubmit="return confirm('Confirmar que {{ sinistro.veiculo.placa|escapejs }} foi recuperado? Ele sai de Inativo e volta para a frota.')">
       {% csrf_token %}
       <input type="hidden" name="volta" value="{{ request.get_full_path }}">
       <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Carro recuperado</button>
     </form>
-  {% else %}
+  {% elif sinistro.veiculo.status == "vendido" %}
     <p class="text-sm text-gray-500">Situação do carro agora: {{ sinistro.veiculo.get_status_display }}.</p>
+  {% else %}
+    <p class="mb-3 text-sm text-gray-500">Situação do carro agora: {{ sinistro.veiculo.get_status_display }}.
+      O roubo ainda não foi aplicado. Depois de conferir a data e a locação, use o botão para encerrar a locação
+      (ou a troca) na data do roubo e deixar o carro Inativo.</p>
+    <form method="post" action="{% url 'sinistros:aplicar_roubo' sinistro.pk %}"
+          onsubmit="return confirm('Encerrar o uso de {{ sinistro.veiculo.placa|escapejs }} em {{ sinistro.data|date:"d/m/Y" }} e deixar o carro Inativo?')">
+      {% csrf_token %}
+      <input type="hidden" name="volta" value="{{ request.get_full_path }}">
+      <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Aplicar o roubo</button>
+    </form>
   {% endif %}
+</section>
+{% endif %}
+
+{# Colisão: o conserto é registrado na manutenção, já ligado a este sinistro. #}
+{% if sinistro.tipo == "colisao" %}
+<section class="mt-6 max-w-2xl rounded-lg bg-white p-4 shadow sm:p-6">
+  <h2 class="mb-1 text-lg font-bold">Conserto na oficina</h2>
+  {% with idas=sinistro.manutencoes.all %}
+  {% if idas %}<p class="mb-3 text-sm text-gray-500">{{ idas|length }} ida{{ idas|length|pluralize }} à oficina registrada{{ idas|length|pluralize }} para este sinistro.</p>
+  {% else %}<p class="mb-3 text-sm text-gray-500">O carro foi para a oficina? Registre aqui: a manutenção já sai ligada a este sinistro e conta os dias parado para o auxílio.</p>{% endif %}
+  {% endwith %}
+  <a href="{% url 'manutencao:registrar' sinistro.veiculo_id %}?sinistro={{ sinistro.pk }}"
+     class="inline-block rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Registrar ida para a oficina</a>
 </section>
 {% endif %}
 

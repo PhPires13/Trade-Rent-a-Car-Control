@@ -1,5 +1,7 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from simple_history.admin import SimpleHistoryAdmin
+
+from apps.formatos import brl
 
 from .models import Alocacao, TrocaTemporaria
 
@@ -69,3 +71,13 @@ class TrocaTemporariaAdmin(CicloDeVidaTravado):
         "km_retirada",
         "km_devolucao",
     ]
+
+    def save_model(self, request, obj, form, change):
+        """Mudar o valor durante a troca refaz as semanas em aberto — mostra o novo valor."""
+        super().save_model(request, obj, form, change)
+        for cobranca in getattr(obj, "semanas_reajustadas", None) or []:
+            messages.info(
+                request,
+                f"A semana com vencimento em {cobranca.vencimento:%d/%m/%Y} passou a "
+                f"{brl(cobranca.valor)}.",
+            )

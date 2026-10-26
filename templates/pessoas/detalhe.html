@@ -30,7 +30,7 @@
 
 {# Cartão "Próximos passos da entrega" (alocações) — some quando tudo está feito #}
 {% load entrega_tags %}
-{% if alocacao_ativa %}{% passos_entrega alocacao_ativa %}{% endif %}
+{% for ativa in alocacoes_ativas %}{% passos_entrega ativa %}{% endfor %}
 
 <div class="grid gap-6 lg:grid-cols-3">
   <div class="rounded-lg bg-white p-5 shadow lg:col-span-2">
@@ -79,6 +79,22 @@
     <div class="rounded-lg bg-white p-4 shadow">
       <div class="text-sm text-gray-500">Saldo devedor</div>
       <div class="text-2xl font-black {% if saldo_devedor > 0 %}text-red-700{% endif %}">{{ saldo_devedor|brl }}</div>
+      <p class="mt-1 text-xs text-gray-600">
+        {% if ultimo_pagamento %}Último pagamento: {{ ultimo_pagamento.valor|brl }} em {{ ultimo_pagamento.data|date:"d/m/Y" }}{% else %}Nenhum pagamento lançado ainda.{% endif %}
+      </p>
+      {% if saldo_devedor > 0 %}
+      <div class="mt-2 flex flex-wrap gap-2 text-sm">
+        <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}"
+           class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">✓ Recebi</a>
+        {% if link_cobrar %}
+        <a href="{{ link_cobrar }}" target="_blank" rel="noopener"
+           class="rounded border border-green-600 px-3 py-1.5 font-semibold text-green-700 hover:bg-green-50"
+           title="Abre o WhatsApp com uma mensagem só, com tudo que está em aberto">📱 Cobrar no WhatsApp</a>
+        {% elif not telefone_digitos %}
+        <span class="text-xs text-gray-600">Sem telefone no cadastro para cobrar pelo WhatsApp.</span>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
     <div class="rounded-lg bg-white p-4 shadow">
       <div class="text-sm text-gray-500">Crédito disponível</div>
@@ -92,7 +108,7 @@
 </div>
 
 <h2 class="mb-3 mt-8 text-xl font-bold">Alocações</h2>
-{% if alocacao_ativa %}
+{% for alocacao_ativa in alocacoes_ativas %}
 <div class="mb-4 rounded-lg border-l-4 border-marca-amarelo bg-white p-5 shadow">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div>
@@ -116,16 +132,18 @@
   {% endif %}
   <div class="mt-3 flex flex-wrap gap-2 border-t border-gray-100 pt-3 text-xs">
     {% if alocacao_ativa.troca_ativa %}
-    <a href="{% url 'alocacoes:troca_devolver' alocacao_ativa.troca_ativa.pk %}"
+    <a href="{% url 'alocacoes:troca_devolver' alocacao_ativa.troca_ativa.pk %}?voltar={{ request.path|urlencode }}"
        class="rounded bg-marca-amarelo px-2.5 py-1 font-semibold text-marca-preto hover:brightness-95">Devolver substituto</a>
+    {% else %}
+    <a href="{% url 'alocacoes:troca_nova' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Trocar carro</a>
     {% endif %}
     <a href="{% url 'alocacoes:contrato' alocacao_ativa.pk %}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Contrato</a>
-    <a href="{% url 'alocacoes:vistoria_nova' alocacao_ativa.pk %}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Registrar vistoria</a>
-    <a href="{% url 'alocacoes:editar' alocacao_ativa.pk %}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Editar valores</a>
-    <a href="{% url 'alocacoes:encerrar' alocacao_ativa.pk %}" class="rounded px-2.5 py-1 font-medium text-red-700 underline hover:bg-red-50">Encerrar</a>
+    <a href="{% url 'alocacoes:vistoria_nova' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Registrar vistoria</a>
+    <a href="{% url 'alocacoes:editar' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Editar valores</a>
+    <a href="{% url 'alocacoes:encerrar' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded px-2.5 py-1 font-medium text-red-700 underline hover:bg-red-50">Encerrar</a>
   </div>
 </div>
-{% else %}
+{% empty %}
 <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-white p-4 text-sm shadow">
   <span class="text-gray-500">Sem carro no momento.</span>
   {% if cliente.status != "inativo" %}
@@ -133,7 +151,7 @@
      class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Alocar um carro</a>
   {% endif %}
 </div>
-{% endif %}
+{% endfor %}
 
 {% if historico %}
 <div class="overflow-x-auto rounded-lg bg-white shadow">
@@ -201,8 +219,13 @@
           <td class="px-2 py-1.5 font-medium">{{ condutor.nome }}</td>
           <td class="px-2 py-1.5 text-gray-600">{{ condutor.cpf|default:"—" }}</td>
           <td class="px-2 py-1.5 text-gray-600">{{ condutor.contato|default:"—" }}</td>
-          <td class="px-2 py-1.5 text-right text-xs">
+          <td class="whitespace-nowrap px-2 py-1.5 text-right text-xs">
             <a href="{% url 'pessoas:condutor_editar' condutor.pk %}" class="underline">editar</a>
+            <form method="post" action="{% url 'pessoas:condutor_remover' condutor.pk %}" class="ml-2 inline"
+                  onsubmit="return confirm('Tirar a autorização de {{ condutor.nome|escapejs }} para dirigir?')">
+              {% csrf_token %}
+              <button class="text-red-700 underline">remover</button>
+            </form>
           </td>
         </tr>
         {% empty %}

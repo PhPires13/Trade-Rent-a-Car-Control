@@ -32,6 +32,20 @@ def _validar_km_maximo(km):
         raise ValidationError(f"KM acima de {milhar(KM_MAXIMO)} — confira os dígitos.")
 
 
+def _status_ao_voltar(veiculo):
+    """Carro que volta do motorista: Disponível, ou Em manutenção se ainda está na oficina.
+
+    Manutenção registrada sem data de saída (o carro foi para a oficina durante
+    a locação) não pode deixar o carro "Disponível" para alugar de novo; ele
+    volta a Disponível quando a saída da oficina for registrada.
+    """
+    from apps.manutencao.services import oficina_por_veiculo  # evita ciclo de import
+
+    if oficina_por_veiculo([veiculo.pk]):
+        return Veiculo.Status.EM_MANUTENCAO
+    return Veiculo.Status.DISPONIVEL
+
+
 def ultima_liberacao_do_carro(veiculo, excluir_alocacao=None, excluir_troca=None):
     """Última data em que o carro voltou de um motorista (término ou fim de troca).
 
@@ -217,7 +231,7 @@ class Alocacao(models.Model):
         atualizar_inadimplencia(self.cliente)
         veiculo = self.veiculo
         if veiculo.status == Veiculo.Status.ALOCADO:
-            veiculo.status = Veiculo.Status.DISPONIVEL
+            veiculo.status = _status_ao_voltar(veiculo)
         if km_devolucao > veiculo.km_atual:
             veiculo.km_atual = km_devolucao
         veiculo.save(update_fields=["status", "km_atual"])
@@ -392,8 +406,20 @@ class TrocaTemporaria(models.Model):
 
     def save(self, *args, **kwargs):
         criando = self._state.adding
+        # Admin: tirar o valor ajustado precisa desfazer o rateio já feito (D02)
+        ajuste_tirado = (
+            not criando
+            and self.valor_semanal_ajustado is None
+            and TrocaTemporaria.objects.filter(
+                pk=self.pk, valor_semanal_ajustado__isnull=False
+            ).exists()
+        )
         with transaction.atomic():
             super().save(*args, **kwargs)
+            if ajuste_tirado:
+                from .services import refazer_semanas_da_troca
+
+                self.semanas_reajustadas = refazer_semanas_da_troca(self)
             if criando:
                 substituto = self.veiculo_substituto
                 substituto.status = Veiculo.Status.ALOCADO
@@ -404,7 +430,10 @@ class TrocaTemporaria(models.Model):
             # o carro do contrato e o substituto (decisão D02).
             from apps.financeiro.services import reajustar_aluguel_pela_troca
 
-            reajustar_aluguel_pela_troca(self)
+            alteradas = reajustar_aluguel_pela_troca(self)
+            if not ajuste_tirado:
+                # as telas e o Admin mostram o novo valor de cada semana refeita
+                self.semanas_reajustadas = alteradas
 
     def clean(self):
         erros = {}
@@ -467,7 +496,7 @@ class TrocaTemporaria(models.Model):
         substituto = self.veiculo_substituto
         # Só libera quem está alocado — não sobrescreve Vendido/Em manutenção/Inativo.
         if substituto.status == Veiculo.Status.ALOCADO:
-            substituto.status = Veiculo.Status.DISPONIVEL
+            substituto.status = _status_ao_voltar(substituto)
         if km_devolucao > substituto.km_atual:
             substituto.km_atual = km_devolucao
         substituto.save(update_fields=["status", "km_atual"])

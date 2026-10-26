@@ -12,4 +12,5 @@ urlpatterns = [
     path("<int:cliente_id>/editar/", views.editar, name="editar"),
     path("<int:cliente_id>/condutores/novo/", views.condutor_novo, name="condutor_novo"),
     path("condutores/<int:condutor_id>/editar/", views.condutor_editar, name="condutor_editar"),
+    path("condutores/<int:condutor_id>/remover/", views.condutor_remover, name="condutor_remover"),
 ]

@@ -331,7 +331,6 @@ def _cancelar_nota_debito(request, cobranca):
     soltas = ItemNotaDebito.objects.filter(
         nota_debito_id=cobranca.nota_debito_id, multa__isnull=False
     ).update(multa=None)
-    services.atualizar_inadimplencia(cobranca.cliente)
     nd = cobranca.nota_debito
     texto = f"ND {nd.numero:03d} cancelada — não será cobrada do cliente."
     if soltas:
@@ -339,12 +338,26 @@ def _cancelar_nota_debito(request, cobranca):
             f" {soltas} multa(s) voltaram para 'A cobrar': registre o resultado do recurso "
             "e, se ainda houver o que cobrar, emita uma ND nova."
         )
+    # encargo por atraso de ND cancelada some junto, se ainda não teve pagamento
+    # nem foi para a cobrança judicial (pendência D05 da etapa 15)
+    encargos = Cobranca.com_quitacao_anotada(
+        cobranca.encargos.filter(status__in=Cobranca.STATUS_EM_ABERTO)
+    )
+    sem_pagamento = [e.pk for e in encargos if e.total_quitado <= ZERO]
+    if sem_pagamento:
+        Cobranca.objects.filter(pk__in=sem_pagamento).update(status=Cobranca.Status.CANCELADA)
+        texto += (
+            " O encargo por atraso dela também foi cancelado."
+            if len(sem_pagamento) == 1
+            else f" Os {len(sem_pagamento)} encargos por atraso dela também foram cancelados."
+        )
+    services.atualizar_inadimplencia(cobranca.cliente)
     messages.success(request, texto)
-    if cobranca.encargos.exclude(status=Cobranca.Status.CANCELADA).exists():
+    if cobranca.encargos.filter(status__in=Cobranca.STATUS_DEVIDOS).exists():
         messages.warning(
             request,
-            "Esta ND tinha encargo por atraso, que continua em aberto. Se não for "
-            "cobrar, use 'não cobrar' no encargo.",
+            "Esta ND tem encargo por atraso que já recebeu parte do pagamento ou está na "
+            "cobrança judicial — ele continua como está. Resolva esse encargo à parte.",
         )
 
 
@@ -699,6 +712,9 @@ def caucao_detalhe(request, caucao_id):
             "movimentacoes": caucao.movimentacoes.select_related("cobranca"),
             # judicial entra: acordo pode ser quitado descontando da caução retida
             "pendentes": _cobrancas_devidas(cliente),
+            # crédito (pagamento adiantado / semanas não usadas) é do cliente, como a
+            # caução: o dono vê os dois juntos antes de devolver ou descontar
+            "credito": MovimentoCredito.saldo_do_cliente(cliente),
             "hoje": date.today(),
             "token": uuid4().hex,
         },
@@ -735,7 +751,9 @@ def das(request):
         linhas = [["Receita de locação (fatura)", resumo["locacao"], "Sim"]]
         for rotulo, valor in resumo["diversos"].items():
             linhas.append([f"Pagamentos diversos — {rotulo} (ND)", valor, "Não"])
-        linhas.append(["Caução recebida", resumo["caucao_recebida"], "Não"])
+        linhas.append(
+            ["Caução recebida (não é receita — é do cliente)", resumo["caucao_recebida"], "Não"]
+        )
         linhas.append(
             ["Adiantamentos recebidos (crédito do cliente)", resumo["adiantamentos"], "Não"]
         )

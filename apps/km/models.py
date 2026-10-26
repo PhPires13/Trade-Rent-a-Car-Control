@@ -275,12 +275,20 @@ class AcertoExcedenteKm(models.Model):
 
 
 def veiculos_com_leitura_pendente(mes):
-    """Veículos de locação ativos sem registro no mês de referência (docs.md §4.8)."""
+    """Veículos de locação ativos sem registro no mês de referência (docs.md §4.8).
+
+    Mês anterior à compra não conta (o carro ainda não era da empresa), como em
+    pendencias_de_leitura. Já o mês anterior à primeira leitura continua na
+    lista — é por ela que se lançam leituras antigas na carga de dados —, mas o
+    painel não cobra esses meses.
+    """
     mes = primeiro_dia_do_mes(mes)
+    mes_seguinte = (mes + timedelta(days=32)).replace(day=1)
     return (
         Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO)
         .exclude(status__in=[Veiculo.Status.VENDIDO, Veiculo.Status.INATIVO])
         .exclude(registros_km__mes_referencia=mes)
+        .filter(models.Q(data_aquisicao__isnull=True) | models.Q(data_aquisicao__lt=mes_seguinte))
         .order_by("placa")
     )
 

@@ -247,7 +247,9 @@ def marcar_paga(request, multa_id):
     multa = get_object_or_404(Multa, pk=multa_id)
     if request.method == "POST":
         multa.pagamento = Multa.Pagamento.PAGO
-        multa.pago_por = request.POST.get("pago_por", "").strip()[:60]
+        # só as duas opções do botão (D23): texto solto não tirava a multa da ND
+        digitado = request.POST.get("pago_por", "").strip().lower()
+        multa.pago_por = {"empresa": "Empresa", "cliente": Multa.PAGO_POR_CLIENTE}.get(digitado, "")
         multa.save(update_fields=["pagamento", "pago_por"])
         quem = {"Empresa": " pela empresa", "Cliente": " pelo cliente"}.get(multa.pago_por, "")
         aviso = ""

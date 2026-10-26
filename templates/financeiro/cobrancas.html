@@ -61,7 +61,7 @@
           {% elif cobranca.status == "cancelada" %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-500">Cancelada</span>
           {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Pendente</span>{% endif %}
         </td>
-        <td class="space-y-1 px-3 py-2">
+        <td class="space-y-2 px-3 py-2">
           {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.saldo > 0 %}
           <a href="{% url 'financeiro:receber' %}?cliente={{ cobranca.cliente.pk }}&cobranca={{ cobranca.pk }}"
              class="inline-block whitespace-nowrap rounded bg-marca-amarelo px-3 py-1.5 text-xs font-semibold text-marca-preto hover:brightness-95"
@@ -72,8 +72,9 @@
                 onsubmit="return confirm('Cobrar do cliente um encargo por atraso de R$ ' + this.valor.value + '? Isso cria uma nova cobrança, que pode ser cancelada depois.')">
             {% csrf_token %}
             <input type="hidden" name="voltar" value="{{ voltar }}">
-            <span class="w-full text-xs text-gray-500" title="Sugerido: 5% até 4 dias de atraso, 10% acima — ajuste o valor se quiser">Encargo por atraso (R$):</span>
-            <input type="text" name="valor" value="{{ encargo }}" class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs" aria-label="Valor do encargo por atraso">
+            <label for="encargo-{{ cobranca.pk }}" class="w-full text-xs text-gray-500" title="Sugerido: 5% até 4 dias de atraso, 10% acima — ajuste o valor se quiser">Encargo por atraso (R$):</label>
+            <input type="text" name="valor" id="encargo-{{ cobranca.pk }}" value="{{ encargo }}" required inputmode="decimal" autocomplete="off"
+                   class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs">
             <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto" title="Sugerido: 5% até 4 dias, 10% acima — ajuste ou zere">Aplicar</button>
           </form>
           {% endif %}
@@ -108,6 +109,10 @@
           {% endif %}
           {% if cobranca.status == "judicial" %}
           <span class="block text-xs text-gray-500">Sem WhatsApp: cobrança judicial</span>
+          {% elif not cobranca.link_whatsapp and cobranca.saldo > 0 and cobranca.status != "pago" and cobranca.status != "cancelada" %}
+          {# sem link = telefone vazio ou incompleto (sem DDD): os dois levam ao cadastro #}
+          <a href="{% url 'pessoas:editar' cobranca.cliente.pk %}" class="block text-xs text-gray-500 underline"
+             title="Cadastre o telefone do cliente, com DDD, para cobrar pelo WhatsApp">Sem WhatsApp: {% if cobranca.cliente.telefone %}telefone incompleto{% else %}cliente sem telefone{% endif %}</a>
           {% endif %}
           {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.status != "judicial" %}
             {% if cobranca.origem in origens_cancelaveis %}

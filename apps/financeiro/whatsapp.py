@@ -53,12 +53,23 @@ def _maiuscula(texto):
     return texto[:1].upper() + texto[1:]
 
 
+def _aluguel(cobranca):
+    """'o aluguel da semana' × 'o aluguel de 3 dias (13/10 a 15/10)' (semana proporcional)."""
+    inicio, fim = cobranca.periodo_inicio, cobranca.periodo_fim
+    if inicio is None or fim is None or (fim - inicio).days == 6:
+        return "o aluguel da semana"
+    dias = (fim - inicio).days + 1
+    if dias == 1:
+        return f"o aluguel de 1 dia ({inicio:%d/%m})"
+    return f"o aluguel de {dias} dias ({inicio:%d/%m} a {fim:%d/%m})"
+
+
 def o_que_e(cobranca):
     """A cobrança em palavras, com artigo: 'a nota de débito ND 046 (multas)'."""
     descricao = cobranca.descricao.strip()
     if cobranca.origem == Cobranca.Origem.ALUGUEL:
         placa = cobranca.alocacao.veiculo.placa if cobranca.alocacao_id else ""
-        return "o aluguel da semana" + (f" do carro {placa}" if placa else "")
+        return _aluguel(cobranca) + (f" do carro {placa}" if placa else "")
     if cobranca.origem == Cobranca.Origem.NOTA_DEBITO:
         return "a " + _minuscula(descricao)
     if cobranca.origem in _ROTULOS:

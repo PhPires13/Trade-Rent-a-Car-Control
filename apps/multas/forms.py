@@ -121,7 +121,6 @@ class MultaEdicaoForm(MultaForm):
         widgets = {
             **MultaForm.Meta.widgets,
             "fici_data_indicacao": forms.DateInput(attrs={"type": "date"}),
-            "pago_por": forms.TextInput(attrs={"list": "opcoes-pago-por"}),
         }
 
     ROTULOS = {
@@ -135,6 +134,34 @@ class MultaEdicaoForm(MultaForm):
 
     #: o que a ND congela: mudar aqui não muda a cobrança que o cliente já recebeu
     CAMPOS_CONGELADOS_PELA_ND = ("valor", "cliente")
+
+    #: "Quem pagou" é escolha, não texto livre (D23): só "Cliente" tira a multa da
+    #: ND, e um texto como "João (motorista)" deixava a multa ser cobrada em dobro.
+    OPCOES_PAGO_POR = [
+        ("", "Não informado"),
+        ("Empresa", "Empresa"),
+        (Multa.PAGO_POR_CLIENTE, "Cliente (o motorista pagou ao órgão)"),
+    ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        campo = self.fields["pago_por"]
+        opcoes = list(self.OPCOES_PAGO_POR)
+        atual = (self.instance.pago_por or "").strip()
+        conhecidos = {valor.lower(): valor for valor, _ in opcoes if valor}
+        if atual.lower() in conhecidos:
+            # "cliente" gravado à mão vira a opção certa
+            self.initial["pago_por"] = conhecidos[atual.lower()]
+        elif atual:
+            # texto livre antigo continua na lista para a edição não apagá-lo
+            opcoes.append((atual, f"{atual} (anotado antes)"))
+        self.fields["pago_por"] = forms.ChoiceField(
+            label=campo.label,
+            choices=opcoes,
+            required=False,
+            help_text="Escolha “Cliente” só se o motorista pagou direto ao órgão — "
+            "aí a multa sai da nota de débito.",
+        )
 
     def clean(self):
         dados = super().clean()

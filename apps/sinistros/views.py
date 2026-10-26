@@ -160,6 +160,14 @@ class SinistroForm(FormularioBR, forms.ModelForm):
             for nome in self.CAMPOS_DA_PROTECAO:
                 self._errors.pop(nome, None)
                 dados[nome] = None
+        evento, ocorrido = dados.get("data_evento"), dados.get("data")
+        if evento and ocorrido and evento < ocorrido:
+            # o evento na Auto Truck é aberto por causa do ocorrido: antes dele é erro
+            # de digitação (ano ou mês trocado)
+            self.add_error(
+                "data_evento",
+                f"O evento não pode ter sido aberto antes do ocorrido ({ocorrido:%d/%m/%Y}).",
+            )
         return dados
 
     def save(self, commit=True):
@@ -240,33 +248,61 @@ def _mensagem_motorista(sinistro):
 
 
 def _aplicar_roubo(request, sinistro):
-    """Roubo: encerra a locação na data e deixa o carro Inativo (com aviso na tela)."""
+    """Roubo: tira o carro do motorista na data e deixa-o Inativo (com aviso na tela)."""
     try:
-        alocacao = services.registrar_roubo(sinistro)
+        resultado = services.registrar_roubo(sinistro)
     except ValidationError as erro:
         messages.warning(
             request,
             "O sinistro foi salvo, mas a locação não foi encerrada sozinha: "
-            + "; ".join(erro.messages),
+            + "; ".join(erro.messages)
+            + ". Depois de ajustar, use o botão “Aplicar o roubo” na edição do sinistro.",
         )
         return
+    placa = sinistro.veiculo.placa
     sinistro.veiculo.refresh_from_db(fields=["status"])
     if sinistro.veiculo.status == Veiculo.Status.INATIVO:
-        texto = f"Roubo registrado: {sinistro.veiculo.placa} ficou Inativo até ser recuperado."
+        texto = f"Roubo registrado: {placa} ficou Inativo até ser recuperado."
     else:
-        texto = (
-            f"Roubo registrado. {sinistro.veiculo.placa} continua como "
-            f"{sinistro.veiculo.get_status_display()}."
-        )
+        texto = f"Roubo registrado. {placa} continua como {sinistro.veiculo.get_status_display()}."
+    alocacao = resultado.alocacao
     if alocacao is not None:
         texto += (
             f" A locação de {alocacao.cliente.nome} foi encerrada em "
             f"{alocacao.data_termino:%d/%m/%Y} — o aluguel para de ser cobrado."
         )
+    if resultado.troca is not None:
+        troca = resultado.troca
+        texto += (
+            f" {placa} era o carro substituto de {troca.alocacao.cliente.nome}: a troca foi "
+            f"encerrada em {troca.data_devolucao:%d/%m/%Y}. A locação dele continua com o "
+            f"{troca.alocacao.veiculo.placa} — se ele ficou sem carro, combine com ele e "
+            "ajuste em Alocações."
+        )
+    if resultado.locacao_continua is not None:
+        continua = resultado.locacao_continua
+        texto += (
+            f" A locação de {continua.cliente.nome} continua, porque ele está com o carro "
+            f"substituto {continua.troca_ativa.veiculo_substituto.placa}."
+        )
     messages.warning(request, texto)
     if alocacao is not None:
         # o que já tinha sido pago por semanas depois do roubo (crédito/caução)
         _avisar_acerto_das_semanas(request, alocacao)
+
+
+def _deixou_de_ser_roubo(request, sinistro, veiculo_id=None):
+    """Tipo (ou carro) corrigido no roubo: o carro de antes sai de Inativo."""
+    if services.deixou_de_ser_roubo(sinistro, veiculo_id):
+        veiculo = Veiculo.objects.get(pk=veiculo_id or sinistro.veiculo_id)
+        motivo = "deixou de ser roubo" if veiculo_id is None else "o roubo é de outro carro"
+        messages.info(
+            request,
+            f"Como {motivo}, {veiculo.placa} voltou a ficar "
+            f"{veiculo.get_status_display()}. "
+            "Se o roubo tinha encerrado uma locação, ela continua encerrada — ajuste em "
+            "Alocações se precisar.",
+        )
 
 
 #: chave da sessão com os códigos de formulário de "Novo sinistro" já gravados
@@ -307,12 +343,21 @@ def editar(request, sinistro_id):
         ).prefetch_related("manutencoes", "auxilios"),
         pk=sinistro_id,
     )
+    # o is_valid() já troca o tipo na instância: guarda o de antes
+    era_roubo_aberto = sinistro.tipo == Sinistro.Tipo.ROUBO and not sinistro.data_recuperacao
+    veiculo_antes = sinistro.veiculo_id
     form = SinistroForm(request.POST or None, instance=sinistro)
     if request.method == "POST" and form.is_valid():
         virou_roubo = (
             "tipo" in form.changed_data and form.cleaned_data["tipo"] == Sinistro.Tipo.ROUBO
         )
         sinistro = form.save()
+        trocou_carro = sinistro.veiculo_id != veiculo_antes
+        if era_roubo_aberto and (sinistro.tipo != Sinistro.Tipo.ROUBO or trocou_carro):
+            # o carro de antes não foi roubado (tipo ou carro corrigido): sai de Inativo
+            _deixou_de_ser_roubo(request, sinistro, veiculo_antes if trocou_carro else None)
+        if era_roubo_aberto and sinistro.tipo == Sinistro.Tipo.ROUBO and trocou_carro:
+            virou_roubo = True  # o roubo passa para o carro certo
         messages.success(
             request,
             f"Sinistro de {sinistro.veiculo.placa} salvo — situação: "
@@ -444,7 +489,18 @@ def carro_recuperado(request, sinistro_id):
             else:
                 texto = (
                     f"{sinistro.veiculo.placa} recuperado em {date.today():%d/%m/%Y}. A situação "
-                    f"do carro continua {sinistro.veiculo.get_status_display()}."
+                    f"do carro agora é {sinistro.veiculo.get_status_display()}."
                 )
             messages.success(request, texto)
+    return redirect(_volta(request))
+
+
+def aplicar_roubo(request, sinistro_id):
+    """Botão "Aplicar o roubo": refaz o encerramento que não deu certo ao salvar."""
+    sinistro = get_object_or_404(Sinistro.objects.select_related("veiculo"), pk=sinistro_id)
+    if request.method == "POST":
+        if sinistro.tipo != Sinistro.Tipo.ROUBO or sinistro.data_recuperacao:
+            messages.info(request, "Este sinistro não é um roubo em aberto.")
+        else:
+            _aplicar_roubo(request, sinistro)
     return redirect(_volta(request))

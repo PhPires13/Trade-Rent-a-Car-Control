@@ -92,6 +92,14 @@ def _planilha_receitas(ano, mes):
     linhas.append(
         ["Caução recebida (não é receita — é do cliente)", float(r["caucao_recebida"]), "Não"]
     )
+    # sobra que virou crédito: fora do total; entra na base quando o crédito é usado
+    linhas.append(
+        [
+            "Adiantamentos recebidos (crédito do cliente — entra quando for usado)",
+            float(r["adiantamentos"]),
+            "Não",
+        ]
+    )
     return "Receitas", ["Grupo", "Valor (R$)", "Base do DAS?"], linhas
 
 

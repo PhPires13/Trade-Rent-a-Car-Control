@@ -1,6 +1,7 @@
 """Vigências e documentos a vencer — IPVA, licenciamento, rastreador, bateria e CNH (§5)."""
 
 from datetime import date, timedelta
+from urllib.parse import quote
 
 from django.db.models import Count, Min
 from django.urls import reverse
@@ -105,7 +106,7 @@ def pendencias_do_veiculo(veiculo, hoje=None):
     não tem pendências.
     """
     # imports locais: estes apps importam apps.frota.models
-    from apps.km.models import RegistroKm, primeiro_dia_do_mes
+    from apps.km.models import pendencias_de_leitura
     from apps.manutencao.services import STATUS_FORA_DO_ACOMPANHAMENTO, resumo_preventivas
     from apps.multas.models import Multa
     from apps.sinistros.models import Sinistro
@@ -126,9 +127,23 @@ def pendencias_do_veiculo(veiculo, hoje=None):
 
     if acompanhado:
         url_manutencao = reverse("manutencao:registrar", args=[veiculo.pk])
+        url_detalhe = reverse("frota:detalhe", args=[veiculo.pk])
+
+        def link_preventiva(prev):
+            # mesmo link do quadro de preventivas: já vem com o item escolhido e,
+            # se nunca houve troca registrada, abre "Informar última troca" (data e
+            # KM em branco) em vez de "feita hoje" — e volta para a ficha do carro
+            url = f"{url_manutencao}?item={prev.item.pk}"
+            if prev.sem_registro:
+                url += "&ultima=1"
+            url += f"&volta={quote(url_detalhe)}"
+            acao = "Informar última troca" if prev.sem_registro else "Registrar que foi feita"
+            return url, acao
+
         for prev in resumo_preventivas(veiculo):
             if not prev.em_alerta:
                 continue
+            url_prev, acao_prev = link_preventiva(prev)
             if prev.status == prev.VENCIDA:
                 detalhe = f"passou {milhar(-prev.faltam_km)} km do ponto da troca"
                 if prev.faltam_km == 0:
@@ -136,8 +151,8 @@ def pendencias_do_veiculo(veiculo, hoje=None):
                 adicionar(
                     f"{prev.item.nome}: vencida",
                     detalhe,
-                    url_manutencao,
-                    "Registrar que foi feita",
+                    url_prev,
+                    acao_prev,
                     True,
                 )
             else:
@@ -152,19 +167,28 @@ def pendencias_do_veiculo(veiculo, hoje=None):
                 adicionar(
                     f"{prev.item.nome}: está chegando a hora",
                     detalhe,
-                    url_manutencao,
-                    "Registrar que foi feita",
+                    url_prev,
+                    acao_prev,
                     False,
                 )
 
-        mes = primeiro_dia_do_mes(hoje)
-        if not RegistroKm.objects.filter(veiculo=veiculo, mes_referencia=mes).exists():
+        # mesma regra do painel e da tela de KM (D21): também os meses anteriores
+        # esquecidos, não só o mês atual
+        for leitura in pendencias_de_leitura(hoje):
+            if leitura.veiculo.pk != veiculo.pk:
+                continue
+            mes = leitura.mes
+            nome_mes = date_format(mes, "F").lower()
+            if mes.year != hoje.year:
+                nome_mes += f" de {mes.year}"
             adicionar(
-                f"KM de {date_format(mes, 'F').lower()} ainda não anotado",
-                "anote quanto marca o painel do carro",
+                f"KM de {nome_mes} ainda não anotado",
+                "esse mês já passou e a leitura ficou faltando"
+                if leitura.atrasada
+                else "anote quanto marca o painel do carro",
                 f"{reverse('km:lista')}?mes={mes:%Y-%m}",
                 "Anotar o KM",
-                False,
+                leitura.atrasada,
             )
 
     url_editar = reverse("frota:veiculo_editar", args=[veiculo.pk])

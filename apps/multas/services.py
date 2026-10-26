@@ -18,7 +18,10 @@ DIAS_ALERTA_FICI = 7
 @transaction.atomic
 def registrar_nic(multa, data_infracao=None, valor=None):
     """FICI perdido → multa NIC contra a empresa, vinculada à original (docs.md §4.7)."""
-    if hasattr(multa, "multa_nic"):
+    # trava a multa: dois envios ao mesmo tempo esperam um pelo outro e o segundo
+    # recebe o aviso abaixo (antes, o banco recusava a 2ª NIC com erro 500)
+    list(Multa.objects.select_for_update().filter(pk=multa.pk).values_list("pk", flat=True))
+    if Multa.objects.filter(multa_origem_nic_id=multa.pk).exists():
         raise ValidationError("Esta multa já tem NIC registrada.")
     multa.fici_status = Multa.Fici.PRAZO_PERDIDO
     multa.save(update_fields=["fici_status"])

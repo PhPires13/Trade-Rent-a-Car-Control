@@ -51,8 +51,8 @@
   {% csrf_token %}
   <input type="hidden" name="token" value="{{ token }}">
   <div>
-    <label class="mb-1 block text-sm font-medium">Cliente *</label>
-    <select name="cliente" required x-model="cliente" x-on:change="ajustar()">
+    <label for="nd-cliente" class="mb-1 block text-sm font-medium">Cliente</label>
+    <select name="cliente" id="nd-cliente" required x-model="cliente" x-on:change="ajustar()">
       <option value="">— escolha —</option>
       {% for c in clientes %}
       <option value="{{ c.pk }}" {% if post.cliente == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.nome }}</option>
@@ -61,13 +61,13 @@
   </div>
   <div class="grid gap-4 sm:grid-cols-2">
     <div>
-      <label class="mb-1 block text-sm font-medium">Data de emissão *</label>
-      <input type="date" name="data_emissao" required x-model="emissao" x-on:change="ajustar()"
+      <label for="nd-emissao" class="mb-1 block text-sm font-medium">Data de emissão</label>
+      <input type="date" name="data_emissao" id="nd-emissao" required x-model="emissao" x-on:change="ajustar()"
              value="{% if post.data_emissao %}{{ post.data_emissao }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}">
     </div>
     <div>
       <label for="nd-vencimento" class="mb-1 block text-sm font-medium">Vencimento</label>
-      <input type="date" id="nd-vencimento" name="vencimento" x-model="venc" x-on:input="manual = true" x-bind:min="emissao"
+      <input type="date" id="nd-vencimento" name="vencimento" data-opcional x-model="venc" x-on:input="manual = true" x-bind:min="emissao"
              value="{{ post.vencimento|default:'' }}" aria-describedby="nd-vencimento-ajuda">
     </div>
   </div>
@@ -79,13 +79,14 @@
   </p>
 
   <div>
-    <label class="mb-1 block text-sm font-medium">O que está sendo cobrado *</label>
+    <p class="mb-1 block text-sm font-medium">O que está sendo cobrado</p>
     <p class="mb-2 text-xs text-gray-500">Um item por linha: descrição e valor em reais.</p>
     <template x-for="(item, i) in itens" x-bind:key="i">
       <div class="mb-2 flex gap-2">
         <input type="text" name="item_descricao" placeholder="descrição (ex.: multa avanço de sinal 12/04)"
                x-model="item.d" class="flex-1" maxlength="200" aria-label="Descrição do item">
-        <input type="text" name="item_valor" placeholder="R$ ex.: 150,00" x-model="item.v" class="w-28" aria-label="Valor do item">
+        <input type="text" name="item_valor" placeholder="R$ ex.: 150,00" x-model="item.v" class="w-28" aria-label="Valor do item (R$)"
+               inputmode="decimal" autocomplete="off">
         <button type="button" class="px-1 text-red-600" x-on:click="itens.splice(i, 1)" x-show="itens.length > 1"
                 title="Remover este item" aria-label="Remover este item">✕</button>
       </div>
@@ -97,8 +98,8 @@
   </div>
 
   <div>
-    <label class="mb-1 block text-sm font-medium">Observações</label>
-    <textarea name="observacoes" rows="2">{{ post.observacoes|default:'' }}</textarea>
+    <label for="nd-observacoes" class="mb-1 block text-sm font-medium">Observações</label>
+    <textarea name="observacoes" id="nd-observacoes" data-opcional rows="2">{{ post.observacoes|default:'' }}</textarea>
   </div>
 
   <div class="flex items-center gap-3">

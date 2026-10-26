@@ -11,6 +11,7 @@ from django.urls import reverse
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.campos import FormularioBR, dinheiro_br
+from apps.formatos import milhar, numero_br
 from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
 
@@ -252,44 +253,51 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
     def clean_km_atual(self):
         """O odômetro nunca anda para trás — todos os fluxos só aumentam o KM.
 
-        Reduzir aqui esconderia preventivas vencidas; correção real de odômetro
-        é exceção e fica no Admin.
+        Reduzir aqui esconderia preventivas vencidas; leitura digitada errada se
+        corrige em "Corrigir", no histórico de KM do carro (refaz KM e excedente).
         """
         km = self.cleaned_data["km_atual"]
         if self.instance.pk and km < self.instance.km_atual:
             raise ValidationError(
-                f"KM atual ({km}) menor que o registrado ({self.instance.km_atual}). "
-                "O odômetro não diminui — correções excepcionais são feitas no Admin."
+                f"KM atual ({milhar(km)}) menor que o registrado "
+                f"({milhar(self.instance.km_atual)}). O KM do carro não diminui. Se uma "
+                "leitura foi digitada errada, abra “Registros de KM” na ficha deste carro e use "
+                "“Corrigir” nela."
             )
         return km
 
     def clean_uso(self):
-        """Carro alugado não pode virar "Fora de locação".
-
-        Ele continuaria sendo cobrado, mas sairia das preventivas, do controle de
-        KM e do ranking de venda enquanto o motorista roda com ele.
-        """
+        """Carro alugado não pode virar "Fora de locação" (C14 — regra em
+        impedimento_fora_de_locacao, usada também no Admin)."""
         uso = self.cleaned_data["uso"]
-        if not self.instance.pk or uso != Veiculo.Uso.FORA_LOCACAO:
-            return uso
-        if self.instance.alocacoes.filter(status=Alocacao.Status.ATIVA).exists():
-            raise ValidationError(
-                "Este carro está alugado. Encerre a alocação antes de marcar como "
-                "“Fora de locação”."
-            )
-        if TrocaTemporaria.objects.filter(
-            Q(veiculo_substituto=self.instance) | Q(alocacao__veiculo=self.instance),
-            data_devolucao__isnull=True,
-        ).exists():
-            raise ValidationError(
-                "Este carro está numa troca (carro reserva) em aberto. Registre a devolução "
-                "da troca antes de marcar como “Fora de locação”."
-            )
+        if self.instance.pk and uso == Veiculo.Uso.FORA_LOCACAO:
+            motivo = impedimento_fora_de_locacao(self.instance)
+            if motivo:
+                raise ValidationError(motivo)
         return uso
 
     @property
     def secoes(self):
         return [(titulo, [self[nome] for nome in nomes]) for titulo, nomes in SECOES_VEICULO]
+
+
+def impedimento_fora_de_locacao(veiculo):
+    """Por que o carro não pode virar "Fora de locação" agora (None = pode).
+
+    Ele continuaria sendo cobrado, mas sairia das preventivas, do controle de
+    KM e do ranking de venda enquanto o motorista roda com ele (C14).
+    """
+    if veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).exists():
+        return "Este carro está alugado. Encerre a alocação antes de marcar como “Fora de locação”."
+    if TrocaTemporaria.objects.filter(
+        Q(veiculo_substituto=veiculo) | Q(alocacao__veiculo=veiculo),
+        data_devolucao__isnull=True,
+    ).exists():
+        return (
+            "Este carro está numa troca (carro reserva) em aberto. Registre a devolução "
+            "da troca antes de marcar como “Fora de locação”."
+        )
+    return None
 
 
 def _formulario_veiculo(request, veiculo):
@@ -482,14 +490,28 @@ def vender(request, veiculo_id):
                 ["Confira a data e os valores — ex.: valor 45.000,00 e KM só com números."],
             )
             messages.error(request, "Venda não registrada: " + "; ".join(mensagens))
+    if veiculo.status == Veiculo.Status.VENDIDO:
+        impedimento = {
+            "texto": f"{veiculo.placa} já foi vendido.",
+            "url": reverse("frota:ficha", args=[veiculo.pk]),
+            "acao": "Ver a ficha do carro",
+        }
+    else:
+        # mesma explicação do detalhe: sem formulário enquanto alguém está com o carro
+        impedimento = _quem_esta_com_o_carro(veiculo)["impedimento_venda"]
+    dados = request.POST if request.method == "POST" else {}
+    estimado = veiculo.valor_venda_estimado
     return render(
         request,
         "frota/vender.html",
         {
             "veiculo": veiculo,
             "hoje": date.today(),
-            "dados": request.POST if request.method == "POST" else {},
+            "dados": dados,
             "ficha": desmobilizacao.montar_ficha(veiculo),
+            "impedimento_venda": impedimento,
+            # já vem com o valor de mercado estimado; a pessoa ajusta para o recebido
+            "valor_sugerido": numero_br(estimado) if estimado and not dados else "",
         },
     )
 

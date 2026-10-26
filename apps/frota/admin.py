@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin
 from simple_history.admin import SimpleHistoryAdmin
 
@@ -27,8 +28,26 @@ class PagamentoIpvaAdmin(SimpleHistoryAdmin):
     search_fields = ["veiculo__placa"]
 
 
+class VeiculoAdminForm(forms.ModelForm):
+    class Meta:
+        model = Veiculo
+        fields = "__all__"  # noqa: DJ007 — quem escolhe os campos é o VeiculoAdmin
+
+    def clean_uso(self):
+        """C14 também no Admin: carro alugado ou em troca aberta não vira "Fora de locação"."""
+        from .views import impedimento_fora_de_locacao  # views importa outros apps
+
+        uso = self.cleaned_data.get("uso")
+        if self.instance.pk and uso == Veiculo.Uso.FORA_LOCACAO:
+            motivo = impedimento_fora_de_locacao(self.instance)
+            if motivo:
+                raise forms.ValidationError(motivo)
+        return uso
+
+
 @admin.register(Veiculo)
 class VeiculoAdmin(SimpleHistoryAdmin):
+    form = VeiculoAdminForm
     inlines = [PagamentoIpvaInline]
     list_display = [
         "placa",

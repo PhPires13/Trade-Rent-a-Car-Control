@@ -22,6 +22,7 @@
                if (n === 'item') { item = $event.target.value; if (tipos[item]) { tipo = tipos[item]; document.getElementById('id_tipo').value = tipo; } }">
   {% csrf_token %}
   {% if volta %}<input type="hidden" name="volta" value="{{ volta }}">{% endif %}
+  {% if not editando %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
   {% include "_erros_form.html" %}
 
   <fieldset class="space-y-4">
@@ -35,6 +36,11 @@
         <p x-show="tipos[item] === 'preventiva'" x-cloak class="mt-1 text-xs font-medium text-yellow-800">Obrigatório para a contagem da próxima troca.</p>
       </div>
     </div>
+    {% if form.km_suspeito %}
+    <label class="flex items-start gap-2 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-900" for="{{ form.confirmar_km.id_for_label }}">
+      {{ form.confirmar_km }} {{ form.confirmar_km.label }}
+    </label>
+    {% endif %}
     {% include "manutencao/_campo.html" with field=form.descricao %}
   </fieldset>
 

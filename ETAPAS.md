@@ -224,6 +224,23 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - Mensagem de WhatsApp diz "aluguel da semana" também nas semanas proporcionais.
 - Deploy Railway/Neon e carga de dados reais.
 
+### Etapa 16 — Pendências das etapas 14 e 15
+- 7 frentes com revisão: ~88 itens feitos, o resto descartado com motivo (já resolvido ou limitação aceitável).
+- Financeiro: teclado numérico/rótulos em caução, ND e encargo; DAS baixa .xlsx; cancelar ND cancela encargos sem pagamento; WhatsApp "aluguel de N dias" na semana proporcional; quadro de crédito na caução; aviso "sem WhatsApp".
+- Alocações/clientes: botões "Recebi", telas de troca mostram o novo valor da semana, Admin de troca travado.
+- Frota: KM pendente da ficha igual ao painel, "Informar última troca", "Fora de locação" bloqueado também no Admin.
+- KM/manutenção: acerto de excedente no Admin (consulta), trava de envio duplicado em manutenção, KM fora do normal na manutenção.
+- Multas/sinistros: "quem pagou" como escolha, roubo de carro substituto, sinistro que deixa de ser roubo devolve o carro.
+- Painel: preventivas "Sem registro"; relatórios: custo/km sem conserto pago pela cota.
+
+**Ainda pendente:**
+- Devolver crédito ao cliente em dinheiro (precisa de tipo novo de movimento + decisão dos donos).
+- Telefone sem DDD gera link de WhatsApp inválido (validar DDD no cadastro).
+- Carro na oficina volta a "Disponível" ao encerrar alocação ou devolver troca.
+- Repasse quitado com desconto da caução fica fora da receita do carro na ficha (raro).
+- Conferir em celular de verdade: painel, menu "Mais" das alocações, formulário de manutenção com "Confirmo o KM".
+- Deploy Railway/Neon e carga de dados reais.
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:

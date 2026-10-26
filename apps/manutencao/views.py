@@ -1,16 +1,21 @@
 from datetime import date
+from uuid import uuid4
 
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
+from django.db.models import Max
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from apps.alocacoes.km_aviso import suspeita_de_km
+from apps.alocacoes.models import VALIDADOR_KM
 from apps.campos import FormularioBR
-from apps.formatos import brl
+from apps.financeiro.views import _envio_unico
+from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
@@ -25,6 +30,52 @@ from .services import (
 
 #: custo e cobrança são valores pagos/recebidos: negativo viraria "lucro" falso no histórico
 SEM_NEGATIVO = MinValueValidator(0, message="O valor não pode ser negativo.")
+
+#: chave da sessão com os códigos de formulário de "Registrar manutenção" já gravados
+SESSAO_TOKENS_MANUTENCAO = "manutencao_tokens_usados"
+
+
+def _ultima_anotacao_de_km(veiculo, ignorar=None):
+    """Data mais recente em que o KM do carro foi anotado (leitura, vistoria ou
+    manutenção), ou None se nunca foi."""
+    from apps.alocacoes.models import Vistoria
+    from apps.km.models import RegistroKm
+
+    manutencoes = Manutencao.objects.filter(veiculo=veiculo, km__isnull=False)
+    if ignorar is not None and ignorar.pk:
+        manutencoes = manutencoes.exclude(pk=ignorar.pk)
+    datas = [
+        RegistroKm.objects.filter(veiculo=veiculo).aggregate(d=Max("data_leitura"))["d"],
+        Vistoria.objects.filter(veiculo=veiculo, km__isnull=False).aggregate(d=Max("data"))["d"],
+        manutencoes.aggregate(d=Max("data"))["d"],
+    ]
+    datas = [d for d in datas if d]
+    return max(datas) if datas else None
+
+
+def suspeita_do_km_da_manutencao(veiculo, km, data, instancia=None):
+    """Aviso quando o KM digitado sobe o KM do carro além do normal (D27); None se ok.
+
+    Só olha o KM que passa do KM atual — é ele que mexe no carro (preventivas
+    "Vencida", excedente). Mesma régua da vistoria e da leitura mensal.
+    """
+    from apps.km.correcao import SALTO_MAXIMO_SEM_LEITURA
+
+    if veiculo is None or km is None or data is None or km <= veiculo.km_atual:
+        return None
+    if instancia is not None and instancia.pk and instancia.km == km:
+        return None  # editando sem mexer no KM: já foi aceito antes
+    data_base = _ultima_anotacao_de_km(veiculo, ignorar=instancia)
+    if data_base is not None:
+        return suspeita_de_km(km, data, veiculo.km_atual, data_base, "na última anotação de KM")
+    if km - veiculo.km_atual <= SALTO_MAXIMO_SEM_LEITURA:
+        return None
+    return (
+        f"Você digitou {milhar(km)} km, mas o carro está cadastrado com "
+        f"{milhar(veiculo.km_atual)} km — seriam {milhar(km - veiculo.km_atual)} km a mais. "
+        f"Confira se não sobrou um dígito. Se estiver certo, marque “Confirmo o KM” e "
+        f"salve de novo."
+    )
 
 
 def _datas_da_oficina(entrada, saida):
@@ -49,6 +100,11 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
         label="Já gerar a cobrança para o cliente",
         required=False,
         help_text="A cobrança entra no Financeiro como conta a receber.",
+    )
+    #: só aparece na tela quando o KM foge do normal (D27)
+    confirmar_km = forms.BooleanField(
+        label="Confirmo o KM (está certo, mesmo fora do normal)",
+        required=False,
     )
 
     class Meta:
@@ -99,6 +155,9 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
     def __init__(self, *args, veiculo=None, **kwargs):
         super().__init__(*args, **kwargs)
         veiculo = veiculo or (self.instance.veiculo if self.instance.veiculo_id else None)
+        self.veiculo = veiculo
+        self.km_suspeito = False
+        self.fields["km"].validators.append(VALIDADOR_KM)
         self.fields["item"].queryset = ItemPreventiva.objects.filter(ativo=True)
         self.fields["pagamento_custo"].choices = [
             ("pendente", "Ainda não"),
@@ -130,6 +189,15 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
         item = dados.get("item")
         if item and item.intervalo_km_padrao and dados.get("km") is None:
             self.add_error("km", "Informe o KM para a contagem da próxima troca recomeçar.")
+        aviso_km = suspeita_do_km_da_manutencao(
+            self.veiculo, dados.get("km"), dados.get("data"), self.instance
+        )
+        # a caixinha só aparece quando o aviso é de KM fora do normal (outro erro
+        # de KM não se resolve marcando "Confirmo") e segue marcada se a pessoa
+        # já confirmou mas outro campo deu erro
+        self.km_suspeito = bool(aviso_km)
+        if aviso_km and not dados.get("confirmar_km"):
+            self.add_error("km", aviso_km)
         entrada, saida = dados.get("data_entrada"), dados.get("data_saida")
         if saida and not entrada:
             self.add_error("data_entrada", "Informe também quando o carro entrou na oficina.")
@@ -397,11 +465,22 @@ def registrar(request, veiculo_id):
         inicial.update(
             sinistro=int(sinistro_id), tipo=Manutencao.Tipo.CORRETIVA, data_entrada=date.today()
         )
+    # Cada formulário leva um código único (como a ND e a multa): clique duplo,
+    # internet lenta ou "Voltar" não gravam a mesma manutenção duas vezes.
+    token = request.POST.get("token", "") if request.method == "POST" else ""
     form = ManutencaoForm(request.POST or None, veiculo=veiculo, initial=inicial)
     if request.method == "POST" and form.is_valid():
-        manutencao = form.save(commit=False)
-        manutencao.veiculo = veiculo
-        manutencao.save()
+        with _envio_unico(request, SESSAO_TOKENS_MANUTENCAO, token) as repetido:
+            if repetido:
+                messages.warning(
+                    request,
+                    "Esta manutenção já tinha sido registrada — o envio repetido foi ignorado "
+                    "e nada foi gravado em dobro.",
+                )
+                return redirect(_volta(request, reverse("manutencao:historico", args=[veiculo.pk])))
+            manutencao = form.save(commit=False)
+            manutencao.veiculo = veiculo
+            manutencao.save()
         messages.success(request, f"Manutenção registrada para {veiculo.placa}.")
         _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
         _carro_foi_para_oficina(request, manutencao)
@@ -416,6 +495,7 @@ def registrar(request, veiculo_id):
             "form": form,
             "volta": _volta(request, ""),
             "informar_ultima": informar_ultima,
+            "token": token or uuid4().hex,
         },
     )
 

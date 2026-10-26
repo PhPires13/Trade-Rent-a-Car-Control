@@ -94,6 +94,11 @@
       </div>
       {% endif %}
     </dl>
+    {% if card.saldo_devedor > 0 %}
+    <a href="{% url 'financeiro:receber' %}?cliente={{ card.cliente.pk }}"
+       class="mt-3 flex min-h-11 items-center justify-center rounded bg-marca-amarelo px-3 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:min-h-0 sm:py-1.5"
+       title="Abre o recebimento já com este cliente escolhido">✓ Recebi</a>
+    {% endif %}
   </div>
   {% empty %}
   <div class="rounded-lg bg-white p-8 text-center shadow md:col-span-2 lg:col-span-3">

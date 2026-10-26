@@ -50,6 +50,10 @@
       {% if sinistro.boletim_ocorrencia %}<span class="text-xs text-gray-600">· BO {{ sinistro.boletim_ocorrencia }}</span>{% endif %}
     </p>
     <div class="flex flex-wrap items-center gap-3 text-sm">
+      {% if sinistro.tipo == "colisao" and sinistro.status != "concluido" and not sinistro.manutencoes.all %}
+        <a href="{% url 'manutencao:registrar' sinistro.veiculo_id %}?sinistro={{ sinistro.pk }}"
+           class="rounded border border-gray-300 px-4 py-2 font-semibold text-marca-preto hover:bg-gray-50 sm:px-3 sm:py-1">🔧 Registrar ida para a oficina</a>
+      {% endif %}
       {% if sinistro.dias_parado %}
         <span class="{% if sinistro.dias_parado > 7 %}font-semibold text-red-700{% else %}text-gray-600{% endif %}">
           🔧 {{ sinistro.dias_parado }} dia{{ sinistro.dias_parado|pluralize }} parado

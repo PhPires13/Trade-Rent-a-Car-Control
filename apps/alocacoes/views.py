@@ -6,12 +6,13 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
 from apps.campos import FormularioBR, exibir_dinheiro
 from apps.financeiro.models import Caucao
 from apps.financeiro.services import gerar_cobrancas_semanais
-from apps.formatos import brl
+from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 from apps.manutencao.services import oficina_por_veiculo
 from apps.pessoas.models import Cliente
@@ -201,11 +202,48 @@ class TrocaForm(FormularioBR, forms.ModelForm):
             "observacoes": forms.Textarea(attrs={"rows": 2}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, alocacao=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["veiculo_substituto"].queryset = Veiculo.objects.filter(
+        campo = self.fields["veiculo_substituto"]
+        campo.queryset = Veiculo.objects.filter(
             status=Veiculo.Status.DISPONIVEL, uso=Veiculo.Uso.LOCACAO
         )
+        campo.empty_label = "Escolha o carro substituto…"
+        # Carro que ainda consta na oficina aparece marcado na lista de escolha.
+        self.na_oficina = oficina_por_veiculo(list(campo.queryset.values_list("pk", flat=True)))
+        campo.label_from_instance = lambda v: (
+            f"{v.placa} — {v.marca_modelo}"
+            + (
+                f" ⚠ na oficina desde {self.na_oficina[v.pk].data_entrada:%d/%m}"
+                if v.pk in self.na_oficina
+                else ""
+            )
+        )
+        if alocacao is not None:
+            self.fields["valor_semanal_ajustado"].help_text = (
+                f"Hoje a semana custa {brl(alocacao.valor_semanal)}. Deixe vazio para manter "
+                "esse valor; preencha só se o substituto tiver outro preço por semana."
+            )
+
+
+def _semanas_reajustadas(request, alteradas):
+    """Diz na tela o novo valor das semanas em aberto refeitas pela troca (D02)."""
+    for cobranca in alteradas or []:
+        messages.info(
+            request,
+            f"A semana com vencimento em {cobranca.vencimento:%d/%m/%Y} passou a "
+            f"{brl(cobranca.valor)} (dias divididos entre os dois carros).",
+        )
+
+
+def _voltar(request):
+    """Endereço seguro de ?voltar= (ex.: a ficha do cliente), ou None."""
+    voltar = request.GET.get("voltar", "")
+    if voltar and url_has_allowed_host_and_scheme(
+        voltar, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return voltar
+    return None
 
 
 class VistoriaForm(FormularioBR, forms.ModelForm):
@@ -295,6 +333,15 @@ def lista(request):
     )
     if mostrar == "ativas":
         alocacoes = alocacoes.filter(status=Alocacao.Status.ATIVA)
+    alocacoes = list(alocacoes)
+    # selo "deve R$ X" + botão "Recebi" nas ativas — uma consulta para todos
+    dividas = dividas_por_cliente(
+        {a.cliente_id for a in alocacoes if a.status == Alocacao.Status.ATIVA}
+    )
+    for alocacao in alocacoes:
+        alocacao.divida = (
+            dividas.get(alocacao.cliente_id) if alocacao.status == Alocacao.Status.ATIVA else None
+        )
     return render(request, "alocacoes/lista.html", {"alocacoes": alocacoes, "mostrar": mostrar})
 
 
@@ -425,7 +472,15 @@ def editar(request, alocacao_id):
             f"Alocação de {alocacao.veiculo.placa} → {alocacao.cliente.nome} atualizada.",
         )
         return _ficha(alocacao)
-    return render(request, "alocacoes/editar.html", {"alocacao": alocacao, "form": form})
+    return render(
+        request,
+        "alocacoes/editar.html",
+        {
+            "alocacao": alocacao,
+            "form": form,
+            "voltar": _voltar(request) or reverse("alocacoes:lista"),
+        },
+    )
 
 
 def encerrar(request, alocacao_id):
@@ -446,7 +501,9 @@ def encerrar(request, alocacao_id):
                 raise ValidationError(aviso_km)
             alocacao.encerrar(data_termino=data_termino, km_devolucao=km_devolucao)
             messages.success(
-                request, f"Alocação encerrada — {alocacao.veiculo.placa} está disponível."
+                request,
+                f"Alocação encerrada — {alocacao.veiculo.placa} está "
+                f"{alocacao.veiculo.get_status_display().lower()}.",
             )
             _avisar_acerto_das_semanas(request, alocacao)
             # Encerrar dispara o acerto de caução quando há saldo retido (docs.md §4.2/§4.4).
@@ -458,10 +515,18 @@ def encerrar(request, alocacao_id):
                     f"de {alocacao.cliente.nome}.",
                 )
                 return redirect("financeiro:caucao_detalhe", caucao.pk)
-            return redirect("alocacoes:lista")
+            # começou na ficha do cliente (?voltar=): volta para ela
+            return redirect(_voltar(request) or "alocacoes:lista")
         except (ValidationError, KeyError, ValueError) as erro:
             _avisar_erro_de_devolucao(request, erro)
     situacao = situacao_da_devolucao(alocacao)
+    if _voltar(request):
+        # a vistoria volta para esta tela sem perder o ?voltar= (ficha do cliente)
+        situacao["url_vistoria_devolucao"] = (
+            reverse("alocacoes:vistoria_nova", args=[alocacao.pk])
+            + "?"
+            + urlencode({"tipo": "saida", "voltar": request.get_full_path()})
+        )
     devolucao = situacao["vistoria_devolucao"]
     # KM e data já anotados na vistoria de devolução entram prontos no formulário.
     km_sugerido = devolucao.km if devolucao and devolucao.km else ""
@@ -477,6 +542,7 @@ def encerrar(request, alocacao_id):
             "km_sugerido": km_sugerido,
             "data_sugerida": data_sugerida,
             "aviso_km": aviso_km,
+            "voltar": _voltar(request) or reverse("alocacoes:lista"),
             **situacao,
         },
     )
@@ -511,7 +577,9 @@ def troca_nova(request, alocacao_id):
     alocacao = get_object_or_404(
         Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
     )
-    form = TrocaForm(request.POST or None, initial={"data_retirada": date.today()})
+    form = TrocaForm(
+        request.POST or None, initial={"data_retirada": date.today()}, alocacao=alocacao
+    )
     if request.method == "POST" and form.is_valid():
         troca = form.save(commit=False)
         troca.alocacao = alocacao
@@ -522,12 +590,29 @@ def troca_nova(request, alocacao_id):
                 request,
                 f"{alocacao.cliente.nome} está com o substituto {troca.veiculo_substituto.placa}.",
             )
+            oficina = form.na_oficina.get(troca.veiculo_substituto_id)
+            if oficina:
+                messages.warning(
+                    request,
+                    f"Atenção: {troca.veiculo_substituto.placa} consta como na oficina desde "
+                    f"{oficina.data_entrada:%d/%m/%Y}. Se já voltou, marque "
+                    "“Carro voltou da oficina” no histórico de manutenção.",
+                )
+            _semanas_reajustadas(request, getattr(troca, "semanas_reajustadas", None))
             return _ficha(alocacao)
         except ValidationError as erro:
             for mensagens in erro.message_dict.values():
                 for mensagem in mensagens:
                     form.add_error(None, mensagem)
-    return render(request, "alocacoes/troca_nova.html", {"alocacao": alocacao, "form": form})
+    return render(
+        request,
+        "alocacoes/troca_nova.html",
+        {
+            "alocacao": alocacao,
+            "form": form,
+            "voltar": _voltar(request) or reverse("alocacoes:lista"),
+        },
+    )
 
 
 def troca_devolver(request, troca_id):
@@ -552,14 +637,25 @@ def troca_devolver(request, troca_id):
             if aviso_km and not request.POST.get("confirmar_km"):
                 raise ValidationError(aviso_km)
             troca.devolver(data_devolucao=data_devolucao, km_devolucao=km_devolucao)
-            messages.success(request, f"Substituto {troca.veiculo_substituto.placa} devolvido.")
+            substituto = troca.veiculo_substituto
+            messages.success(
+                request,
+                f"Substituto {substituto.placa} devolvido — agora está "
+                f"{substituto.get_status_display().lower()}.",
+            )
+            _semanas_reajustadas(request, getattr(troca, "semanas_reajustadas", None))
             return _ficha(troca.alocacao)
         except (ValidationError, KeyError, ValueError) as erro:
             _avisar_erro_de_devolucao(request, erro)
     return render(
         request,
         "alocacoes/troca_devolver.html",
-        {"troca": troca, "hoje": date.today(), "aviso_km": aviso_km},
+        {
+            "troca": troca,
+            "hoje": date.today(),
+            "aviso_km": aviso_km,
+            "voltar": _voltar(request) or reverse("alocacoes:lista"),
+        },
     )
 
 
@@ -635,12 +731,26 @@ def vistoria_nova(request, alocacao_id):
         Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
     )
     inicial = {"data": date.today()}
+    troca = alocacao.troca_ativa
+    vigente = troca.veiculo_substituto if troca else alocacao.veiculo
     if request.GET.get("tipo") in Vistoria.Tipo.values:
         # vindo dos passos da entrega/devolução, o tipo já chega escolhido
         inicial["tipo"] = request.GET["tipo"]
+    else:
+        # sem vistoria de entrega do carro que está com o motorista → é a entrega;
+        # já tem → a próxima é a devolução
+        ja_entregue = alocacao.vistorias.filter(
+            veiculo=vigente, tipo=Vistoria.Tipo.ENTRADA
+        ).exists()
+        inicial["tipo"] = Vistoria.Tipo.SAIDA if ja_entregue else Vistoria.Tipo.ENTRADA
     form = VistoriaForm(
         request.POST or None, request.FILES or None, initial=inicial, alocacao=alocacao
     )
+    # o KM do painel é digitado de verdade; o último conhecido fica só de dica
+    form.fields["km"].widget.attrs.setdefault(
+        "placeholder", f"último conhecido: {milhar(vigente.km_atual)} km"
+    )
+    form.fields["km"].widget.attrs.setdefault("inputmode", "numeric")
     if request.method == "POST" and form.is_valid():
         vistoria = form.save(commit=False)
         vistoria.alocacao = alocacao
@@ -651,10 +761,8 @@ def vistoria_nova(request, alocacao_id):
             f"para {vistoria.veiculo.placa}.",
         )
         # Vindo dos passos da entrega (ficha) ou da devolução, volta para lá.
-        voltar = request.GET.get("voltar", "")
-        if voltar and url_has_allowed_host_and_scheme(
-            voltar, allowed_hosts={request.get_host()}, require_https=request.is_secure()
-        ):
+        voltar = _voltar(request)
+        if voltar:
             return redirect(voltar)
         return redirect("alocacoes:timeline", vistoria.veiculo_id)
     return render(
@@ -663,6 +771,7 @@ def vistoria_nova(request, alocacao_id):
         {
             "alocacao": alocacao,
             "form": form,
+            "voltar": _voltar(request) or reverse("alocacoes:lista"),
             "checklist_leitura": checklist.disponivel(),
             "vistorias": alocacao.vistorias.select_related("veiculo"),
         },

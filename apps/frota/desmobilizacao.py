@@ -12,6 +12,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils.text import capfirst
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
@@ -176,10 +177,19 @@ def _janela_de_manutencoes(ids, inicio_janela):
         "manutencoes__tipo",
         "manutencoes__data_entrada",
         "manutencoes__data_saida",
+        "manutencoes__origem_custo",
+        "manutencoes__sinistro__franquia_valor",
     )
     for linha in linhas:
         custo, dias, esporadicas = janela.get(linha["pk"], (ZERO, 0, 0))
-        custo += linha["manutencoes__custo_real"] or ZERO
+        # conserto pago pela cota da proteção já é despesa no sinistro (D07):
+        # mesmo critério de manutencoes_que_sao_despesa; dias/esporádicas contam
+        pela_cota = (
+            linha["manutencoes__origem_custo"] == Manutencao.OrigemCusto.PROTECAO
+            and linha["manutencoes__sinistro__franquia_valor"] is not None
+        )
+        if not pela_cota:
+            custo += linha["manutencoes__custo_real"] or ZERO
         entrada = linha["manutencoes__data_entrada"]
         if entrada:
             dias += ((linha["manutencoes__data_saida"] or hoje) - entrada).days
@@ -229,9 +239,19 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         "cobranca__alocacao__veiculo",
         "valor",
     )
+    # repasses de manutenção e a franquia do sinistro cobrada do cliente (D09) —
+    # esta sem alocação na cobrança, então entra aqui para anular a franquia que
+    # já é despesa do carro; uma query só para as duas origens
     repasses = _somas(
-        AplicacaoRecebimento.objects.filter(cobranca__manutencao_repassada__veiculo_id__in=ids),
-        "cobranca__manutencao_repassada__veiculo",
+        AplicacaoRecebimento.objects.filter(
+            Q(cobranca__manutencao_repassada__veiculo_id__in=ids)
+            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids, cobranca__alocacao__isnull=True)
+        ).annotate(
+            veiculo_do_repasse=Coalesce(
+                "cobranca__manutencao_repassada__veiculo", "cobranca__sinistro_franquia__veiculo"
+            )
+        ),
+        "veiculo_do_repasse",
         "valor",
     )
     auxilios = _somas_da_frota(
@@ -324,8 +344,13 @@ def media_custo_km_frota(hoje=None):
     inicio_janela = hoje - timedelta(days=JANELA_INDICADORES_DIAS)
     ids = frota_de_locacao().values_list("pk", flat=True)
     km_rodado = _km_rodado_na_janela(ids, inicio_janela)
-    custos_manutencao = _somas_da_frota(
-        list(km_rodado), "manutencoes__custo_real", manutencoes__data__gte=inicio_janela
+    # sem o conserto pago pela cota da proteção (D07), como _janela_de_manutencoes
+    custos_manutencao = _somas(
+        manutencoes_que_sao_despesa().filter(
+            veiculo_id__in=list(km_rodado), data__gte=inicio_janela
+        ),
+        "veiculo",
+        "custo_real",
     )
     custos_km = [
         custos_manutencao.get(veiculo_id, ZERO) / km for veiculo_id, km in km_rodado.items() if km

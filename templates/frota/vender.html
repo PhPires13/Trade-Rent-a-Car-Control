@@ -39,6 +39,13 @@
     </ul>
   </div>
 
+  {% if impedimento_venda %}
+  <div class="max-w-md rounded-lg bg-white p-6 shadow">
+    <p class="font-semibold">Ainda não dá para registrar a venda.</p>
+    <p class="mt-2 text-sm text-gray-700">{{ impedimento_venda.texto }}</p>
+    <a href="{{ impedimento_venda.url }}" class="mt-3 inline-block rounded bg-marca-preto px-4 py-2.5 text-sm font-semibold text-white hover:brightness-125">{{ impedimento_venda.acao }}</a>
+  </div>
+  {% else %}
   <form method="post" class="max-w-md space-y-4 rounded-lg bg-white p-6 shadow"
         onsubmit="return confirm('Confirmar a venda de {{ veiculo.placa|escapejs }} ({{ veiculo.marca_modelo|escapejs }})?\n\nO carro sai da frota e esta ação não pode ser desfeita.');">
     {% csrf_token %}
@@ -49,7 +56,8 @@
     <div>
       <label for="venda-valor" class="mb-1 block text-sm font-medium">Valor recebido na venda (R$)</label>
       <input id="venda-valor" type="text" name="valor" inputmode="decimal" placeholder="ex.: 45.000,00"
-             value="{{ dados.valor|default:'' }}" required>
+             value="{% if dados.valor %}{{ dados.valor }}{% else %}{{ valor_sugerido }}{% endif %}" required>
+      {% if valor_sugerido %}<p class="mt-1 text-xs text-gray-600">Já veio com o valor de mercado estimado. Troque pelo valor que você recebeu de fato.</p>{% endif %}
     </div>
     <div>
       <label for="venda-comprador" class="mb-1 block text-sm font-medium">Comprador <span class="font-normal text-gray-600">(opcional)</span></label>
@@ -71,6 +79,7 @@
       <a href="{% url 'frota:ficha' veiculo.pk %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
     </div>
   </form>
+  {% endif %}
 </div>
 
 <style>

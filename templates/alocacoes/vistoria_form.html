@@ -9,7 +9,7 @@
   </h1>
   <div class="flex flex-wrap items-center gap-3 text-sm">
     <a href="{% url 'alocacoes:vistoria_imprimir' alocacao.pk %}{% if form.veiculo.value %}?veiculo={{ form.veiculo.value }}{% endif %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-medium">🖨 Checklist em branco</a>
-    <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
+    <a href="{{ voltar }}" class="text-gray-500 underline">← Voltar</a>
   </div>
 </div>
 
@@ -65,7 +65,7 @@
 
   <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
     <button class="rounded bg-marca-amarelo px-5 py-3 font-bold text-marca-preto hover:brightness-95">Salvar vistoria</button>
-    <a href="{% url 'alocacoes:lista' %}" class="rounded border border-gray-300 px-5 py-3 text-center text-gray-700">Cancelar</a>
+    <a href="{{ voltar }}" class="rounded border border-gray-300 px-5 py-3 text-center text-gray-700">Cancelar</a>
   </div>
 </form>
 

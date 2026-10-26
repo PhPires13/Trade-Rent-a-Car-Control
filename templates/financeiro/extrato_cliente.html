@@ -19,7 +19,8 @@
        title="Abre o WhatsApp com uma mensagem só, listando tudo que está em aberto e o total">💬 Cobrar no WhatsApp</a>
     {% endif %}
     <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}"
-       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">Registrar pagamento</a>
+       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95"
+       title="Lançar um pagamento que o cliente fez">✓ Recebi</a>
   </div>
 </div>
 

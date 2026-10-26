@@ -25,7 +25,7 @@ from apps.frota.alertas import vigencias_a_vencer
 from apps.frota.desmobilizacao import ranking_da_frota
 from apps.frota.models import Veiculo, normalizar_placa
 from apps.km.models import pendencias_de_leitura
-from apps.manutencao.services import preventivas_em_alerta
+from apps.manutencao.services import frota_acompanhada, resumos_por_veiculo
 from apps.multas.models import Multa
 from apps.multas.services import alertas_fici
 from apps.pessoas.models import Cliente, CondutorAutorizado
@@ -231,6 +231,28 @@ def rotina_atrasada(hoje, vencidas, semanas_nao_lancadas=0):
     )
 
 
+def _preventivas_do_painel():
+    """Preventivas em alerta e as "Sem registro", com um só cálculo da frota.
+
+    Mesma regra de manutencao.services.preventivas_em_alerta e
+    preventivas_sem_registro; chamar as duas repetiria as mesmas consultas.
+    Sem registro: o carro não tem troca anotada e o sistema não sabe quando
+    vence; o painel pede para informar a última troca.
+    """
+    veiculos = list(frota_acompanhada())
+    resumos = resumos_por_veiculo(veiculos)
+    alertas, sem_registro = [], []
+    for veiculo in veiculos:
+        resumo = resumos[veiculo.pk]
+        criticas = [p for p in resumo if p.em_alerta]
+        if criticas:
+            alertas.append((veiculo, criticas))
+        nunca = [p for p in resumo if p.status == p.SEM_REGISTRO]
+        if nunca:
+            sem_registro.append((veiculo, nunca))
+    return {"alertas_preventivas": alertas, "preventivas_sem_registro": sem_registro}
+
+
 def painel(request):
     """Painel inicial — dinheiro, frota e alertas do dia (docs.md §5).
 
@@ -300,7 +322,7 @@ def painel(request):
         ).select_related("alocacao__cliente", "veiculo_substituto"),
         # mês atual e meses anteriores esquecidos (D21), esquecidos primeiro
         "leituras_pendentes": pendencias_de_leitura(hoje),
-        "alertas_preventivas": preventivas_em_alerta(),
+        **_preventivas_do_painel(),
         "semana_total": semana_total,
         "semana_a_lancar": a_lancar,
         "rotina_atrasada": rotina_atrasada(hoje, atrasadas, semanas_nao_lancadas),

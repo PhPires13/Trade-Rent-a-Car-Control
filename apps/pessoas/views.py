@@ -9,13 +9,16 @@ from django.shortcuts import get_object_or_404, redirect, render
 from apps.alocacoes.models import Alocacao
 from apps.busca import nome_casa, numero_casa, parece_numero, sem_acento, so_digitos
 from apps.campos import FormularioBR
+from apps.financeiro import whatsapp
 from apps.financeiro.models import (
     ZERO,
     AplicacaoRecebimento,
     Cobranca,
     MovimentacaoCaucao,
     MovimentoCredito,
+    Recebimento,
 )
+from apps.financeiro.views import _abertas_por_cliente
 
 from . import cnh
 from .models import Cliente, CondutorAutorizado
@@ -93,7 +96,13 @@ class CondutorInlineForm(forms.ModelForm):
 
     class Meta:
         model = CondutorAutorizado
-        fields = ["nome", "cpf", "contato"]
+        # a CNH também é pedida aqui: quem dirige o carro precisa ter habilitação
+        fields = ["nome", "cpf", "cnh_numero", "contato"]
+        widgets = {
+            "cpf": forms.TextInput(attrs={"inputmode": "numeric"}),
+            "cnh_numero": forms.TextInput(attrs={"inputmode": "numeric"}),
+            "contato": forms.TextInput(attrs={"inputmode": "tel"}),
+        }
 
 
 class CondutorForm(forms.ModelForm):
@@ -193,13 +202,18 @@ def _card(cliente, hoje, saldos, alocacao_ativa):
 
 def _resumo(cliente, hoje):
     """Bloco de números e alertas da ficha (um cliente só)."""
-    alocacao_ativa = (
+    # cliente com dois carros ao mesmo tempo vê os dois na ficha
+    ativas = list(
         cliente.alocacoes.filter(status=Alocacao.Status.ATIVA)
         .select_related("veiculo")
         .prefetch_related("trocas__veiculo_substituto")  # aviso de carro substituto
-        .first()
+        .order_by("-data_inicio", "-pk")
     )
-    return _card(cliente, hoje, _saldos_em_lote([cliente.pk])[cliente.pk], alocacao_ativa)
+    card = _card(
+        cliente, hoje, _saldos_em_lote([cliente.pk])[cliente.pk], ativas[0] if ativas else None
+    )
+    card["alocacoes_ativas"] = ativas
+    return card
 
 
 def _cards_em_lote(clientes, hoje):
@@ -268,6 +282,15 @@ def detalhe(request, cliente_id):
             "ultimas_multas": multas[:5],
             "condutores": cliente.condutores_autorizados.all(),
             "form_condutor": CondutorInlineForm(),
+            # bloco "Em aberto": último pagamento e a mensagem única de cobrança
+            "ultimo_pagamento": cliente.recebimentos.exclude(
+                forma=Recebimento.Forma.CREDITO
+            ).first(),
+            "link_cobrar": whatsapp.link_cliente(
+                cliente, _abertas_por_cliente([cliente.pk]).get(cliente.pk, []), hoje
+            )
+            if contexto["saldo_devedor"] > 0
+            else "",
         }
     )
     return render(request, "pessoas/detalhe.html", contexto)
@@ -310,8 +333,15 @@ def condutor_novo(request, cliente_id):
             condutor.cliente = cliente
             condutor.save()
             messages.success(request, f"Condutor {condutor.nome} autorizado.")
-        else:
+        elif "nome" in form.errors:
             messages.error(request, "Informe ao menos o nome do condutor.")
+        else:
+            # com a CNH no formulário curto, o erro pode ser de outro campo
+            for campo, erros in form.errors.items():
+                rotulo = form.fields[campo].label if campo in form.fields else ""
+                messages.error(
+                    request, f"{rotulo}: {' '.join(erros)}" if rotulo else " ".join(erros)
+                )
     return redirect("pessoas:detalhe", cliente.pk)
 
 
@@ -325,6 +355,33 @@ def condutor_editar(request, condutor_id):
             return redirect("pessoas:detalhe", condutor.cliente_id)
         return redirect("pessoas:lista")
     return render(request, "pessoas/condutor_form.html", {"form": form, "condutor": condutor})
+
+
+def condutor_remover(request, condutor_id):
+    """Tira a autorização do condutor (botão com confirmação na ficha do cliente).
+
+    Condutor que já aparece em multa não é apagado: a multa precisa continuar
+    dizendo quem dirigia. Nesse caso a tela explica e nada muda.
+    """
+    condutor = get_object_or_404(CondutorAutorizado, pk=condutor_id)
+    destino = (
+        redirect("pessoas:detalhe", condutor.cliente_id)
+        if condutor.cliente_id
+        else redirect("pessoas:lista")
+    )
+    if request.method != "POST":
+        return destino
+    if condutor.multas.exists():
+        messages.error(
+            request,
+            f"{condutor.nome} aparece em multa(s) como quem dirigia, por isso não pode ser "
+            "removido. Se ele não está mais autorizado, anote isso em “editar” > observações.",
+        )
+        return destino
+    nome = condutor.nome
+    condutor.delete()
+    messages.success(request, f"{nome} não é mais condutor autorizado.")
+    return destino
 
 
 def cnh_extrair(request):

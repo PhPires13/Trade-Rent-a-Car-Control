@@ -67,7 +67,7 @@ def test_preventiva_vencida_vem_primeiro_e_proxima_depois(veiculo):
     assert pendencias[0]["grave"] is True
     assert "1.000 km" in pendencias[0]["detalhe"]
     assert pendencias[1]["texto"] == "Alinhamento: está chegando a hora"
-    assert pendencias[1]["url"] == f"/manutencao/registrar/{veiculo.pk}/"
+    assert pendencias[1]["url"].startswith(f"/manutencao/registrar/{veiculo.pk}/?item=")
 
 
 def test_ipva_e_licenciamento_dentro_de_30_dias(veiculo):

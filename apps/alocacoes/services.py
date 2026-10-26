@@ -116,3 +116,48 @@ def linha_do_tempo(veiculo):
             }
         )
     return sorted(eventos, key=lambda e: e["data"], reverse=True)
+
+
+def refazer_semanas_da_troca(troca, hoje=None):
+    """Troca que perdeu o valor ajustado (Admin): semanas em aberto voltam ao preço certo.
+
+    Espelha financeiro.services.reajustar_aluguel_pela_troca (decisão D02), que
+    só age quando há valor ajustado. Mexe só nas semanas ainda em aberto que a
+    troca alcança, e nunca deixa o valor abaixo do que já foi pago. Devolve as
+    cobranças alteradas.
+    """
+    from datetime import timedelta
+
+    from apps.financeiro.models import Cobranca  # import local evita ciclo de import
+    from apps.financeiro.services import (
+        _valor_do_periodo,
+        atualizar_inadimplencia,
+        periodo_da_cobranca,
+    )
+
+    alocacao = troca.alocacao
+    abertas = Cobranca.com_quitacao_anotada(
+        Cobranca.objects.filter(
+            alocacao=alocacao,
+            origem=Cobranca.Origem.ALUGUEL,
+            status__in=Cobranca.STATUS_EM_ABERTO,
+            vencimento__gte=troca.data_retirada - timedelta(days=6),
+        )
+    )
+    alteradas = []
+    for cobranca in abertas:
+        inicio, fim = periodo_da_cobranca(cobranca)
+        if fim < troca.data_retirada:
+            continue
+        if troca.data_devolucao and inicio > troca.data_devolucao:
+            continue
+        novo = _valor_do_periodo(alocacao, inicio, fim)
+        if novo == cobranca.valor or novo < cobranca.total_quitado:
+            continue
+        cobranca.valor = novo
+        cobranca.save(update_fields=["valor"])
+        cobranca.atualizar_status(hoje)
+        alteradas.append(cobranca)
+    if alteradas:
+        atualizar_inadimplencia(alocacao.cliente)
+    return alteradas
