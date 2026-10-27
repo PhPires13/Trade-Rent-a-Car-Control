@@ -227,9 +227,7 @@ def _alugueis_da_semana(semana, hoje):
                     # passou, mas o que ele cobra (a partir de `nao_pago`) ainda não
                     # começou — nada de uso ficou sem cobrança, a rotina não está parada
                     devido_desde = max(data, nao_pago)
-                    if devido_desde < hoje - timedelta(days=1) and (
-                        not termino or data <= termino
-                    ):
+                    if devido_desde < hoje - timedelta(days=1) and (not termino or data <= termino):
                         atrasadas += 1
                 if inicio <= data <= fim and (not termino or data <= termino):
                     previsto += (
