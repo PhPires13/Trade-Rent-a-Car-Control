@@ -6,10 +6,10 @@ Entrega: depois de alocar, a ficha do cliente mostra um cartão com os passos
 mostra os passos (vistoria de devolução → KM final → caução → confirmar).
 """
 
-from datetime import date
+from datetime import date, timedelta
 from urllib.parse import urlencode
 
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.urls import reverse
 
 from apps.formatos import brl, milhar
@@ -59,7 +59,7 @@ def passos_da_entrega(alocacao):
                 if alocacao.contrato_aberto_em
                 else "Imprima duas vias e colha a assinatura do cliente."
             ),
-            "url": reverse("alocacoes:contrato", args=[alocacao.pk]),
+            "url": _url("alocacoes:contrato", alocacao.pk, voltar=ficha),
             "botao": "Abrir contrato",
         }
     )
@@ -150,16 +150,45 @@ def passos_da_entrega(alocacao):
     return passos
 
 
+#: Vistoria de devolução com mais dias que isso não sugere a data do encerramento.
+DIAS_DATA_VISTORIA = 3
+
+
+def vistoria_de_devolucao(alocacao, vistorias=None):
+    """A vistoria de devolução que vale para encerrar, ou None.
+
+    Só a vistoria mais recente do carro da locação, quando é de devolução e não
+    veio antes da última devolução de substituto — uma "devolução" antiga (o
+    carro foi para a oficina e voltou ao motorista) não pode marcar o passo
+    como feito nem sugerir data e KM.
+    """
+    if vistorias is None:
+        vistorias = list(_vistorias_do_carro_da_locacao(alocacao).order_by("-data", "-pk"))
+    if not vistorias or vistorias[0].tipo != Vistoria.Tipo.SAIDA:
+        return None
+    ultima = vistorias[0]
+    fim_troca = alocacao.trocas.aggregate(m=Max("data_devolucao"))["m"]
+    if fim_troca and ultima.data < fim_troca:
+        return None
+    return ultima
+
+
 def situacao_da_devolucao(alocacao):
     """O que a tela de encerrar mostra em passos: vistorias, débitos e caução."""
     from apps.financeiro.models import Cobranca  # import local evita ciclo de import
 
     vistorias = list(_vistorias_do_carro_da_locacao(alocacao).order_by("-data", "-pk"))
     entrega = next((v for v in vistorias if v.tipo == Vistoria.Tipo.ENTRADA), None)
-    devolucao = next((v for v in vistorias if v.tipo == Vistoria.Tipo.SAIDA), None)
+    devolucao = vistoria_de_devolucao(alocacao, vistorias)
+    hoje = date.today()
+    # Vistoria de devolução antiga (o carro foi conferido e o motorista seguiu com
+    # ele) não serve de data: sugere hoje e a pessoa confere.
+    data_da_vistoria = bool(
+        devolucao and devolucao.data >= hoje - timedelta(days=DIAS_DATA_VISTORIA)
+    )
+    data_devolucao = devolucao.data if data_da_vistoria else hoje
     # D03: semanas que começam no dia da devolução (ou depois) são canceladas ao
     # encerrar — não são dívida, e mandar receber agora faria pagar o que não usou
-    data_devolucao = devolucao.data if devolucao else date.today()
     devidas = Cobranca.com_quitacao_anotada(
         Cobranca.objects.filter(cliente_id=alocacao.cliente_id, status__in=Cobranca.STATUS_DEVIDOS)
     )
@@ -182,6 +211,8 @@ def situacao_da_devolucao(alocacao):
     return {
         "vistoria_entrega": entrega,
         "vistoria_devolucao": devolucao,
+        "data_sugerida": data_devolucao,
+        "data_da_vistoria": data_da_vistoria,
         "debitos": debitos,
         "semanas_a_cancelar": semanas_a_cancelar,
         "url_vistoria_devolucao": _url(

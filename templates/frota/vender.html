@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load humanize l10n %}
 
 {% block titulo %}Vender — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
 
@@ -51,7 +51,7 @@
     {% csrf_token %}
     <div>
       <label for="venda-data" class="mb-1 block text-sm font-medium">Data da venda</label>
-      <input id="venda-data" type="date" name="data" value="{% if dados.data %}{{ dados.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}" required>
+      <input id="venda-data" type="date" name="data" value="{% if dados.data %}{{ dados.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}" max="{{ hoje|date:'Y-m-d' }}"{% if veiculo.data_aquisicao %} min="{{ veiculo.data_aquisicao|date:'Y-m-d' }}"{% endif %} required>
     </div>
     <div>
       <label for="venda-valor" class="mb-1 block text-sm font-medium">Valor recebido na venda (R$)</label>
@@ -71,7 +71,7 @@
       </div>
       <div>
         <label for="venda-km" class="mb-1 block text-sm font-medium">KM no dia da venda</label>
-        <input id="venda-km" type="number" name="km" min="0" value="{{ dados.km|default:veiculo.km_atual }}">
+        <input id="venda-km" type="number" name="km" min="{{ veiculo.km_atual|unlocalize }}" value="{{ dados.km|default:veiculo.km_atual }}">
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4">

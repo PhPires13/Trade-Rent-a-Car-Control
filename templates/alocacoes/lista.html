@@ -53,8 +53,11 @@
       </div>
       <div><dt class="text-gray-500">Dia de pagar</dt><dd>{{ alocacao.get_dia_vencimento_display }}</dd></div>
       <div><dt class="text-gray-500">Desde</dt><dd>{{ alocacao.data_inicio|date:"d/m/Y" }}</dd></div>
-      {% if alocacao.divida %}
-      <div><dt class="text-gray-500">Deve hoje</dt><dd class="font-bold text-red-700">{{ alocacao.divida.total|brl }}</dd></div>
+      {% if alocacao.divida.ate_hoje %}
+      <div><dt class="text-gray-500">Deve hoje</dt><dd class="font-bold text-red-700">{{ alocacao.divida.ate_hoje|brl }}</dd></div>
+      {% endif %}
+      {% if alocacao.divida.a_vencer %}
+      <div><dt class="text-gray-500">A vencer</dt><dd class="text-gray-600">{{ alocacao.divida.a_vencer|brl }}</dd></div>
       {% endif %}
     </dl>
     {% if alocacao.status == "ativa" %}
@@ -108,7 +111,8 @@
           <span class="text-gray-500">{{ alocacao.veiculo.marca_modelo }}</span>
         </td>
         <td class="px-3 py-2"><a href="{% url 'pessoas:detalhe' alocacao.cliente.pk %}" class="hover:underline">{{ alocacao.cliente.nome }}</a>
-          {% if alocacao.divida %}<span class="block text-xs font-semibold text-red-700">deve {{ alocacao.divida.total|brl }}</span>{% endif %}
+          {% if alocacao.divida.ate_hoje %}<span class="block text-xs font-semibold text-red-700">{{ alocacao.divida.ate_hoje|brl }} vencido</span>{% endif %}
+          {% if alocacao.divida.a_vencer %}<span class="block text-xs text-gray-600">{{ alocacao.divida.a_vencer|brl }} a vencer</span>{% endif %}
         </td>
         <td class="px-3 py-2">{{ alocacao.data_inicio|date:"d/m/Y" }}</td>
         <td class="px-3 py-2">

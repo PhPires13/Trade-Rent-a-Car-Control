@@ -28,6 +28,8 @@ def mensagem_recibo(resumo):
             f"({recebimento.get_forma_display()}) em {recebimento.data:%d/%m/%Y}."
         )
     linhas = [abertura]
+    if resumo.get("credito_usado"):
+        linhas.append(f"• Usamos também {brl(resumo['credito_usado'])} do seu crédito guardado.")
     for cobranca, valor in resumo["quitadas"]:
         linhas.append(f"✓ Quitado: {cobranca.descricao} ({brl(valor)})")
     for cobranca, valor in resumo["parciais"]:

@@ -114,7 +114,8 @@ def test_campos_de_dinheiro_abrem_teclado_numerico(usuario_logado, cliente, atra
     html = usuario_logado.get(f"{URL}?cliente={cliente.pk}").content.decode()
     assert 'for="valor"' in html and 'id="valor"' in html
     assert f'for="aplicar_{atrasada.pk}"' in html and f'id="aplicar_{atrasada.pk}"' in html
-    assert html.count('inputmode="decimal"') == 2  # valor + 1 cobrança
+    # valor + 1 cobrança + encargo sugerido da atrasada (valor e quanto aplicar nele)
+    assert html.count('inputmode="decimal"') == 4
 
 
 def test_forma_invalida_e_recusada(cliente, atrasada):

@@ -1,6 +1,5 @@
-from datetime import date
-
 from django.db import models, transaction
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.frota.models import Veiculo
@@ -102,7 +101,8 @@ class Manutencao(models.Model):
     km = models.PositiveIntegerField("KM na execução", null=True, blank=True)
     descricao = models.TextField(
         "descrição do reparo",
-        help_text="Descreva o serviço feito — pesa na avaliação de desmobilização (§4.9)",
+        help_text="Descreva o serviço feito (ex.: troca do para-choque). Conta na hora de "
+        "decidir vender o carro.",
     )
     oficina = models.ForeignKey(
         "frota.Fornecedor",
@@ -195,7 +195,7 @@ class Manutencao(models.Model):
         """Dias na oficina; enquanto não sai, conta até hoje."""
         if not self.data_entrada:
             return 0
-        fim = self.data_saida or date.today()
+        fim = self.data_saida or timezone.localdate()
         return (fim - self.data_entrada).days
 
     @property

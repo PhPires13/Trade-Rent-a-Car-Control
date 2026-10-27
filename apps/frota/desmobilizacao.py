@@ -56,10 +56,14 @@ def multas_que_sao_despesa():
     """Multas que a empresa assumiu e que continuam devidas.
 
     Advertência, cancelada ou não exigível: não há o que pagar, então não é
-    despesa (mesma regra do atalho "Pagar" da lista de multas).
+    despesa (mesma regra do atalho "Pagar" da lista de multas). Multa já cobrada
+    do motorista numa ND também não: o dinheiro volta pela cobrança, e contar
+    as duas coisas faria a mesma multa aparecer como despesa e como receita.
     """
-    return Multa.objects.filter(responsavel=Multa.Responsavel.EMPRESA, valor__isnull=False).exclude(
-        resultado__in=Multa.RESULTADOS_ANULADORES
+    return (
+        Multa.objects.filter(responsavel=Multa.Responsavel.EMPRESA, valor__isnull=False)
+        .exclude(resultado__in=Multa.RESULTADOS_ANULADORES)
+        .exclude(itens_nd__isnull=False)
     )
 
 
@@ -72,7 +76,9 @@ def meses_de_protecao(veiculo, hoje):
     """Mensalidades da proteção do mês da compra ao da venda (ou até hoje), os dois inclusive.
 
     Mesmo recorte do relatório mensal: cada mês em que o carro esteve na frota
-    paga uma mensalidade; depois de vendido, não paga mais.
+    paga uma mensalidade; depois de vendido, não paga mais. Critério único:
+    sem data de compra = sem proteção a lançar (o cadastro exige a data
+    quando há mensalidade; a ficha avisa "proteção não calculada").
     """
     if not veiculo.data_aquisicao:
         return 0
@@ -411,9 +417,38 @@ def _validar_campos_da_venda(veiculo):
         ) from None
 
 
+def oficina_impede_venda(veiculo):
+    """Manutenção ainda aberta (carro na oficina) — ela ficaria aberta para sempre."""
+    from apps.manutencao.services import oficina_por_veiculo  # manutencao importa frota
+
+    return oficina_por_veiculo([veiculo.pk]).get(veiculo.pk)
+
+
+def texto_oficina_impede_venda(manutencao):
+    return (
+        f"O carro ainda está na oficina (desde {manutencao.data_entrada:%d/%m}). "
+        "Registre “Carro voltou da oficina” antes de vender."
+    )
+
+
+def _validar_data_e_km_da_venda(veiculo, data, km, hoje=None):
+    """Data entre a compra e hoje; KM da venda nunca abaixo do KM atual do carro."""
+    hoje = hoje or date.today()
+    erros = []
+    if data > hoje:
+        erros.append("A data da venda não pode ser depois de hoje.")
+    if veiculo.data_aquisicao and data < veiculo.data_aquisicao:
+        erros.append(f"A venda não pode ser antes da compra ({veiculo.data_aquisicao:%d/%m/%Y}).")
+    # KM negativo fica para _validar_campos_da_venda (mensagem do campo "KM na venda")
+    if km is not None and 0 <= km < veiculo.km_atual:
+        erros.append("KM da venda menor que o KM atual do carro — confira o painel.")
+    if erros:
+        raise ValidationError(erros)
+
+
 @transaction.atomic
 def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None):
-    """Vende o veículo — só sem alocação ativa nem troca aberta (docs.md §4.9)."""
+    """Vende o veículo — só sem alocação ativa, troca aberta nem oficina (docs.md §4.9)."""
     if veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).exists():
         raise ValidationError("Encerre a alocação ativa antes de vender o veículo.")
     if TrocaTemporaria.objects.filter(
@@ -426,6 +461,11 @@ def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None):
         )
     if veiculo.status == Veiculo.Status.VENDIDO:
         raise ValidationError("Veículo já vendido.")
+    na_oficina = oficina_impede_venda(veiculo)
+    if na_oficina:
+        raise ValidationError(texto_oficina_impede_venda(na_oficina))
+    # antes de mexer no objeto: a tela reaproveita o veículo para remontar a ficha
+    _validar_data_e_km_da_venda(veiculo, data, km)
     veiculo.data_venda = data
     veiculo.valor_venda = valor
     veiculo.comprador = comprador

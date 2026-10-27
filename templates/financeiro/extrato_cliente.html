@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block titulo %}Extrato — {{ cliente.nome }}{% endblock %}
+{% block titulo %}Extrato — {{ cliente.nome }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <div class="mb-2">
@@ -12,7 +12,6 @@
     {% if cliente.status == "inadimplente" %}<span class="ml-2 rounded bg-red-100 px-2 py-0.5 text-sm font-semibold text-red-700">Inadimplente</span>{% endif %}
   </h1>
   <div class="flex flex-wrap items-center gap-3 text-sm">
-    <span title="Dinheiro que o cliente pagou a mais e pode ser usado nas próximas cobranças">Crédito a favor do cliente: <strong>{{ credito|brl }}</strong></span>
     {% if link_whatsapp %}
     <a href="{{ link_whatsapp }}" target="_blank" rel="noopener"
        class="rounded border border-green-600 px-3 py-1.5 font-semibold text-green-700 hover:bg-green-50"
@@ -24,6 +23,19 @@
   </div>
 </div>
 
+{# o resumo do cliente num relance: o que deve hoje, o que vem, e o que é dele #}
+<div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4" data-resumo-extrato>
+  <div class="rounded-lg bg-white p-3 shadow"><div class="text-xs text-gray-500">Deve hoje</div>
+    <div class="whitespace-nowrap text-xl font-black {% if vencido > 0 %}text-red-700{% endif %}">{{ vencido|brl }}</div></div>
+  <div class="rounded-lg bg-white p-3 shadow"><div class="text-xs text-gray-500">A vencer</div>
+    <div class="whitespace-nowrap text-xl font-black">{{ a_vencer|brl }}</div></div>
+  <div class="rounded-lg bg-white p-3 shadow" title="Dinheiro que o cliente pagou a mais e pode ser usado nas próximas cobranças"><div class="text-xs text-gray-500">Crédito do cliente</div>
+    <div class="whitespace-nowrap text-xl font-black text-green-700">{{ credito|brl }}</div>
+    {% if credito > 0 and devido_total > 0 %}<a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}&usar_credito=1" class="text-xs underline">usar nas cobranças</a>{% endif %}</div>
+  <div class="rounded-lg bg-white p-3 shadow"><div class="text-xs text-gray-500">Caução guardada</div>
+    <div class="whitespace-nowrap text-xl font-black">{{ saldo_caucao|brl }}</div></div>
+</div>
+
 <div class="grid gap-6 lg:grid-cols-2">
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 font-semibold">Cobranças</h2>
@@ -33,14 +45,14 @@
       <tbody class="block divide-y divide-gray-100 sm:table-row-group">
         {% for cobranca in cobrancas %}
         <tr class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 sm:table-row sm:py-0">
-          <td class="sm:px-2 sm:py-1.5 sm:table-cell text-gray-600 sm:text-gray-900">{{ cobranca.vencimento|date:"d/m/y" }}</td>
+          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell text-gray-600 sm:text-gray-900">{{ cobranca.vencimento|date:"d/m/y" }}</td>
           <td class="order-first basis-full font-medium sm:px-2 sm:py-1.5 sm:table-cell sm:font-normal">{{ cobranca.descricao }}</td>
-          <td class="sm:px-2 sm:py-1.5 sm:table-cell sm:text-right">{{ cobranca.valor|brl }}</td>
+          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell sm:text-right">{{ cobranca.valor|brl }}</td>
           <td class="sm:px-2 sm:py-1.5 sm:table-cell">
             {% if cobranca.status == "pago" %}<span class="text-green-700">Pago</span>
-            {% elif cobranca.status == "atrasado" %}<span class="font-semibold text-red-700">Atrasado ({{ cobranca.saldo|brl }})</span>
-            {% elif cobranca.status == "parcial" %}<span class="text-yellow-800">Parcial ({{ cobranca.saldo|brl }})</span>
-            {% elif cobranca.status == "judicial" %}<span class="font-semibold text-purple-800">Judicial ({{ cobranca.saldo|brl }})</span>
+            {% elif cobranca.status == "atrasado" %}<span class="font-semibold text-red-700">Atrasado — <span class="whitespace-nowrap">falta {{ cobranca.saldo|brl }}</span></span>
+            {% elif cobranca.status == "parcial" %}<span class="text-yellow-800">Parcial — <span class="whitespace-nowrap">falta {{ cobranca.saldo|brl }}</span></span>
+            {% elif cobranca.status == "judicial" %}<span class="font-semibold text-purple-800">Judicial — <span class="whitespace-nowrap">falta {{ cobranca.saldo|brl }}</span></span>
             {% elif cobranca.status == "cancelada" %}<span class="text-gray-600 line-through">Cancelada</span>
             {% else %}<span class="text-gray-600">{{ cobranca.get_status_display }}</span>{% endif %}
             {% if cobranca.status in status_devidos and cobranca.saldo > 0 %}
@@ -65,22 +77,23 @@
       <tbody class="block divide-y divide-gray-100 sm:table-row-group">
         {% for recebimento in recebimentos %}
         <tr class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 sm:table-row sm:py-0">
-          <td class="sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.data|date:"d/m/y" }}</td>
+          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.data|date:"d/m/y" }}</td>
           {% if recebimento.forma == "credito" %}
           <td class="sm:px-2 sm:py-1.5 sm:table-cell text-gray-600">Abatimento com crédito do cliente
             <div class="text-xs text-gray-500">não é dinheiro novo — usa a sobra de um pagamento anterior</div></td>
-          <td class="sm:px-2 sm:py-1.5 sm:table-cell font-medium text-gray-600 sm:text-right">{{ recebimento.valor|brl }}</td>
+          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell font-medium text-gray-600 sm:text-right">{{ recebimento.valor|brl }}</td>
           {% else %}
           <td class="sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.get_forma_display }}</td>
-          <td class="sm:px-2 sm:py-1.5 sm:table-cell font-medium text-green-700 sm:text-right">{{ recebimento.valor|brl }}</td>
+          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell font-medium text-green-700 sm:text-right">{{ recebimento.valor|brl }}</td>
           {% endif %}
           <td class="basis-full sm:px-2 sm:py-1.5 sm:table-cell text-xs text-gray-500">
-            {% for aplicacao in recebimento.aplicacoes.all %}{{ aplicacao.cobranca.descricao }} ({{ aplicacao.valor|brl }}){% if not forloop.last %}; {% endif %}{% endfor %}
+            {% for aplicacao in recebimento.aplicacoes.all %}{{ aplicacao.cobranca.descricao }} (<span class="whitespace-nowrap">{{ aplicacao.valor|brl }}</span>){% if not forloop.last %}; {% endif %}{% endfor %}
+            {% if recebimento.sobra %}<div class="font-medium text-green-800">sobra <span class="whitespace-nowrap">{{ recebimento.sobra.0|brl }}</span> → {{ recebimento.sobra.1 }}</div>{% endif %}
             {% if recebimento.pode_desfazer %}
             <form method="post" action="{% url 'financeiro:desfazer_recebimento' recebimento.pk %}" class="mt-1"
                   onsubmit="if (!confirm('Desfazer este lançamento de {{ recebimento.valor|brl }}? As cobranças voltam a ficar em aberto e o crédito ou reforço de caução gerado por ele é removido.')) return false; this.querySelector('button').disabled = true; return true;">
               {% csrf_token %}
-              <button class="rounded border border-red-300 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 sm:px-2 sm:py-1"
+              <button class="py-1 text-xs text-gray-500 underline hover:text-red-700"
                       title="Só no mesmo dia do lançamento">↩ desfazer (lançado hoje)</button>
             </form>
             {% endif %}

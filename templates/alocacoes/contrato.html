@@ -10,9 +10,14 @@
             class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95">
       🖨 Imprimir / salvar PDF
     </button>
-    <a href="{% url 'alocacoes:lista' %}" class="text-gray-500 underline">← alocações</a>
+    <a href="{{ voltar }}" class="inline-flex min-h-11 min-w-11 items-center px-2 text-gray-600 underline">← Voltar</a>
   </div>
 </div>
+{% if empresa_incompleta %}
+<p class="nao-imprime mb-4 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900 print:hidden" role="alert">
+  Dados da empresa não configurados (CNPJ ou endereço) — avise quem cuida do sistema. Até lá, preencha à caneta.
+</p>
+{% endif %}
 <p class="mb-4 text-xs text-gray-500 nao-imprime">
   Minuta gerada pelo sistema com os dados da alocação — revise antes de assinar.
   Os espaços em branco (____) podem ser preenchidos à caneta. Imprima 2 vias: uma fica

@@ -105,7 +105,7 @@ def test_d32_alocacao_que_termina_antes_do_vencimento_nao_entra(cliente):
 def test_d32_card_mostra_o_previsto_da_semana_inteira(usuario_logado, cliente):
     alocacao = _alocacao(cliente, date(2026, 9, 4), dia_vencimento=4)
     _aluguel(cliente, date(2026, 10, 16), alocacao=alocacao, status=Cobranca.Status.PAGO)
-    with mock.patch("config.views.date", SegundaFixa):
+    with mock.patch("config.views.timezone.localdate", return_value=SegundaFixa.today()):
         resposta = usuario_logado.get("/")
     assert resposta.context["semana_total"] == Decimal("650.00")
     assert "inclui R$ 650,00 de aluguéis que ainda vão vencer" in resposta.content.decode()

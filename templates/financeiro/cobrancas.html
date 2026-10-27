@@ -29,9 +29,11 @@
   <span class="text-xs text-gray-500">Ordem: {{ ordem_rotulo }}</span>
 </form>
 
-<div class="overflow-x-auto rounded-lg bg-white shadow">
-  <table class="w-full text-sm">
-    <thead class="bg-marca-preto text-left text-white">
+{# Celular: cada cobrança vira um cartão (cliente e valor em destaque, botões em largura cheia). #}
+{# Do md para cima: tabela. Um só conjunto de formulários — a âncora #cobranca-<pk> volta na linha. #}
+<div class="md:overflow-x-auto md:rounded-lg md:bg-white md:shadow">
+  <table class="block w-full text-sm md:table">
+    <thead class="hidden bg-marca-preto text-left text-white md:table-header-group">
       <tr>
         <th class="px-3 py-2">Vencimento</th>
         <th class="px-3 py-2">Cliente</th>
@@ -42,67 +44,48 @@
         <th class="px-3 py-2">Ações</th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block space-y-3 md:table-row-group md:space-y-0 md:divide-y md:divide-gray-100">
       {% for cobranca, encargo in linhas %}
-      <tr>
-        <td class="whitespace-nowrap px-3 py-2">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
-        <td class="px-3 py-2">
-          <a href="{% url 'financeiro:extrato_cliente' cobranca.cliente.pk %}" class="underline decoration-marca-amarelo decoration-2">
-            {{ cobranca.cliente.nome }}</a>
+      <tr id="cobranca-{{ cobranca.pk }}" class="block scroll-mt-20 rounded-lg bg-white p-4 shadow md:table-row md:rounded-none md:p-0 md:shadow-none
+                 {% if cobranca.status == 'atrasado' %}border-l-4 border-red-500 md:border-l-0{% elif cobranca.status == 'judicial' %}border-l-4 border-purple-500 md:border-l-0{% endif %}">
+        <td class="hidden whitespace-nowrap px-3 py-2 md:table-cell">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
+        <td class="block md:table-cell md:px-3 md:py-2">
+          <div class="flex items-start justify-between gap-2">
+            <a href="{% url 'financeiro:extrato_cliente' cobranca.cliente.pk %}" class="font-semibold underline decoration-marca-amarelo decoration-2 md:font-normal">
+              {{ cobranca.cliente.nome }}</a>
+            {# celular: o valor que falta, em destaque, ao lado do nome #}
+            <span class="whitespace-nowrap text-lg font-black md:hidden {% if cobranca.status == 'atrasado' %}text-red-700{% endif %}">{{ cobranca.saldo|brl }}</span>
+          </div>
         </td>
-        <td class="px-3 py-2">{{ cobranca.descricao }}</td>
-        <td class="whitespace-nowrap px-3 py-2">{{ cobranca.valor|brl }}</td>
-        <td class="whitespace-nowrap px-3 py-2 font-semibold">{{ cobranca.saldo|brl }}</td>
-        <td class="px-3 py-2">
+        <td class="block text-gray-700 md:table-cell md:px-3 md:py-2 md:text-gray-900">{{ cobranca.descricao }}</td>
+        <td class="hidden whitespace-nowrap px-3 py-2 md:table-cell">{{ cobranca.valor|brl }}</td>
+        <td class="hidden whitespace-nowrap px-3 py-2 font-semibold md:table-cell">{{ cobranca.saldo|brl }}</td>
+        <td class="mt-1 block md:mt-0 md:table-cell md:px-3 md:py-2">
+          <span class="text-xs text-gray-500 md:hidden">Vence {{ cobranca.vencimento|date:"d/m/Y" }} ·</span>
           {% if cobranca.status == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Pago</span>
           {% elif cobranca.status == "atrasado" %}<span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">Atrasado</span>
           {% elif cobranca.status == "parcial" %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-yellow-800">Parcial</span>
-          {% elif cobranca.status == "judicial" %}<span class="whitespace-nowrap rounded bg-purple-100 px-2 py-0.5 font-semibold text-purple-800">Judicial</span>
+          {% elif cobranca.status == "judicial" %}<span class="whitespace-nowrap rounded bg-purple-100 px-2 py-0.5 font-semibold text-purple-800">Na Justiça</span>
           {% elif cobranca.status == "cancelada" %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-500">Cancelada</span>
           {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Pendente</span>{% endif %}
+          <span class="text-xs text-gray-500 md:hidden">· valor {{ cobranca.valor|brl }}</span>
         </td>
-        <td class="space-y-2 px-3 py-2">
+        <td class="mt-3 block space-y-2 md:mt-0 md:table-cell md:px-3 md:py-2">
           {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.saldo > 0 %}
           <a href="{% url 'financeiro:receber' %}?cliente={{ cobranca.cliente.pk }}&cobranca={{ cobranca.pk }}"
-             class="inline-block whitespace-nowrap rounded bg-marca-amarelo px-3 py-1.5 text-xs font-semibold text-marca-preto hover:brightness-95"
+             class="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95 md:inline-flex md:min-h-0 md:text-xs"
              title="Abre o recebimento já com o cliente e o valor que falta desta cobrança">✓ Recebi</a>
-          {% endif %}
-          {% if encargo %}
-          <form method="post" action="{% url 'financeiro:aplicar_encargo' cobranca.pk %}" class="flex flex-wrap items-center gap-1"
-                onsubmit="return confirm('Cobrar do cliente um encargo por atraso de R$ ' + this.valor.value + '? Isso cria uma nova cobrança, que pode ser cancelada depois.')">
-            {% csrf_token %}
-            <input type="hidden" name="voltar" value="{{ voltar }}">
-            <label for="encargo-{{ cobranca.pk }}" class="w-full text-xs text-gray-500" title="Sugerido: 5% até 4 dias de atraso, 10% acima — ajuste o valor se quiser">Encargo por atraso (R$):</label>
-            <input type="text" name="valor" id="encargo-{{ cobranca.pk }}" value="{{ encargo }}" required inputmode="decimal" autocomplete="off"
-                   class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs">
-            <button class="rounded bg-marca-amarelo px-2 py-0.5 text-xs font-semibold text-marca-preto" title="Sugerido: 5% até 4 dias, 10% acima — ajuste ou zere">Aplicar</button>
-          </form>
-          {% endif %}
-          {# encargo e judicial são decisões independentes (C20): os dois aparecem #}
-          {% if cobranca.status == "atrasado" %}
-          <form method="post" action="{% url 'financeiro:marcar_judicial' cobranca.pk %}"
-                onsubmit="return confirm('Marcar como cobrança judicial? O encargo automático para e o status só muda quando ela for quitada ou reaberta.')">
-            {% csrf_token %}
-            <input type="hidden" name="voltar" value="{{ voltar }}">
-            <button class="text-xs text-purple-700 underline" title="Passar para cobrança judicial">mandar para judicial</button>
-          </form>
-          {% elif cobranca.status == "judicial" %}
-          <form method="post" action="{% url 'financeiro:reabrir_judicial' cobranca.pk %}"
-                onsubmit="return confirm('Tirar esta cobrança da cobrança judicial e voltar para o fluxo normal?')">
-            {% csrf_token %}
-            <input type="hidden" name="voltar" value="{{ voltar }}">
-            <button class="text-xs text-purple-700 underline" title="Voltar ao fluxo normal de cobrança">tirar do judicial (reabrir)</button>
-          </form>
           {% endif %}
           {% if cobranca.link_whatsapp %}
           <a href="{{ cobranca.link_whatsapp }}" target="_blank" rel="noopener"
-             class="block whitespace-nowrap py-1 text-xs text-green-700 underline" title="Abre o WhatsApp com a mensagem desta cobrança pronta — dá para mudar antes de enviar">
+             class="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded border border-green-600 px-3 font-semibold text-green-700 md:block md:min-h-0 md:rounded-none md:border-0 md:px-0 md:py-1 md:text-xs md:font-normal md:underline"
+             title="Abre o WhatsApp com a mensagem desta cobrança pronta — dá para mudar antes de enviar">
             💬 cobrar no WhatsApp
           </a>
           {% endif %}
           {% if cobranca.link_whatsapp_cliente %}
           <a href="{{ cobranca.link_whatsapp_cliente }}" target="_blank" rel="noopener"
-             class="block whitespace-nowrap py-1 text-xs font-semibold text-green-700 underline"
+             class="block whitespace-nowrap py-1 text-center text-xs font-semibold text-green-700 underline md:text-left"
              title="Uma mensagem só, com as {{ cobranca.qtd_abertas_cliente }} cobranças em aberto deste cliente e o total">
             💬 cobrar tudo ({{ cobranca.qtd_abertas_cliente }} itens)
           </a>
@@ -114,20 +97,53 @@
           <a href="{% url 'pessoas:editar' cobranca.cliente.pk %}" class="block text-xs text-gray-500 underline"
              title="Cadastre o telefone do cliente, com DDD, para cobrar pelo WhatsApp">Sem WhatsApp: {% if cobranca.cliente.telefone %}telefone incompleto{% else %}cliente sem telefone{% endif %}</a>
           {% endif %}
-          {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.status != "judicial" %}
-            {% if cobranca.origem in origens_cancelaveis %}
-            <form method="post" action="{% url 'financeiro:cancelar' cobranca.pk %}"
-                  onsubmit="return confirm('Cancelar esta cobrança? Ela não será cobrada do cliente.')">
+          {% if encargo or cobranca.status == "atrasado" or cobranca.status == "judicial" or cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.origem in origens_cancelaveis %}
+          {# decisões menos frequentes ficam recolhidas: com 13 semanas atrasadas, a lista não vira um muro de formulários #}
+          <details class="text-xs">
+            <summary class="cursor-pointer select-none list-none py-1 text-gray-600 underline [&::-webkit-details-marker]:hidden">Mais ▾</summary>
+            <div class="mt-1 space-y-2 rounded border border-gray-200 bg-gray-50 p-2">
+            {% if encargo %}
+            <form method="post" action="{% url 'financeiro:aplicar_encargo' cobranca.pk %}" class="flex flex-wrap items-center gap-1"
+                  onsubmit="return confirm('Cobrar do cliente um encargo por atraso de ' + this.valor.value + (this.valor.value.indexOf('%') >= 0 ? '' : ' reais') + '? Isso cria uma nova cobrança, que pode ser cancelada depois.')">
               {% csrf_token %}
               <input type="hidden" name="voltar" value="{{ voltar }}">
-              <button class="text-xs text-gray-500 underline">{% if cobranca.origem == "nota_debito" %}cancelar a ND{% else %}não cobrar{% endif %}</button>
+              <label for="encargo-{{ cobranca.pk }}" class="w-full text-gray-600" title="Sugerido: 5% até 4 dias de atraso, 10% acima — ajuste o valor se quiser">Encargo por atraso (R$ ou 5% / 10%):</label>
+              <input type="text" name="valor" id="encargo-{{ cobranca.pk }}" value="{{ encargo }}" required inputmode="decimal" autocomplete="off"
+                     class="w-24 rounded border border-gray-300 px-1 py-1">
+              <button class="rounded bg-marca-amarelo px-2 py-1 font-semibold text-marca-preto" title="Sugerido: 5% até 4 dias, 10% acima — ajuste se quiser">Aplicar</button>
             </form>
             {% endif %}
+            {# encargo e judicial são decisões independentes (C20): os dois aparecem #}
+            {% if cobranca.status == "atrasado" %}
+            <form method="post" action="{% url 'financeiro:marcar_judicial' cobranca.pk %}"
+                  onsubmit="return confirm('Marcar como cobrança judicial? O encargo automático para e o status só muda quando ela for quitada ou reaberta.')">
+              {% csrf_token %}
+              <input type="hidden" name="voltar" value="{{ voltar }}">
+              <button class="py-1 text-purple-700 underline" title="Passar para cobrança judicial">mandar para judicial</button>
+            </form>
+            {% elif cobranca.status == "judicial" %}
+            <form method="post" action="{% url 'financeiro:reabrir_judicial' cobranca.pk %}"
+                  onsubmit="return confirm('Tirar esta cobrança da cobrança judicial e voltar para o fluxo normal?')">
+              {% csrf_token %}
+              <input type="hidden" name="voltar" value="{{ voltar }}">
+              <button class="py-1 text-purple-700 underline" title="Voltar ao fluxo normal de cobrança">tirar do judicial (reabrir)</button>
+            </form>
+            {% endif %}
+            {% if cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.status != "judicial" and cobranca.origem in origens_cancelaveis %}
+            <form method="post" action="{% url 'financeiro:cancelar' cobranca.pk %}"
+                  onsubmit="return confirm('{% if cobranca.origem == "nota_debito" %}Cancelar a ND {{ cobranca.nota_debito.numero|stringformat:"03d" }} ({{ cobranca.valor|brl }})? Ela deixa de ser cobrada do cliente.{% if cobranca.nd_com_multas %} As multas dela voltam para \'A cobrar\'.{% endif %}{% else %}Cancelar esta cobrança ({{ cobranca.valor|brl }})? Ela não será cobrada do cliente.{% endif %}')">
+              {% csrf_token %}
+              <input type="hidden" name="voltar" value="{{ voltar }}">
+              <button class="py-1 text-gray-600 underline">{% if cobranca.origem == "nota_debito" %}cancelar a ND{% else %}não cobrar{% endif %}</button>
+            </form>
+            {% endif %}
+            </div>
+          </details>
           {% endif %}
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="7" class="px-3 py-6 text-center text-gray-500">
+      <tr class="block md:table-row"><td colspan="7" class="block rounded-lg bg-white px-3 py-6 text-center text-gray-500 shadow md:table-cell md:shadow-none">
         {% if status == "abertas" and not origem %}Nenhuma cobrança em aberto — está tudo recebido.
         <a href="?status=todas" class="ml-1 underline">ver todas as cobranças</a>
         {% else %}Nenhuma cobrança com esses filtros. <a href="?" class="ml-1 underline">limpar filtros</a>{% endif %}

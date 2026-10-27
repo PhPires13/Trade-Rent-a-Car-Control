@@ -9,20 +9,54 @@
   A alocação continua ativa; ao devolver o substituto, ele retoma o carro dele.
 </p>
 
-<form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow">
+{% if sem_candidatos %}
+<div class="mb-4 max-w-xl rounded border-l-4 border-yellow-500 bg-yellow-50 px-4 py-3 text-sm text-yellow-900" role="alert">
+  Nenhum carro disponível para servir de substituto agora.
+  <a href="{% url 'frota:hub' %}" class="font-semibold underline">Ver a frota →</a>
+</div>
+{% endif %}
+
+{{ km_candidatos|json_script:"km-candidatos" }}
+<form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-4 shadow sm:p-6"
+      x-data="{
+        kms: JSON.parse(document.getElementById('km-candidatos').textContent),
+        sugerido: false,
+        escolheu(alvo) {
+          if (alvo.name !== 'veiculo_substituto') return;
+          const km = this.kms[alvo.value];
+          const campo = document.getElementById('id_km_retirada');
+          if (km !== undefined) { campo.value = km; this.sugerido = true; }
+        }
+      }"
+      @change="escolheu($event.target)"
+      @input="if ($event.target.name === 'km_retirada') sugerido = false">
   {% csrf_token %}
   {% include "_erros_form.html" %}
   {% for field in form %}
+  {% if field.name == "confirmar_km" %}
+  <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
+    <p class="mb-1">{{ form.texto_km }}</p>
+    <label class="flex min-h-11 items-center gap-2 font-semibold" for="{{ field.id_for_label }}">
+      <input type="checkbox" name="confirmar_km" id="{{ field.id_for_label }}" style="width:auto"{% if field.value %} checked{% endif %}>
+      {{ field.label }}
+    </label>
+  </div>
+  {% else %}
   <div>
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
     {{ field }}
+    {% if field.name == "km_retirada" %}
+    <p x-show="sugerido" x-cloak class="mt-1 text-xs text-gray-600">Preenchido com o KM que o sistema já tem — confira no painel.</p>
+    {% endif %}
     {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
   </div>
+  {% endif %}
   {% endfor %}
-  <div class="flex gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar troca</button>
-    <a href="{{ voltar }}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <button class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 sm:py-2"
+            {% if sem_candidatos %}disabled{% endif %}>Registrar troca</button>
+    <a href="{{ voltar }}" class="px-4 py-2 text-center text-sm text-gray-600 underline">Cancelar</a>
   </div>
 </form>
 

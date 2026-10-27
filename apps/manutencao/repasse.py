@@ -1,9 +1,8 @@
 """Repasse de manutenção ao cliente (docs.md §4.5)."""
 
-from datetime import date
-
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from apps.alocacoes.services import cliente_vigente
 from apps.financeiro.models import Cobranca
@@ -51,7 +50,7 @@ def gerar_repasse(manutencao, vencimento=None):
         raise ValidationError(
             "Nenhum cliente estava com o veículo na data — repasse manual pelo financeiro."
         )
-    hoje = date.today()
+    hoje = timezone.localdate()
     cobranca = Cobranca.objects.create(
         cliente=cliente,
         origem=Cobranca.Origem.REPASSE_MANUTENCAO,

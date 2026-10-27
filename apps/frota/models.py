@@ -116,10 +116,12 @@ class Veiculo(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="FIPE/mercado, atualizado manualmente — usado na desmobilização",
+        help_text=(
+            "Valor da FIPE ou de mercado — atualize de vez em quando. Usado em ‘Quando vender’."
+        ),
     )
     mensalidade_protecao = models.DecimalField(
-        'mensalidade da proteção "$ AT" (R$)',
+        "mensalidade da proteção Auto Truck (R$)",
         max_digits=8,
         decimal_places=2,
         null=True,

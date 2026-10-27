@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block titulo %}Caução — {{ caucao.alocacao.cliente.nome }}{% endblock %}
+{% block titulo %}Caução — {{ cliente.nome }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-2">
@@ -9,22 +9,26 @@
   <a href="{% url 'financeiro:caucoes' %}" class="text-sm underline">← Voltar para cauções</a>
 </div>
 
-<div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">{{ caucao.recebido|brl }}</div><div class="text-sm text-gray-500">Recebido</div></div>
-  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">{{ caucao.descontado|brl }}</div><div class="text-sm text-gray-500">Descontos</div></div>
-  <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">{{ caucao.devolvido|brl }}</div><div class="text-sm text-gray-500">Devolvido</div></div>
-  <div class="rounded-lg bg-marca-preto p-4 text-white shadow"><div class="text-2xl font-black text-marca-amarelo">{{ caucao.saldo|brl }}</div><div class="text-sm text-gray-300">Saldo guardado ({{ caucao.status }})</div></div>
+<div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-5">
+  <div class="rounded-lg bg-white p-4 shadow" data-combinada>
+    <div class="whitespace-nowrap text-2xl font-black">{{ combinado|brl }}</div>
+    <div class="text-sm text-gray-500">Combinada{% if falta > 0 %} · <span class="font-semibold text-amber-700">falta {{ falta|brl }}</span>{% elif combinado > 0 %} · completa ✓{% endif %}</div>
+  </div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="whitespace-nowrap text-2xl font-black">{{ caucao.recebido|brl }}</div><div class="text-sm text-gray-500">Recebido</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="whitespace-nowrap text-2xl font-black">{{ caucao.descontado|brl }}</div><div class="text-sm text-gray-500">Descontos</div></div>
+  <div class="rounded-lg bg-white p-4 shadow"><div class="whitespace-nowrap text-2xl font-black">{{ caucao.devolvido|brl }}</div><div class="text-sm text-gray-500">Devolvido</div></div>
+  <div class="col-span-2 rounded-lg bg-marca-preto p-4 text-white shadow sm:col-span-1"><div class="whitespace-nowrap text-2xl font-black text-marca-amarelo">{{ caucao.saldo|brl }}</div><div class="text-sm text-gray-300">Saldo guardado ({{ caucao.status }})</div></div>
 </div>
 
 {% if credito > 0 %}
 <div class="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm" data-credito-cliente>
-  <p class="font-semibold">{{ caucao.alocacao.cliente.nome }} também tem {{ credito|brl }} de crédito (pagou adiantado ou sobrou de semanas não usadas).</p>
+  <p class="font-semibold">{{ cliente.nome }} também tem {{ credito|brl }} de crédito (pagou adiantado ou sobrou de semanas não usadas).</p>
   <p class="mt-1 text-gray-700">Esse valor não faz parte da caução. {% if pendentes %}Ainda há cobrança em aberto: use o crédito para pagá-la antes de mexer na caução.{% else %}Não há cobrança em aberto: combine a devolução junto com a da caução.{% endif %}</p>
   <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2">
     {% if pendentes %}
-    <a href="{% url 'financeiro:receber' %}?cliente={{ caucao.alocacao.cliente.pk }}" class="font-medium underline">Usar o crédito nas cobranças →</a>
+    <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}&usar_credito=1" class="font-medium underline">Usar o crédito nas cobranças →</a>
     {% endif %}
-    <a href="{% url 'financeiro:extrato_cliente' caucao.alocacao.cliente.pk %}" class="font-medium underline">Ver o extrato do cliente →</a>
+    <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="font-medium underline">Ver o extrato do cliente →</a>
   </div>
 </div>
 {% endif %}
@@ -32,27 +36,66 @@
 <div class="grid gap-6 lg:grid-cols-2">
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 font-semibold">Extrato</h2>
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <tbody class="divide-y divide-gray-100">
-        {% for m in movimentacoes %}
-        <tr>
-          <td class="px-2 py-1.5">{{ m.data|date:"d/m/Y" }}</td>
-          <td class="px-2 py-1.5">{{ m.get_tipo_display }}{% if m.cobranca %} <span class="text-xs text-gray-500">({{ m.cobranca.descricao }})</span>{% endif %}</td>
-          <td class="px-2 py-1.5 text-right font-medium {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}text-red-700{% else %}text-green-700{% endif %}">
-            {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}−{% else %}+{% endif %} {{ m.valor|brl }}
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td class="px-2 py-3 text-gray-500">Nenhuma movimentação — registre o recebimento da caução ao lado.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
+    <ul class="divide-y divide-gray-100 text-sm">
+      {% for m in movimentacoes %}
+      <li class="flex items-start justify-between gap-3 py-2">
+        <div class="min-w-0">
+          <div><span class="whitespace-nowrap text-gray-600">{{ m.data|date:"d/m/Y" }}</span> · {{ m.get_tipo_display }}{% if m.forma %} <span class="text-xs text-gray-500">({{ m.get_forma_display }})</span>{% endif %}</div>
+          {% if m.cobranca %}<div class="text-xs text-gray-500">pagou: {{ m.cobranca.descricao }}</div>{% endif %}
+          {% if m.observacoes %}<div class="text-xs text-gray-500">{{ m.observacoes }}</div>{% endif %}
+          {% if m.pode_desfazer %}
+          <form method="post" action="{% url 'financeiro:desfazer_movimentacao_caucao' m.pk %}" class="mt-1"
+                onsubmit="if (!confirm('Desfazer este lançamento de {{ m.get_tipo_display|lower }} de {{ m.valor|brl }}? Ele some do extrato da caução{% if m.cobranca %} e a cobrança volta a ficar em aberto{% endif %}.')) return false; this.querySelector('button').disabled = true; return true;">
+            {% csrf_token %}
+            <button class="text-xs text-gray-500 underline hover:text-red-700" title="Só no mesmo dia do lançamento">↩ desfazer (lançado hoje)</button>
+          </form>
+          {% endif %}
+        </div>
+        <div class="whitespace-nowrap text-right font-medium {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}text-red-700{% else %}text-green-700{% endif %}">
+          {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}−{% else %}+{% endif %} {{ m.valor|brl }}
+        </div>
+      </li>
+      {% empty %}
+      <li class="py-3 text-gray-500">Nenhuma movimentação — registre o recebimento da caução ao lado.</li>
+      {% endfor %}
+    </ul>
   </div>
 
-  <div class="rounded-lg bg-white p-5 shadow" x-data="{ tipo: 'recebimento', enviando: false }">
+  <div class="rounded-lg bg-white p-5 shadow"
+       data-saldo="{{ caucao.saldo|stringformat:'.2f' }}" data-combinado="{{ combinado|stringformat:'.2f' }}"
+       x-data='{ tipo: "{{ post.tipo|default:'recebimento'|escapejs }}", enviando: false, valorTexto: "",
+                 saldo: 0, combinado: 0,
+                 br(texto) {
+                   let t = String(texto || "").replace(/R\$|\s/g, "");
+                   if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+                   else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+                   return parseFloat(t) || 0;
+                 },
+                 get entrada() { return this.tipo === "recebimento" || this.tipo === "reforco"; },
+                 get acimaDoCombinado() { return this.entrada && this.combinado > 0 && this.saldo + this.br(this.valorTexto) > this.combinado + 0.005; } }'
+       x-init="saldo = parseFloat($el.dataset.saldo) || 0; combinado = parseFloat($el.dataset.combinado) || 0;
+               valorTexto = document.getElementById('caucao-valor').value;
+               $watch('tipo', () => { const sugerido = '{{ valor_sugerido|escapejs }}';
+                 /* o que falta depositar só serve para depósito/reforço: não leva para a devolução */
+                 if (!entrada && sugerido && valorTexto === sugerido) valorTexto = '';
+                 else if (entrada && sugerido && !valorTexto) valorTexto = sugerido; })">
     <h2 class="mb-3 font-semibold">Registrar movimentação</h2>
+
+    {% if deve > 0 or alocacao_ativa %}
+    {# devolver com dívida ou com o carro ainda com o cliente: avisa antes, com o atalho do desconto #}
+    <div x-show="tipo === 'devolucao'" x-cloak class="mb-3 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-sm text-amber-900" data-alerta-devolucao>
+      <p class="font-semibold">
+        {{ cliente.nome }}{% if deve > 0 %} ainda deve {{ deve|brl }}{% endif %}{% if deve > 0 and alocacao_ativa %} e{% endif %}{% if alocacao_ativa %} está com o {{ caucao.alocacao.veiculo.placa }}{% endif %}.
+        {% if deve > 0 %}Descontar da caução primeiro?{% endif %}
+      </p>
+      {% if deve > 0 and pendentes %}
+      <button type="button" x-on:click="tipo = 'desconto'" class="mt-2 rounded border border-amber-600 bg-white px-3 py-1.5 font-semibold text-amber-900 hover:bg-amber-100">
+        Usar a caução para pagar
+      </button>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <form method="post" class="space-y-3 text-sm"
           x-on:submit="if ((tipo === 'devolucao' || tipo === 'desconto') && !confirm(tipo === 'devolucao'
             ? 'Confirmar a DEVOLUÇÃO de R$ ' + $el.valor.value + ' ao cliente? O saldo da caução diminui.'
@@ -72,35 +115,51 @@
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label for="caucao-valor" class="mb-1 block font-medium">Valor (R$)</label>
-          <input type="text" name="valor" id="caucao-valor" required inputmode="decimal" autocomplete="off" placeholder="ex.: 1.500,00">
-          <p class="mt-1 text-xs text-gray-500" x-show="tipo === 'devolucao'">Saldo disponível: {{ caucao.saldo|brl }}</p>
+          <input type="text" name="valor" id="caucao-valor" required inputmode="decimal" autocomplete="off" placeholder="ex.: 1.500,00"
+                 value="{% if post %}{{ post.valor }}{% else %}{{ valor_sugerido }}{% endif %}" x-model="valorTexto">
+          <p class="mt-1 text-xs text-gray-500" x-show="tipo === 'devolucao' || tipo === 'desconto'">Saldo disponível: {{ caucao.saldo|brl }}</p>
+          {% if falta > 0 %}<p class="mt-1 text-xs text-gray-500" x-show="entrada">Falta depositar: {{ falta|brl }}</p>{% endif %}
         </div>
         <div>
           <label for="caucao-data" class="mb-1 block font-medium">Data</label>
-          <input type="date" name="data" id="caucao-data" value="{{ hoje|date:'Y-m-d' }}" required>
+          <input type="date" name="data" id="caucao-data" required max="{{ hoje|date:'Y-m-d' }}"
+                 x-bind:min="entrada ? '{{ data_minima_deposito|date:'Y-m-d' }}' : '{{ data_minima|date:'Y-m-d' }}'"
+                 value="{% if post.data %}{{ post.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}">
         </div>
       </div>
-      <div x-show="tipo === 'recebimento' || tipo === 'reforco'">
+      <div x-show="entrada">
         <label for="caucao-forma" class="mb-1 block font-medium">Como pagou</label>
-        <select name="forma" id="caucao-forma">
-          <option value="pix">Pix</option>
-          <option value="dinheiro">Dinheiro</option>
-          <option value="transferencia">Transferência</option>
+        <select name="forma" id="caucao-forma" x-bind:disabled="!entrada">
+          <option value="pix" {% if post.forma == "pix" %}selected{% endif %}>Pix</option>
+          <option value="dinheiro" {% if post.forma == "dinheiro" %}selected{% endif %}>Dinheiro</option>
+          <option value="transferencia" {% if post.forma == "transferencia" %}selected{% endif %}>Transferência</option>
         </select>
       </div>
+      {% if combinado > 0 %}
+      <label x-show="acimaDoCombinado" x-cloak class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+        <input type="checkbox" name="confirmar_acima" value="1" class="mt-1 h-4 w-4" style="width:auto" {% if post.confirmar_acima == "1" %}checked{% endif %}>
+        <span><strong>Confirmo: valor acima do combinado</strong> ({{ combinado|brl }}). Confira se não sobrou um zero.</span>
+      </label>
+      {% endif %}
       <div x-show="tipo === 'desconto'">
         <label for="caucao-cobranca" class="mb-1 block font-medium">Cobrança a quitar</label>
         <select name="cobranca" id="caucao-cobranca">
           {% for cobranca in pendentes %}
-          <option value="{{ cobranca.pk }}">{{ cobranca.descricao }} — saldo {{ cobranca.saldo|brl }}</option>
+          <option value="{{ cobranca.pk }}" {% if post.cobranca == cobranca.pk|stringformat:"s" %}selected{% endif %}>{{ cobranca.descricao }} — saldo {{ cobranca.saldo|brl }}</option>
           {% empty %}
           <option value="">— este cliente não tem cobrança em aberto —</option>
           {% endfor %}
         </select>
       </div>
+      {% if deve > 0 or alocacao_ativa %}
+      <label x-show="tipo === 'devolucao'" x-cloak class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+        <input type="checkbox" name="devolver_mesmo_assim" value="1" class="mt-1 h-4 w-4" style="width:auto" {% if post.devolver_mesmo_assim == "1" %}checked{% endif %}>
+        <span><strong>Devolver mesmo assim</strong>{% if deve > 0 %}, sem descontar o que está em aberto{% endif %}{% if alocacao_ativa %}, com o carro ainda com o cliente{% endif %}.</span>
+      </label>
+      {% endif %}
       <div>
         <label for="caucao-observacoes" class="mb-1 block font-medium">Observações (opcional)</label>
-        <input type="text" name="observacoes" id="caucao-observacoes">
+        <input type="text" name="observacoes" id="caucao-observacoes" maxlength="500" value="{{ post.observacoes|default:'' }}">
       </div>
       <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95"
               x-bind:disabled="enviando" x-bind:class="enviando ? 'cursor-wait opacity-50' : ''">
@@ -111,6 +170,6 @@
 </div>
 
 <style>
-  form input, form select { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }
+  form input:not([type=checkbox]), form select { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem; }
 </style>
 {% endblock %}

@@ -90,6 +90,14 @@ class MultaForm(FormularioBR, forms.ModelForm):
         ].help_text = "Cadastre a pessoa na ficha do cliente, em Condutores autorizados."
         # Alpine: o nome de quem dirigia só aparece quando é "outra pessoa"
         self.fields["tipo_condutor"].widget.attrs["x-model"] = "tipo"
+        # "Empresa (absorve)" já escolhe Empresa em "Quem vai pagar" — a não ser que a
+        # pessoa já tenha mexido nesse campo; voltando para cliente/outro, volta Cliente
+        self.fields["tipo_condutor"].widget.attrs["x-on:change"] = (
+            "if (!mexeuResp) resp = $event.target.value === 'empresa' ? 'empresa' "
+            ": (resp === 'empresa' ? 'cliente' : resp)"
+        )
+        self.fields["responsavel"].widget.attrs["x-model"] = "resp"
+        self.fields["responsavel"].widget.attrs["x-on:change"] = "mexeuResp = true"
 
     def clean_valor(self):
         valor = self.cleaned_data.get("valor")
@@ -102,7 +110,68 @@ class MultaForm(FormularioBR, forms.ModelForm):
         if dados.get("tipo_condutor") != Multa.TipoCondutor.OUTRO:
             # campo escondido na tela não pode deixar um nome esquecido gravado
             dados["condutor_autorizado"] = None
+        if (
+            dados.get("tipo_condutor") == Multa.TipoCondutor.EMPRESA
+            and dados.get("responsavel") == Multa.Responsavel.CLIENTE
+        ):
+            # "a empresa absorve" e "o cliente paga" ao mesmo tempo: a multa ia para a ND
+            self.add_error(
+                "responsavel",
+                "Você marcou que a empresa absorve; escolha Empresa em Quem vai pagar.",
+            )
+        self._conferir_condutor_do_cliente(dados)
         return dados
+
+    def _conferir_condutor_do_cliente(self, dados):
+        """Carro/data corrigidos mudam o cliente: o condutor do cliente antigo não serve.
+
+        Sem isso a multa ficava com o cliente novo e o condutor autorizado do outro
+        motorista (a ND sairia para um e o nome indicado seria de outro).
+        """
+        condutor = dados.get("condutor_autorizado")
+        veiculo, dia = dados.get("veiculo"), dados.get("data_infracao")
+        if not (self.instance.pk and condutor and condutor.cliente_id and veiculo and dia):
+            return
+        mudou = set(self.changed_data)
+        if not {"veiculo", "data_infracao"} & mudou or "cliente" in mudou:
+            return
+        if self.instance.itens_nd.exists() or self.instance.multa_origem_nic_id:
+            return  # nesses casos o cliente não é recalculado (ver save)
+        from apps.alocacoes.services import cliente_vigente
+
+        novo = cliente_vigente(veiculo, dia)
+        if novo is not None and novo.pk != condutor.cliente_id:
+            self.add_error(
+                "condutor_autorizado",
+                f"{condutor} é condutor de outro cliente; nessa data o carro estava com "
+                f"{novo.nome}. Confira quem dirigia.",
+            )
+
+    def save(self, commit=True):
+        multa = super().save(commit=False)
+        if (
+            self.instance.pk
+            and {"veiculo", "data_infracao"} & set(self.changed_data)
+            # na ND, cliente e responsável ficam como foram cobrados
+            and not self.instance.itens_nd.exists()
+            # a NIC guarda o motorista da multa original, não o do dia em que chegou
+            and not self.instance.multa_origem_nic_id
+        ):
+            if "cliente" not in self.changed_data:
+                # carro ou data corrigidos: o motorista é recalculado pela nova data
+                # (senão a ND sairia para quem estava com o carro no dia antigo)
+                multa.cliente = None
+            if "responsavel" not in self.changed_data:
+                aquisicao = multa.veiculo.data_aquisicao
+                antes_da_compra = bool(aquisicao and multa.data_infracao < aquisicao)
+                if antes_da_compra and multa.responsavel == Multa.Responsavel.CLIENTE:
+                    multa.responsavel = Multa.Responsavel.VENDEDOR  # dono anterior (§4.9)
+                elif not antes_da_compra and multa.responsavel == Multa.Responsavel.VENDEDOR:
+                    multa.responsavel = Multa.Responsavel.CLIENTE
+        if commit:
+            multa.save()
+            self._save_m2m()
+        return multa
 
 
 class MultaEdicaoForm(MultaForm):
@@ -133,7 +202,7 @@ class MultaEdicaoForm(MultaForm):
     }
 
     #: o que a ND congela: mudar aqui não muda a cobrança que o cliente já recebeu
-    CAMPOS_CONGELADOS_PELA_ND = ("valor", "cliente")
+    CAMPOS_CONGELADOS_PELA_ND = ("valor", "cliente", "responsavel")
 
     #: "Quem pagou" é escolha, não texto livre (D23): só "Cliente" tira a multa da
     #: ND, e um texto como "João (motorista)" deixava a multa ser cobrada em dobro.

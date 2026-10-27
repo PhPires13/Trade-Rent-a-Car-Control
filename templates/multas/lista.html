@@ -41,6 +41,8 @@
 <p class="mb-3 text-sm text-gray-600">Multas que ainda não foram pagas ao órgão. Depois de pagar, toque em <strong>Marcar paga</strong>.</p>
 {% elif tarefa == "cobrar" %}
 <p class="mb-3 text-sm text-gray-600">Multas que o cliente ainda deve. Para cobrar, <a href="{% url 'multas:gerar_nd' %}{% if filtro_cliente %}?cliente={{ filtro_cliente.pk }}{% endif %}" class="font-semibold underline">gere a nota de débito</a>.</p>
+{% elif tarefa == "definir" %}
+<p class="mb-3 text-sm text-gray-600">Ninguém estava alugando o carro na data destas multas. Toque em <strong>Editar</strong> e escolha quem paga: o cliente certo, o condutor ou a empresa.</p>
 {% endif %}
 
 <form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -89,7 +91,8 @@
     </div>
     <p class="mt-1 text-xs text-gray-600">Cliente: {{ multa.repasse }}</p>
     <div class="mt-3 space-y-2">
-      {% if multa.fici_status == "pendente" %}
+      {% if multa.anulada %}
+      {% elif multa.fici_status == "pendente" %}
         {% include "multas/_acao_fici.html" with grande=True %}
       {% elif multa.pagamento == "pendente" and multa.valor %}
         {% include "multas/_acao_paga.html" with grande=True %}
@@ -98,10 +101,10 @@
         <summary class="flex min-h-[44px] cursor-pointer select-none items-center justify-center rounded border border-gray-200 text-gray-700">Mais opções ▾</summary>
         <div class="mt-2 space-y-2">
           <a href="{% url 'multas:editar' multa.pk %}?volta={{ volta|urlencode }}" class="flex min-h-[44px] items-center justify-center rounded border border-gray-300 font-semibold text-gray-800">Editar multa</a>
-          {% if multa.fici_status == "pendente" and multa.pagamento == "pendente" and multa.valor %}
+          {% if not multa.anulada and multa.fici_status == "pendente" and multa.pagamento == "pendente" and multa.valor %}
             {% include "multas/_acao_paga.html" with grande=True %}
           {% endif %}
-          {% if multa.fici_status == "pendente" and multa.fici_prazo and multa.fici_prazo < hoje %}
+          {% if not multa.anulada and multa.fici_status == "pendente" and multa.fici_prazo and multa.fici_prazo < hoje %}
             {% include "multas/_acao_nic.html" with grande=True %}
           {% endif %}
         </div>
@@ -145,11 +148,11 @@
         <td class="px-3 py-2">{% include "multas/_selo_pagamento.html" %}</td>
         <td class="px-3 py-2 text-right text-xs">
           <div class="flex flex-wrap items-start justify-end gap-1.5">
-          {% if multa.fici_status == "pendente" %}
+          {% if multa.fici_status == "pendente" and not multa.anulada %}
             {% include "multas/_acao_fici.html" with grande=False %}
             {% if multa.fici_prazo and multa.fici_prazo < hoje %}{% include "multas/_acao_nic.html" with grande=False %}{% endif %}
           {% endif %}
-          {% if multa.pagamento == "pendente" and multa.valor %}
+          {% if multa.pagamento == "pendente" and multa.valor and not multa.anulada %}
             {% include "multas/_acao_paga.html" with grande=False %}
           {% endif %}
             <a href="{% url 'multas:editar' multa.pk %}?volta={{ volta|urlencode }}" class="whitespace-nowrap rounded px-2 py-1 text-gray-700 underline">Editar</a>

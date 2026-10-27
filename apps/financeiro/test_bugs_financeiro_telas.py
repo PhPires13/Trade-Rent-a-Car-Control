@@ -236,7 +236,8 @@ def test_c29_acao_volta_para_o_filtro(usuario_logado, cliente, acao, origem):
         f"/financeiro/cobranca/{cobranca.pk}/{acao}/", {"voltar": voltar, "valor": "10,00"}
     )
     assert resposta.status_code == 302
-    assert resposta["Location"] == f"/financeiro/?{voltar}"
+    # volta no filtro e na linha da cobrança (âncora #cobranca-<pk>)
+    assert resposta["Location"] == f"/financeiro/?{voltar}#cobranca-{cobranca.pk}"
 
 
 def test_c29_voltar_nao_leva_para_fora(usuario_logado, cliente):

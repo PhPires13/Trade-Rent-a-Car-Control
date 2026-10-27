@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block titulo %}Manutenções — {{ veiculo.placa }}{% endblock %}
+{% block titulo %}Manutenções — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -23,9 +23,9 @@
         <th class="px-3 py-2">Tipo</th>
         <th class="px-3 py-2">KM</th>
         <th class="px-3 py-2">Descrição</th>
-        <th class="px-3 py-2" title="Quanto a oficina cobrou da empresa">Custo real</th>
+        <th class="px-3 py-2">Quanto a oficina cobrou</th>
         <th class="px-3 py-2">Pago à oficina</th>
-        <th class="px-3 py-2" title="Quanto foi cobrado do cliente (entre parênteses: diferença para o custo real)">Cobrado do cliente</th>
+        <th class="px-3 py-2" title="Quanto foi cobrado do cliente (entre parênteses: diferença para o que a oficina cobrou)">Cobrado do cliente</th>
         <th class="px-3 py-2" title="Dias que o carro ficou na oficina">Dias parado</th>
         <th class="px-3 py-2" title="Cobrança do custo ao cliente, no Financeiro">Repasse</th>
         <th class="px-3 py-2"><span class="sr-only">Ações</span></th>
@@ -39,7 +39,7 @@
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Tipo: </span>{{ m.get_tipo_display }}{% if m.sinistro %} <span class="text-xs text-red-600">(sinistro)</span>{% endif %}</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">KM: </span>{{ m.km|milhar }}</td>
         <td class="block py-0.5 text-gray-600 sm:table-cell sm:px-3 sm:py-2">{{ m.descricao }}{% if m.oficina %} <span class="text-xs text-gray-600">· {{ m.oficina }}</span>{% endif %}</td>
-        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Custo real: </span>{% if m.custo_real is not None %}{{ m.custo_real|brl }}{% else %}—{% endif %}</td>
+        <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Quanto a oficina cobrou: </span>{% if m.custo_real is not None %}{{ m.custo_real|brl }}{% else %}—{% endif %}</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Pago à oficina: </span>
           {% if not m.custo_real %}—
           {% elif m.pagamento_custo == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Pago</span>
@@ -47,7 +47,7 @@
         </td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Cobrado do cliente: </span>
           {% if m.valor_cobrado_cliente is not None %}{{ m.valor_cobrado_cliente|brl }}
-            {% if m.diferenca is not None %}<span class="text-xs sm:block {% if m.diferenca >= 0 %}text-green-700{% else %}text-red-700{% endif %}" title="Cobrado do cliente menos o custo real">({% if m.diferenca >= 0 %}+{% endif %}{{ m.diferenca|brl }})</span>{% endif %}
+            {% if m.diferenca is not None %}<span class="text-xs sm:block {% if m.diferenca >= 0 %}text-green-700{% else %}text-red-700{% endif %}" title="Cobrado do cliente menos o que a oficina cobrou">({% if m.diferenca >= 0 %}+{% endif %}{{ m.diferenca|brl }})</span>{% endif %}
           {% else %}—{% endif %}
         </td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Dias parado: </span>

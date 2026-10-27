@@ -7,9 +7,10 @@
 <h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
 {% include "financeiro/_abas.html" with aba="caucoes" %}
 
-<div class="overflow-x-auto rounded-lg bg-white shadow">
-  <table class="w-full text-sm">
-    <thead class="bg-marca-preto text-left text-white">
+{# Celular: um cartão por caução (cliente e saldo em destaque). Do md para cima: tabela. #}
+<div class="md:overflow-x-auto md:rounded-lg md:bg-white md:shadow">
+  <table class="block w-full text-sm md:table">
+    <thead class="hidden bg-marca-preto text-left text-white md:table-header-group">
       <tr>
         <th class="px-3 py-2">Cliente</th>
         <th class="px-3 py-2">Veículo</th>
@@ -21,23 +22,34 @@
         <th class="px-3 py-2">Situação</th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="block space-y-3 md:table-row-group md:space-y-0 md:divide-y md:divide-gray-100">
       {% for caucao in caucoes %}
-      <tr>
-        <td class="px-3 py-2 font-medium">
-          <a href="{% url 'financeiro:caucao_detalhe' caucao.pk %}" class="underline decoration-marca-amarelo decoration-2">
-            {{ caucao.alocacao.cliente.nome }}</a>
+      <tr class="block rounded-lg bg-white p-4 shadow md:table-row md:rounded-none md:p-0 md:shadow-none">
+        <td class="block md:table-cell md:px-3 md:py-2">
+          <div class="flex items-start justify-between gap-2">
+            <a href="{% url 'financeiro:caucao_detalhe' caucao.pk %}" class="font-semibold underline decoration-marca-amarelo decoration-2 md:font-medium">
+              {{ caucao.alocacao.cliente.nome }}</a>
+            <span class="whitespace-nowrap text-lg font-black md:hidden">{{ caucao.saldo|brl }}</span>
+          </div>
         </td>
-        <td class="px-3 py-2">{{ caucao.alocacao.veiculo.placa }}</td>
-        <td class="px-3 py-2">{{ caucao.alocacao.caucao_valor|brl }}</td>
-        <td class="px-3 py-2">{{ caucao.recebido|brl }}</td>
-        <td class="px-3 py-2">{{ caucao.descontado|brl }}</td>
-        <td class="px-3 py-2">{{ caucao.devolvido|brl }}</td>
-        <td class="px-3 py-2 font-semibold">{{ caucao.saldo|brl }}</td>
-        <td class="px-3 py-2 text-gray-600">{{ caucao.status }}</td>
+        <td class="block text-gray-600 md:table-cell md:px-3 md:py-2 md:text-gray-900">
+          {{ caucao.alocacao.veiculo.placa }}<span class="md:hidden"> · {{ caucao.status }}</span></td>
+        <td class="block text-xs text-gray-500 md:table-cell md:whitespace-nowrap md:px-3 md:py-2 md:text-sm md:text-gray-900">
+          <span class="whitespace-nowrap"><span class="md:hidden">Acordada </span>{{ caucao.alocacao.caucao_valor|brl }}</span>
+          <span class="md:hidden">· <span class="whitespace-nowrap">recebida {{ caucao.recebido|brl }}</span>{% if caucao.descontado %} · <span class="whitespace-nowrap">descontos {{ caucao.descontado|brl }}</span>{% endif %}{% if caucao.devolvido %} · <span class="whitespace-nowrap">devolvida {{ caucao.devolvido|brl }}</span>{% endif %}</span>
+        </td>
+        <td class="hidden whitespace-nowrap px-3 py-2 md:table-cell">{{ caucao.recebido|brl }}</td>
+        <td class="hidden whitespace-nowrap px-3 py-2 md:table-cell">{{ caucao.descontado|brl }}</td>
+        <td class="hidden whitespace-nowrap px-3 py-2 md:table-cell">{{ caucao.devolvido|brl }}</td>
+        <td class="hidden whitespace-nowrap px-3 py-2 font-semibold md:table-cell">{{ caucao.saldo|brl }}</td>
+        <td class="hidden px-3 py-2 text-gray-600 md:table-cell">{{ caucao.status }}</td>
+        <td class="mt-3 block md:hidden">
+          <a href="{% url 'financeiro:caucao_detalhe' caucao.pk %}"
+             class="flex min-h-[44px] items-center justify-center rounded border border-gray-300 font-semibold text-gray-800">Abrir a caução</a>
+        </td>
       </tr>
       {% empty %}
-      <tr><td colspan="8" class="px-3 py-4 text-gray-500">Nenhuma caução registrada (a caução é opcional).</td></tr>
+      <tr class="block md:table-row"><td colspan="8" class="block rounded-lg bg-white px-3 py-4 text-gray-500 shadow md:table-cell md:shadow-none">Nenhuma caução registrada (a caução é opcional).</td></tr>
       {% endfor %}
     </tbody>
   </table>

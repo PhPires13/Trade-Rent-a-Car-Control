@@ -27,4 +27,5 @@ class MultaAdmin(SimpleHistoryAdmin):
         "pagamento",
     ]
     list_filter = ["resultado", "fici_status", "pagamento", "orgao"]
+    list_select_related = ["veiculo", "cliente", "orgao"]
     search_fields = ["veiculo__placa", "cliente__nome", "ait", "codigo"]

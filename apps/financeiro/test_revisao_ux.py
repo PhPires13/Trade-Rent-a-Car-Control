@@ -92,6 +92,7 @@ def test_receber_quita_cobranca_judicial(usuario_logado, cliente):
             "cliente": cliente.pk,
             "valor": "650,00",
             "data": "2026-07-20",
+            "confirmar_mes_passado": "1",  # pagamento de mês já fechado no DAS
             "forma": "pix",
             "sobra_destino": "credito",
             f"aplicar_{cobranca.pk}": "650,00",
@@ -110,6 +111,7 @@ def test_judicial_parcialmente_paga_continua_judicial(usuario_logado, cliente):
             "cliente": cliente.pk,
             "valor": "300,00",
             "data": "2026-07-20",
+            "confirmar_mes_passado": "1",  # pagamento de mês já fechado no DAS
             "forma": "pix",
             "sobra_destino": "credito",
             f"aplicar_{cobranca.pk}": "300,00",
@@ -166,6 +168,7 @@ def test_erro_no_recebimento_preserva_o_digitado(usuario_logado, cliente):
             "cliente": cliente.pk,
             "valor": "900,00",
             "data": "2026-07-20",
+            "confirmar_mes_passado": "1",  # pagamento de mês já fechado no DAS
             "forma": "dinheiro",
             "sobra_destino": "caucao",
             "observacoes": "pagamento na loja",
@@ -180,7 +183,8 @@ def test_erro_no_recebimento_preserva_o_digitado(usuario_logado, cliente):
     assert 'value="200,00"' in html
     assert 'value="pagamento na loja"' in html
     assert 'value="dinheiro" selected' in html
-    assert 'value="caucao" selected' in html
+    # sem caução ativa, "Reforço de caução" nem é oferecido
+    assert 'value="caucao"' not in html
     mensagens = [str(m) for m in resposta.context["messages"]]
     assert any("acima do saldo devedor" in m for m in mensagens)
     assert not Recebimento.objects.exists()  # nada foi lançado
@@ -194,6 +198,7 @@ def test_valor_com_ponto_de_milhar_aceito(usuario_logado, cliente):
             "cliente": cliente.pk,
             "valor": "1.300,00",
             "data": "2026-07-20",
+            "confirmar_mes_passado": "1",  # pagamento de mês já fechado no DAS
             "forma": "pix",
             "sobra_destino": "credito",
             f"aplicar_{cobranca.pk}": "1.300,00",
@@ -212,6 +217,7 @@ def test_mensagem_diz_qual_campo_falhou(usuario_logado, cliente):
             "cliente": cliente.pk,
             "valor": "setecentos",
             "data": "2026-07-20",
+            "confirmar_mes_passado": "1",  # pagamento de mês já fechado no DAS
             "forma": "pix",
             "sobra_destino": "credito",
         },

@@ -38,6 +38,28 @@ class SoLeituraNaEdicao:
         return super().history_form_view(request, object_id, version_id, extra_context)
 
 
+class SemIncluirPeloAdmin:
+    """Lançamento financeiro não se cria pelo Admin (decisão D11, ETAPA 15).
+
+    Um Recebimento criado aqui aparecia no extrato mas não gerava crédito nem
+    entrava no caixa/DAS. O caminho certo são as telas: Receber, Emitir ND e
+    Caução — o aviso no topo da lista diz isso.
+    """
+
+    tela_certa = ""
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = {**(extra_context or {})}
+        if self.tela_certa:
+            extra_context.setdefault(
+                "subtitle", f"Só consulta — para lançar, use {self.tela_certa}"
+            )
+        return super().changelist_view(request, extra_context)
+
+
 class InlineSoLeitura:
     """Inline de lançamento financeiro: mostra, mas não inclui nem altera valores.
 
@@ -61,10 +83,13 @@ class InlineSoLeitura:
 
 
 @admin.register(Cobranca)
-class CobrancaAdmin(SoLeituraNaEdicao, SimpleHistoryAdmin):
+class CobrancaAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+    tela_certa = "Financeiro → Emitir ND (ou o aluguel, que é gerado sozinho)"
     list_display = ["descricao", "cliente", "origem", "valor", "vencimento", "status"]
     list_filter = ["status", "origem"]
     search_fields = ["descricao", "cliente__nome"]
+    list_select_related = ["cliente"]
+    raw_id_fields = ["alocacao", "cliente"]
     campos_financeiros = ("cliente", "origem", "valor", "status", "nota_debito", "cobranca_origem")
 
 
@@ -74,8 +99,10 @@ class AplicacaoInline(InlineSoLeitura, admin.TabularInline):
 
 
 @admin.register(Recebimento)
-class RecebimentoAdmin(SoLeituraNaEdicao, SimpleHistoryAdmin):
+class RecebimentoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+    tela_certa = "Financeiro → Receber"
     list_display = ["cliente", "data", "valor", "forma"]
+    list_select_related = ["cliente"]
     list_filter = ["forma"]
     inlines = [AplicacaoInline]
     campos_financeiros = ("cliente", "valor", "forma")
@@ -89,8 +116,15 @@ class ItemNotaDebitoInline(InlineSoLeitura, admin.TabularInline):
 
 
 @admin.register(NotaDebito)
-class NotaDebitoAdmin(SoLeituraNaEdicao, SimpleHistoryAdmin):
+class NotaDebitoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+    tela_certa = "Financeiro → Emitir ND"
     list_display = ["numero", "cliente", "data_emissao", "total"]
+    list_select_related = ["cliente"]
+
+    def get_queryset(self, request):
+        # "total" soma os itens: prefetch evita uma consulta por ND
+        return super().get_queryset(request).prefetch_related("itens")
+
     inlines = [ItemNotaDebitoInline]
     campos_financeiros = ("numero", "cliente")
 
@@ -101,14 +135,38 @@ class MovimentacaoCaucaoInline(InlineSoLeitura, admin.TabularInline):
 
 
 @admin.register(Caucao)
-class CaucaoAdmin(SoLeituraNaEdicao, SimpleHistoryAdmin):
+class CaucaoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+    tela_certa = "Financeiro → Cauções"
     list_display = ["alocacao", "recebido", "descontado", "devolvido", "saldo"]
+    list_select_related = ["alocacao__veiculo", "alocacao__cliente"]
     inlines = [MovimentacaoCaucaoInline]
     campos_financeiros = ("alocacao",)
 
+    def get_queryset(self, request):
+        # recebido/descontado/devolvido anotados em lote (antes: ~12 consultas por linha)
+        return Caucao.com_saldos_anotados(super().get_queryset(request))
+
+    @admin.display(description="recebido")
+    def recebido(self, obj):
+        return obj.recebido
+
+    @admin.display(description="descontado")
+    def descontado(self, obj):
+        return obj.descontado
+
+    @admin.display(description="devolvido")
+    def devolvido(self, obj):
+        return obj.devolvido
+
+    @admin.display(description="saldo")
+    def saldo(self, obj):
+        return obj.saldo
+
 
 @admin.register(MovimentoCredito)
-class MovimentoCreditoAdmin(SoLeituraNaEdicao, SimpleHistoryAdmin):
+class MovimentoCreditoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+    tela_certa = "Financeiro → Receber (a sobra do pagamento vira crédito)"
     list_display = ["cliente", "tipo", "valor", "data"]
+    list_select_related = ["cliente"]
     list_filter = ["tipo"]
     campos_financeiros = ("cliente", "tipo", "valor")

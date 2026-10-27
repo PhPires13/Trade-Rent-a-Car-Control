@@ -33,6 +33,18 @@
 </section>
 {% endif %}
 
+<form method="get" action="{% url 'manutencao:escolher_carro' %}" class="mb-6 flex flex-wrap items-end gap-2 rounded-lg bg-white p-4 shadow">
+  <div class="w-full sm:w-auto sm:min-w-[16rem]">
+    <label for="qual-carro" class="mb-1 block font-semibold">Registrar manutenção — qual carro?</label>
+    <select id="qual-carro" name="veiculo" required onchange="if (this.value) this.form.submit()"
+            class="w-full rounded border border-gray-300 px-3 py-3 text-base sm:py-2">
+      <option value="">Escolha a placa…</option>
+      {% for carro in carros %}<option value="{{ carro.pk }}">{{ carro.placa }} — {{ carro.marca_modelo }}</option>{% endfor %}
+    </select>
+  </div>
+  <button class="w-full rounded bg-marca-amarelo px-4 py-3 font-semibold text-marca-preto hover:brightness-95 sm:w-auto sm:py-2">Continuar</button>
+</form>
+
 <div class="mb-4 flex flex-wrap items-center gap-2 text-sm" role="tablist" aria-label="O que mostrar">
   <a href="{% url 'manutencao:preventivas' %}" role="tab" aria-selected="{% if ver_todas %}false{% else %}true{% endif %}"
      class="rounded-full px-4 py-2 font-semibold {% if ver_todas %}bg-white text-gray-600 shadow{% else %}bg-marca-preto text-white{% endif %}">Só o que precisa de atenção</a>
@@ -89,9 +101,8 @@
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Próxima com: </span>{% if p.km_proximo %}{{ p.km_proximo|intcomma }} km{% else %}—{% endif %}</td>
         <td class="block py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Faltam: </span>
           {% if p.faltam_km is not None %}
-            {% if p.faltam_km == 0 %}<span class="font-semibold text-red-700">vence agora</span>
-            {% elif p.faltam_km < 0 %}<span class="font-semibold text-red-700">vencida há {{ p.faltam_km|intcomma|cut:"-" }} km</span>
-            {% else %}{{ p.faltam_km|intcomma }} km{% endif %}
+            {% if p.faltam_km <= 0 %}<span class="font-semibold text-red-700">{{ p.texto_km }}</span>
+            {% else %}{{ p.faltam_km|milhar }} km{% endif %}
             {% if p.dias_restantes %}<span class="text-xs text-gray-500">≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }}</span>{% endif %}
           {% else %}—{% endif %}
         </td>

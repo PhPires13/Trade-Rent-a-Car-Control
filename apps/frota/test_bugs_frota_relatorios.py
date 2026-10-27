@@ -454,5 +454,7 @@ def test_d06_linha_em_branco_nao_cria_ipva_vazio(usuario_logado, veiculo):
             "pagamentos_ipva-0-parcela": "1",
         },
     )
-    assert resposta.status_code == 302
+    # qualidade final: em vez de "IPVA salvo", avisa que nada foi lançado e fica na tela
+    assert resposta.status_code == 200
+    assert "Nada foi lançado" in resposta.content.decode()
     assert not PagamentoIpva.objects.exists()

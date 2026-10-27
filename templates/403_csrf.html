@@ -1,0 +1,12 @@
+{% extends "_pagina_aviso.html" %}
+{% block titulo %}Sessão expirada — Trade Rent a Car{% endblock %}
+{% block aviso_titulo %}A página ficou aberta muito tempo{% endblock %}
+{% block aviso_texto %}
+<p>Sua sessão expirou ou a página ficou aberta muito tempo, e por segurança o envio não foi aceito.</p>
+<p class="text-sm text-gray-600">Entre de novo e repita o que estava fazendo — o último envio não foi salvo.</p>
+{% endblock %}
+{% block aviso_acao %}
+<a href="{% url 'painel' %}"
+   class="flex min-h-[48px] w-full items-center justify-center rounded-lg bg-marca-amarelo px-4 font-bold text-marca-preto hover:brightness-95">
+  Clique aqui para entrar de novo</a>
+{% endblock %}

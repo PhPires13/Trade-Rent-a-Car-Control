@@ -19,7 +19,7 @@
 {% endif %}
 
 <form method="post" class="max-w-2xl space-y-6"
-      x-data="{ tipo: '{{ form.tipo_condutor.value|default:'cliente'|escapejs }}' }">
+      x-data="{ tipo: '{{ form.tipo_condutor.value|default:'cliente'|escapejs }}', resp: '{{ form.responsavel.value|default:'cliente'|escapejs }}', mexeuResp: false }">
   {% csrf_token %}
   {% include "_erros_form.html" %}
   {% if multa %}<input type="hidden" name="volta" value="{{ volta }}">{% else %}<input type="hidden" name="token" value="{{ token }}">{% endif %}

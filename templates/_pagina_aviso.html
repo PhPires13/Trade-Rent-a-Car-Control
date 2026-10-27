@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{# Molde das telas de aviso (404, 500, sessão expirada, sair): cartão da marca com título, texto e um botão. #}
+{# Não depende de request nem de usuário: a 500 e a 403 de CSRF renderizam sem contexto. #}
+
+{% block conteudo %}
+<div class="mx-auto mt-12 max-w-md">
+  <div class="overflow-hidden rounded-lg shadow-lg">
+    <div class="bg-marca-amarelo px-6 py-5 text-center">
+      <span class="text-3xl font-black tracking-tight text-marca-preto">TRADE<span class="align-middle">→</span></span>
+      <div class="bg-marca-amarelo text-sm italic text-marca-preto">Rent a Car</div>
+    </div>
+    <div class="bg-white px-6 py-6 text-gray-800">
+      <h1 class="mb-2 text-xl font-bold">{% block aviso_titulo %}{% endblock %}</h1>
+      <div class="mb-5 space-y-2">{% block aviso_texto %}{% endblock %}</div>
+      {% block aviso_acao %}
+      <a href="{% url 'painel' %}"
+         class="flex min-h-[48px] w-full items-center justify-center rounded-lg bg-marca-amarelo px-4 font-bold text-marca-preto hover:brightness-95">
+        Ir para o Painel</a>
+      {% endblock %}
+    </div>
+  </div>
+</div>
+{% endblock %}

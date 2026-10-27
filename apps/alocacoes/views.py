@@ -1,9 +1,12 @@
 from datetime import date, timedelta
+from uuid import uuid4
 
 from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
+from django.db.models import Max
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -12,6 +15,7 @@ from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from apps.campos import FormularioBR, exibir_dinheiro
 from apps.financeiro.models import Caucao
 from apps.financeiro.services import gerar_cobrancas_semanais
+from apps.financeiro.views import _envio_unico
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 from apps.manutencao.services import oficina_por_veiculo
@@ -25,7 +29,12 @@ from .services import linha_do_tempo
 
 
 def dividas_por_cliente(clientes_ids=None):
-    """{cliente_id: {"total", "judicial", "vencido"}} do que cada um deve hoje (D17)."""
+    """{cliente_id: {...}} do que cada um deve (D17).
+
+    "vencido": venceu antes de hoje (ou judicial) — é o que pede confirmação
+    para alocar. "ate_hoje": mesma conta do Quem deve (vencimento até hoje).
+    "a_vencer": ainda vai vencer (não é atraso).
+    """
     from apps.financeiro.models import Cobranca  # import local evita ciclo de import
 
     cobrancas = Cobranca.objects.filter(status__in=Cobranca.STATUS_DEVIDOS)
@@ -36,8 +45,15 @@ def dividas_por_cliente(clientes_ids=None):
     for cobranca in Cobranca.com_quitacao_anotada(cobrancas):
         if cobranca.saldo <= 0:
             continue
-        divida = dividas.setdefault(cobranca.cliente_id, {"total": 0, "judicial": 0, "vencido": 0})
+        divida = dividas.setdefault(
+            cobranca.cliente_id,
+            {"total": 0, "judicial": 0, "vencido": 0, "ate_hoje": 0, "a_vencer": 0},
+        )
         divida["total"] += cobranca.saldo
+        if cobranca.vencimento <= hoje:
+            divida["ate_hoje"] += cobranca.saldo
+        else:
+            divida["a_vencer"] += cobranca.saldo
         if cobranca.status == Cobranca.Status.JUDICIAL:
             divida["judicial"] += cobranca.saldo
         if cobranca.vencimento < hoje or cobranca.status == Cobranca.Status.JUDICIAL:
@@ -59,6 +75,52 @@ def texto_da_divida(cliente, divida):
     if divida["judicial"]:
         texto += f" ({brl(divida['judicial'])} em cobrança judicial)"
     return texto + "."
+
+
+def _data_do_post(dados, campo):
+    """Data digitada no formulário ainda não validado (ou None)."""
+    try:
+        return date.fromisoformat(str(dados.get(campo, "")).strip())
+    except ValueError:
+        return None
+
+
+def _int_do_post(dados, campo):
+    texto = str(dados.get(campo, "")).strip().replace(".", "")
+    return int(texto) if texto.isdigit() else None
+
+
+def semanas_a_lancar(inicio, hoje=None):
+    """Quantas semanas de aluguel nascem de uma vez para um contrato que começou em `inicio`."""
+    hoje = hoje or date.today()
+    if inicio is None or inicio > hoje:
+        return 0
+    return (hoje - inicio).days // 7 + 1
+
+
+def alocacao_ativa_do_cliente(cliente_id):
+    return (
+        Alocacao.objects.filter(cliente_id=cliente_id, status=Alocacao.Status.ATIVA)
+        .select_related("veiculo", "cliente")
+        .order_by("-data_inicio", "-pk")
+        .first()
+    )
+
+
+def texto_cliente_com_carro(ativa):
+    nome = ativa.cliente.nome.split()[0] if ativa.cliente.nome.strip() else ativa.cliente.nome
+    return (
+        f"{nome} já está com o carro {ativa.veiculo.placa} desde "
+        f"{ativa.data_inicio:%d/%m/%Y}. Se trocou de carro, encerre a alocação anterior "
+        "ou use Troca temporária."
+    )
+
+
+def texto_km_menor(km_atual):
+    return (
+        f"O carro já marcou {milhar(km_atual)} km — confira o painel. Se o KM do "
+        "sistema estava errado, marque “Confirmo o KM” e salve de novo."
+    )
 
 
 class AlocacaoForm(FormularioBR, forms.ModelForm):
@@ -86,30 +148,85 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
 
     #: Início mais antigo que isso = contrato que já rodava (carga inicial, D01).
     DIAS_INICIO_ANTIGO = 7
+    #: Data mais antiga que isso é quase sempre ano digitado errado.
+    DIAS_PASSADO_MAXIMO = 366
+    #: Acima disso, lançar as semanas atrasadas de uma vez pede confirmação.
+    SEMANAS_SEM_CONFIRMAR = 26
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        hoje = date.today()
+        self.fields["data_inicio"].widget.attrs["max"] = hoje.isoformat()
         self.fields["veiculo"].queryset = Veiculo.objects.filter(
             status=Veiculo.Status.DISPONIVEL, uso=Veiculo.Uso.LOCACAO
         )
         self.fields["cliente"].queryset = Cliente.objects.exclude(status=Cliente.Status.INATIVO)
         self.fields["veiculo"].empty_label = "Escolha o carro…"
         self.fields["cliente"].empty_label = "Escolha o cliente…"
+        # Na lista de clientes: quem já está com carro e quem deve (vencido)
+        self.carro_do_cliente = {
+            a.cliente_id: a.veiculo.placa
+            for a in Alocacao.objects.filter(status=Alocacao.Status.ATIVA).select_related("veiculo")
+        }
+        self.dividas = dividas_por_cliente()
+
+        def rotulo_cliente(cliente):
+            texto = cliente.nome
+            if cliente.pk in self.carro_do_cliente:
+                texto += f" — já com {self.carro_do_cliente[cliente.pk]}"
+            vencido = (self.dividas.get(cliente.pk) or {}).get("ate_hoje")
+            if vencido:
+                texto += f" — deve {brl(vencido)}"
+            return texto
+
+        self.fields["cliente"].label_from_instance = rotulo_cliente
         dia = self.fields["dia_vencimento"]
         dia.required = False
         dia.choices = [("", "Mesmo dia da semana do início"), *Cliente.DiaSemana.choices]
         # D17: cliente devendo pode alugar, mas só com confirmação explícita
         self.texto_divida = None
+        self.texto_dois_carros = None
+        self.texto_km = None
+        self.semanas = 0
         cliente_id = str(self.data.get("cliente", "")) if self.is_bound else ""
         cliente = Cliente.objects.filter(pk=cliente_id).first() if cliente_id.isdigit() else None
         if cliente:
-            self.texto_divida = texto_da_divida(
-                cliente, dividas_por_cliente([cliente.pk]).get(cliente.pk)
-            )
+            self.texto_divida = texto_da_divida(cliente, self.dividas.get(cliente.pk))
+            ativa = alocacao_ativa_do_cliente(cliente.pk)
+            if ativa:
+                self.texto_dois_carros = texto_cliente_com_carro(ativa)
         if self.texto_divida:
             self.fields["confirmar_divida"] = forms.BooleanField(
                 required=False, label="Confirmo: alocar mesmo com o cliente devendo"
             )
+        if self.texto_dois_carros:
+            self.fields["confirmar_dois_carros"] = forms.BooleanField(
+                required=False, label="Confirmo: o cliente vai ficar com os dois carros"
+            )
+        if self.is_bound:
+            # KM menor que o já conhecido (D27): pede confirmação
+            veiculo_id = str(self.data.get("veiculo", ""))
+            km = _int_do_post(self.data, "km_entrega")
+            veiculo = (
+                Veiculo.objects.filter(pk=veiculo_id).only("km_atual").first()
+                if veiculo_id.isdigit()
+                else None
+            )
+            if veiculo and km is not None and km < veiculo.km_atual:
+                self.texto_km = texto_km_menor(veiculo.km_atual)
+                self.fields["confirmar_km"] = forms.BooleanField(
+                    required=False, label="Confirmo o KM"
+                )
+            # D01: muitas semanas atrasadas de uma vez só com confirmação
+            inicio = _data_do_post(self.data, "cobrar_a_partir_de") or _data_do_post(
+                self.data, "data_inicio"
+            )
+            self.semanas = semanas_a_lancar(inicio, hoje)
+            if self.semanas > self.SEMANAS_SEM_CONFIRMAR:
+                self.fields["confirmar_semanas"] = forms.BooleanField(
+                    required=False,
+                    label=f"Confirmo lançar {self.semanas} semanas atrasadas",
+                )
 
     def clean_confirmar_divida(self):
         confirmado = self.cleaned_data.get("confirmar_divida")
@@ -118,6 +235,44 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
                 f"{self.texto_divida} Para entregar o carro mesmo assim, marque a confirmação."
             )
         return confirmado
+
+    def clean_confirmar_dois_carros(self):
+        confirmado = self.cleaned_data.get("confirmar_dois_carros")
+        if self.texto_dois_carros and not confirmado:
+            raise ValidationError(
+                f"{self.texto_dois_carros} Para alocar mais um carro, marque a confirmação."
+            )
+        return confirmado
+
+    def clean_confirmar_km(self):
+        confirmado = self.cleaned_data.get("confirmar_km")
+        if self.texto_km and not confirmado:
+            raise ValidationError(self.texto_km)
+        return confirmado
+
+    def _data_nao_antiga_demais(self, campo):
+        valor = self.cleaned_data.get(campo)
+        if valor and valor < date.today() - timedelta(days=self.DIAS_PASSADO_MAXIMO):
+            raise ValidationError(f"Confira o ano — {valor:%d/%m/%Y} está longe demais.")
+        return valor
+
+    def clean_data_inicio(self):
+        """Início antigo de verdade (contrato de anos, carga inicial) passa quando
+        "Cobrar aluguel a partir de" está preenchido com data recente: aí só o
+        histórico usa o início e nenhuma semana antiga é lançada."""
+        valor = self.cleaned_data.get("data_inicio")
+        limite = date.today() - timedelta(days=self.DIAS_PASSADO_MAXIMO)
+        cobrar = _data_do_post(self.data, "cobrar_a_partir_de")
+        if valor and valor < limite and not (cobrar and cobrar >= limite):
+            raise ValidationError(
+                f"Confira o ano — {valor:%d/%m/%Y} está longe demais. Se o contrato começou "
+                "mesmo nessa data, preencha também “Cobrar aluguel a partir de” (em "
+                "“Contrato que já rodava antes do sistema?”)."
+            )
+        return valor
+
+    def clean_cobrar_a_partir_de(self):
+        return self._data_nao_antiga_demais("cobrar_a_partir_de")
 
     def clean_dia_vencimento(self):
         valor = self.cleaned_data.get("dia_vencimento")
@@ -130,9 +285,14 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
         semanas desde março, todas atrasadas, e o motorista vira inadimplente.
         """
         dados = super().clean()
+        hoje = date.today()
         inicio = dados.get("data_inicio")
-        antigo = inicio and inicio < date.today() - timedelta(days=self.DIAS_INICIO_ANTIGO)
-        if antigo and not dados.get("cobrar_a_partir_de"):
+        antigo = inicio and inicio < hoje - timedelta(days=self.DIAS_INICIO_ANTIGO)
+        if (
+            antigo
+            and not dados.get("cobrar_a_partir_de")
+            and "cobrar_a_partir_de" not in self.errors
+        ):
             self.add_error(
                 "cobrar_a_partir_de",
                 f"Este contrato começou em {inicio:%d/%m/%Y}, há mais de uma semana. "
@@ -141,13 +301,27 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
                 "repita aqui a data de início.",
             )
         cobrar = dados.get("cobrar_a_partir_de")
-        base = max(date.today(), inicio) if inicio else date.today()
-        if cobrar and cobrar > base + timedelta(days=self.DIAS_INICIO_ANTIGO):
+        # a data de início nunca é futura (Alocacao.clean): a conta parte de hoje,
+        # sem somar dias a uma data digitada (9999 dava erro 500)
+        if cobrar and cobrar > hoje + timedelta(days=self.DIAS_INICIO_ANTIGO):
             # ano digitado errado (2027) deixaria o carro rodando meses sem cobrança
             self.add_error(
                 "cobrar_a_partir_de",
                 f"{cobrar:%d/%m/%Y} está longe demais — confira a data. As semanas até "
                 "lá não seriam cobradas.",
+            )
+        datas_ok = not {"data_inicio", "cobrar_a_partir_de"} & set(self.errors)
+        if (
+            datas_ok
+            and self.semanas > self.SEMANAS_SEM_CONFIRMAR
+            and not dados.get("confirmar_semanas")
+        ):
+            self.add_error(
+                "confirmar_semanas",
+                f"Serão lançadas {self.semanas} semanas de aluguel, todas atrasadas. Se o "
+                "contrato já rodava antes do sistema, use “Cobrar aluguel a partir de” para "
+                "lançar só as semanas que ainda não foram acertadas. Se é isso mesmo, "
+                "marque a confirmação.",
             )
         return dados
 
@@ -171,6 +345,18 @@ class AlocacaoEdicaoForm(FormularioBR, forms.ModelForm):
             "observacoes",
         ]
         widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields[
+            "valor_semanal"
+        ].help_text = "Vale para as próximas semanas e para a semana em aberto sem pagamento."
+        dia = self.fields["dia_vencimento"]
+        dia.choices = list(Cliente.DiaSemana.choices)  # sem a opção vazia "---------"
+        dia.help_text = (
+            "Mudar o dia vale a partir da próxima cobrança: a primeira no dia novo sai "
+            "proporcional, só pelos dias ainda não cobrados."
+        )
 
     def clean_caucao_valor(self):
         """Não some com a caução combinada enquanto houver dinheiro retido (C01)."""
@@ -220,10 +406,38 @@ class TrocaForm(FormularioBR, forms.ModelForm):
             )
         )
         if alocacao is not None:
+            # as regras da troca (data, alocação ativa) já valem ao validar o formulário
+            self.instance.alocacao = alocacao
+        self.fields["km_retirada"].label = "KM do substituto ao sair"
+        self.fields["data_retirada"].widget.attrs["max"] = date.today().isoformat()
+        if alocacao is not None:
+            self.fields["data_retirada"].widget.attrs["min"] = alocacao.data_inicio.isoformat()
+        # KM menor que o já conhecido do substituto (D27): pede confirmação
+        self.texto_km = None
+        if self.is_bound:
+            veiculo_id = str(self.data.get("veiculo_substituto", ""))
+            km = _int_do_post(self.data, "km_retirada")
+            veiculo = (
+                Veiculo.objects.filter(pk=veiculo_id).only("km_atual").first()
+                if veiculo_id.isdigit()
+                else None
+            )
+            if veiculo and km is not None and km < veiculo.km_atual:
+                self.texto_km = texto_km_menor(veiculo.km_atual)
+                self.fields["confirmar_km"] = forms.BooleanField(
+                    required=False, label="Confirmo o KM"
+                )
+        if alocacao is not None:
             self.fields["valor_semanal_ajustado"].help_text = (
                 f"Hoje a semana custa {brl(alocacao.valor_semanal)}. Deixe vazio para manter "
                 "esse valor; preencha só se o substituto tiver outro preço por semana."
             )
+
+    def clean_confirmar_km(self):
+        confirmado = self.cleaned_data.get("confirmar_km")
+        if self.texto_km and not confirmado:
+            raise ValidationError(self.texto_km)
+        return confirmado
 
 
 def _semanas_reajustadas(request, alteradas):
@@ -239,8 +453,14 @@ def _semanas_reajustadas(request, alteradas):
 def _voltar(request):
     """Endereço seguro de ?voltar= (ex.: a ficha do cliente), ou None."""
     voltar = request.GET.get("voltar", "")
-    if voltar and url_has_allowed_host_and_scheme(
-        voltar, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    # só caminho deste site ("/clientes/10/"), nunca outro endereço
+    if (
+        voltar.startswith("/")
+        and not voltar.startswith("//")
+        and not voltar.startswith("/\\")
+        and url_has_allowed_host_and_scheme(
+            voltar, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+        )
     ):
         return voltar
     return None
@@ -282,6 +502,8 @@ class VistoriaForm(FormularioBR, forms.ModelForm):
         self.initial.setdefault(
             "veiculo", troca.veiculo_substituto_id if troca else alocacao.veiculo_id
         )
+        self.fields["data"].widget.attrs["min"] = alocacao.data_inicio.isoformat()
+        self.fields["data"].widget.attrs["max"] = date.today().isoformat()
 
     def clean_veiculo(self):
         veiculo = self.cleaned_data.get("veiculo")
@@ -290,12 +512,45 @@ class VistoriaForm(FormularioBR, forms.ModelForm):
             veiculo = troca.veiculo_substituto if troca else self.alocacao.veiculo
         return veiculo
 
+    def _inicio_do_carro(self, veiculo):
+        """Desde quando o motorista está com este carro nesta alocação."""
+        if veiculo.pk != self.alocacao.veiculo_id:
+            retirada = (
+                self.alocacao.trocas.filter(veiculo_substituto=veiculo)
+                .order_by("data_retirada")
+                .values_list("data_retirada", flat=True)
+                .first()
+            )
+            if retirada:
+                return retirada, "a retirada do substituto"
+        return self.alocacao.data_inicio, "o início da locação"
+
     def clean(self):
         dados = super().clean()
         veiculo, km, data = dados.get("veiculo"), dados.get("km"), dados.get("data")
+        if veiculo and data:
+            if data > date.today():
+                self.add_error("data", "A data da vistoria não pode ser no futuro.")
+                data = None
+            else:
+                inicio, rotulo_inicio = self._inicio_do_carro(veiculo)
+                if data < inicio:
+                    self.add_error(
+                        "data",
+                        f"A vistoria não pode ser antes de {rotulo_inicio} ({inicio:%d/%m/%Y}).",
+                    )
+                    data = None
         if veiculo and km and data:
             km_base, data_base, rotulo = base_da_vistoria(self.alocacao, veiculo)
-            aviso = suspeita_de_km(km, data, km_base, data_base, rotulo)
+            # KM menor que o já conhecido: entrega >= KM da entrega; devolução >= o
+            # maior entre o da entrega e o atual do carro (esse KM preenche o encerramento)
+            minimo = km_base
+            if dados.get("tipo") == Vistoria.Tipo.SAIDA:
+                minimo = max(km_base, veiculo.km_atual)
+            if km < minimo:
+                aviso = texto_km_menor(minimo)
+            else:
+                aviso = suspeita_de_km(km, data, km_base, data_base, rotulo)
             if aviso and not dados.get("confirmar_km"):
                 self.add_error("km", aviso)
         return dados
@@ -319,6 +574,23 @@ def _data_e_km_da_devolucao(post, campo_data):
     if km > KM_MAXIMO:
         raise ValidationError("KM grande demais — confira os dígitos.")
     return data, km
+
+
+def _maior_km_de_vistoria(alocacao, veiculo_id, desde):
+    """Maior KM anotado em vistoria deste carro nesta alocação a partir de `desde`."""
+    return alocacao.vistorias.filter(
+        veiculo_id=veiculo_id, data__gte=desde, km__isnull=False
+    ).aggregate(m=Max("km"))["m"]
+
+
+def _aviso_km_abaixo_da_vistoria(km, km_vistoria):
+    if km_vistoria and km < km_vistoria:
+        return (
+            f"Uma vistoria deste período já anotou {milhar(km_vistoria)} km — o KM não pode "
+            f"voltar para {milhar(km)}. Confira o painel. Se a vistoria é que estava errada, "
+            "marque “Confirmo o KM” e salve de novo."
+        )
+    return None
 
 
 def _ficha(alocacao):
@@ -359,7 +631,13 @@ def _sugestoes_da_nova_alocacao(form):
             dados["categoria"] = veiculo.categoria.nome
             dados["valor"] = exibir_dinheiro(veiculo.categoria.valor_semanal_referencia)
         veiculos[str(veiculo.pk)] = dados
-    dividas = dividas_por_cliente()
+    dividas = form.dividas
+    ativas = {
+        a.cliente_id: a
+        for a in Alocacao.objects.filter(status=Alocacao.Status.ATIVA)
+        .select_related("veiculo", "cliente")
+        .order_by("data_inicio", "pk")
+    }
     clientes = {}
     for cliente in form.fields["cliente"].queryset:
         dados = {}
@@ -373,9 +651,22 @@ def _sugestoes_da_nova_alocacao(form):
         divida = texto_da_divida(cliente, dividas.get(cliente.pk))
         if divida:
             dados = {"dia": "", "dia_nome": "", "caucao": "", **dados, "divida": divida}
+        if cliente.pk in ativas:
+            # aviso de cliente que já está com carro (pede confirmação ao salvar)
+            dados = {
+                "dia": "",
+                "dia_nome": "",
+                "caucao": "",
+                **dados,
+                "com_carro": texto_cliente_com_carro(ativas[cliente.pk]),
+            }
         if dados:
             clientes[str(cliente.pk)] = dados
     return veiculos, clientes
+
+
+class _FormularioComErro(Exception):
+    """Sai do envio único sem gravar o token: a pessoa corrige e envia de novo."""
 
 
 def nova(request):
@@ -383,9 +674,12 @@ def nova(request):
     veiculo_id = request.GET.get("veiculo", "")
     if veiculo_id.isdigit():
         inicial["veiculo"] = veiculo_id
-        veiculo = Veiculo.objects.filter(pk=veiculo_id).only("km_atual").first()
+        veiculo = Veiculo.objects.filter(pk=veiculo_id).select_related("categoria").first()
         if veiculo:
             inicial["km_entrega"] = veiculo.km_atual
+            if veiculo.categoria and veiculo.categoria.valor_semanal_referencia:
+                # preço da categoria como sugestão — a pessoa pode mudar
+                inicial["valor_semanal"] = veiculo.categoria.valor_semanal_referencia
     cliente_id = request.GET.get("cliente", "")
     if cliente_id.isdigit():
         inicial["cliente"] = cliente_id
@@ -395,38 +689,61 @@ def nova(request):
             inicial["dia_vencimento"] = cliente.dia_vencimento
             inicial["caucao_valor"] = cliente.caucao_referencia or None
     form = AlocacaoForm(request.POST or None, initial=inicial)
-    if request.method == "POST" and form.is_valid():
-        alocacao = form.save()  # sem dia de vencimento, o save usa o dia do início
-        # Já cria a cobrança da 1ª semana (a rotina diária faria o mesmo amanhã):
-        # o cartão "Próximos passos" mostra o valor e o botão de receber na hora.
-        gerar_cobrancas_semanais()
-        cliente = alocacao.cliente
-        oficina = oficina_por_veiculo([alocacao.veiculo_id]).get(alocacao.veiculo_id)
-        if oficina:
-            messages.warning(
-                request,
-                f"Atenção: {alocacao.veiculo.placa} consta como na oficina desde "
-                f"{oficina.data_entrada:%d/%m/%Y}. Se já voltou, marque "
-                "“Carro voltou da oficina” no histórico de manutenção.",
+    if request.method == "POST":
+        token = request.POST.get("token", "")
+        try:
+            with _envio_unico(request, "alocacao_tokens_usados", token) as repetido:
+                veiculo_post = str(request.POST.get("veiculo", ""))
+                cliente_post = str(request.POST.get("cliente", ""))
+                if (
+                    repetido
+                    and not Alocacao.objects.filter(
+                        veiculo_id=veiculo_post if veiculo_post.isdigit() else None,
+                        cliente_id=cliente_post if cliente_post.isdigit() else None,
+                        status=Alocacao.Status.ATIVA,
+                    ).exists()
+                ):
+                    # voltou com o botão "Voltar" e trocou carro/cliente: nada foi
+                    # criado com estes dados — confere e envia de novo (token novo)
+                    messages.warning(
+                        request,
+                        "Este formulário já tinha sido usado. Confira os dados e toque em "
+                        "“Alocar carro” de novo.",
+                    )
+                    raise _FormularioComErro
+                if repetido:
+                    # toque duplo / reenvio: a alocação já foi criada pelo 1º envio
+                    messages.info(
+                        request,
+                        "Esta alocação já tinha sido registrada — nada foi lançado em dobro.",
+                    )
+                    cliente_id = str(request.POST.get("cliente", ""))
+                    if cliente_id.isdigit():
+                        return redirect("pessoas:detalhe", cliente_id)
+                    return redirect("alocacoes:lista")
+                if not form.is_valid():
+                    raise _FormularioComErro
+                alocacao = form.save()  # sem dia de vencimento, o save usa o dia do início
+                # Já cria a cobrança da 1ª semana (a rotina diária faria o mesmo amanhã):
+                # o cartão "Próximos passos" mostra o valor e o botão de receber na hora.
+                gerar_cobrancas_semanais()
+        except _FormularioComErro:
+            pass
+        except IntegrityError:
+            # dois envios ao mesmo tempo: o outro já alocou este carro
+            messages.info(
+                request, "Esta alocação já tinha sido registrada — nada foi lançado em dobro."
             )
-        if cliente.cnh_validade and cliente.cnh_validade < date.today():
-            messages.warning(
-                request,
-                f"Atenção: a CNH de {cliente.nome} está vencida "
-                f"desde {cliente.cnh_validade:%d/%m/%Y}.",
-            )
-        messages.success(
-            request,
-            f"Veículo {alocacao.veiculo.placa} alocado a {cliente.nome}. "
-            "Siga os próximos passos da entrega logo abaixo.",
-        )
-        return redirect("pessoas:detalhe", cliente.pk)
+            return redirect("alocacoes:lista")
+        else:
+            return _depois_de_alocar(request, alocacao)
     veiculos, clientes = _sugestoes_da_nova_alocacao(form)
     return render(
         request,
         "alocacoes/nova.html",
         {
             "form": form,
+            "token": uuid4().hex,
             "dados_veiculos": veiculos,
             "dados_clientes": clientes,
             # aviso ao escolher carro que ainda está na oficina (manutenção sem saída)
@@ -438,8 +755,37 @@ def nova(request):
             },
             "sem_veiculos": not form.fields["veiculo"].queryset.exists(),
             "sem_clientes": not form.fields["cliente"].queryset.exists(),
+            # contrato antigo: o campo "cobrar a partir de" já abre visível
+            "abrir_contrato_antigo": bool(
+                form["cobrar_a_partir_de"].value() or form.errors.get("cobrar_a_partir_de")
+            ),
+            "dias_inicio_antigo": AlocacaoForm.DIAS_INICIO_ANTIGO,
         },
     )
+
+
+def _depois_de_alocar(request, alocacao):
+    """Avisos (oficina, CNH vencida) e volta para a ficha com os próximos passos."""
+    cliente = alocacao.cliente
+    oficina = oficina_por_veiculo([alocacao.veiculo_id]).get(alocacao.veiculo_id)
+    if oficina:
+        messages.warning(
+            request,
+            f"Atenção: {alocacao.veiculo.placa} consta como na oficina desde "
+            f"{oficina.data_entrada:%d/%m/%Y}. Se já voltou, marque "
+            "“Carro voltou da oficina” no histórico de manutenção.",
+        )
+    if cliente.cnh_validade and cliente.cnh_validade < date.today():
+        messages.warning(
+            request,
+            f"Atenção: a CNH de {cliente.nome} está vencida desde {cliente.cnh_validade:%d/%m/%Y}.",
+        )
+    messages.success(
+        request,
+        f"Veículo {alocacao.veiculo.placa} alocado a {cliente.nome}. "
+        "Siga os próximos passos da entrega logo abaixo.",
+    )
+    return redirect("pessoas:detalhe", cliente.pk)
 
 
 def entrega_dispensar(request, alocacao_id):
@@ -467,6 +813,16 @@ def editar(request, alocacao_id):
         if not alocacao.caucao_valor:
             # caução tirada do contrato: some o registro que nunca recebeu dinheiro
             Caucao.objects.filter(alocacao=alocacao, movimentacoes__isnull=True).delete()
+        if "valor_semanal" in form.changed_data:
+            # valor corrigido: a semana em aberto (sem pagamento) passa ao valor novo
+            from apps.financeiro.services import refazer_alugueis_em_aberto
+
+            for cobranca in refazer_alugueis_em_aberto(alocacao) or []:
+                messages.info(
+                    request,
+                    f"A semana de {cobranca.vencimento:%d/%m} em aberto foi refeita: "
+                    f"{brl(cobranca.valor)}.",
+                )
         messages.success(
             request,
             f"Alocação de {alocacao.veiculo.placa} → {alocacao.cliente.nome} atualizada.",
@@ -494,7 +850,10 @@ def encerrar(request, alocacao_id):
     if request.method == "POST":
         try:
             data_termino, km_devolucao = _data_e_km_da_devolucao(request.POST, "data_termino")
-            aviso_km = suspeita_de_km(
+            aviso_km = _aviso_km_abaixo_da_vistoria(
+                km_devolucao,
+                _maior_km_de_vistoria(alocacao, alocacao.veiculo_id, alocacao.data_inicio),
+            ) or suspeita_de_km(
                 km_devolucao, data_termino, alocacao.km_entrega, alocacao.data_inicio, "na entrega"
             )
             if aviso_km and not request.POST.get("confirmar_km"):
@@ -515,8 +874,8 @@ def encerrar(request, alocacao_id):
                     f"de {alocacao.cliente.nome}.",
                 )
                 return redirect("financeiro:caucao_detalhe", caucao.pk)
-            # começou na ficha do cliente (?voltar=): volta para ela
-            return redirect(_voltar(request) or "alocacoes:lista")
+            # a ficha do cliente mostra o resultado (crédito, caução, histórico)
+            return _ficha(alocacao)
         except (ValidationError, KeyError, ValueError) as erro:
             _avisar_erro_de_devolucao(request, erro)
     situacao = situacao_da_devolucao(alocacao)
@@ -528,9 +887,15 @@ def encerrar(request, alocacao_id):
             + urlencode({"tipo": "saida", "voltar": request.get_full_path()})
         )
     devolucao = situacao["vistoria_devolucao"]
-    # KM e data já anotados na vistoria de devolução entram prontos no formulário.
-    km_sugerido = devolucao.km if devolucao and devolucao.km else ""
-    data_sugerida = devolucao.data if devolucao else date.today()
+    # KM e data já anotados na vistoria de devolução entram prontos no formulário
+    # (só quando a vistoria é recente — situacao_da_devolucao decide: o KM de uma
+    # vistoria de semanas atrás deixaria de cobrar o que o carro rodou depois).
+    recente = situacao["data_da_vistoria"]
+    km_sugerido = devolucao.km if recente and devolucao.km else ""
+    ultima_troca = max(
+        (t.data_devolucao for t in alocacao.trocas.all() if t.data_devolucao), default=None
+    )
+    data_minima = max(alocacao.data_inicio, ultima_troca or alocacao.data_inicio)
     return render(
         request,
         "alocacoes/encerrar.html",
@@ -540,7 +905,7 @@ def encerrar(request, alocacao_id):
             "caucao": _caucao_com_saldo(alocacao),
             "troca_ativa": alocacao.troca_ativa,
             "km_sugerido": km_sugerido,
-            "data_sugerida": data_sugerida,
+            "data_minima": data_minima,
             "aviso_km": aviso_km,
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
             **situacao,
@@ -604,12 +969,16 @@ def troca_nova(request, alocacao_id):
             for mensagens in erro.message_dict.values():
                 for mensagem in mensagens:
                     form.add_error(None, mensagem)
+    candidatos = form.fields["veiculo_substituto"].queryset
     return render(
         request,
         "alocacoes/troca_nova.html",
         {
             "alocacao": alocacao,
             "form": form,
+            # KM de cada candidato: preenche "KM do substituto ao sair" ao escolher
+            "km_candidatos": {str(v.pk): v.km_atual for v in candidatos},
+            "sem_candidatos": not candidatos.exists(),
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
         },
     )
@@ -628,14 +997,27 @@ def troca_devolver(request, troca_id):
         )
         return redirect("alocacoes:lista")
     aviso_km = None
+    # o cliente volta para o carro dele: avisa se ele ainda consta na oficina
+    principal = troca.alocacao.veiculo
+    oficina_principal = oficina_por_veiculo([principal.pk]).get(principal.pk)
     if request.method == "POST":
         try:
             data_devolucao, km_devolucao = _data_e_km_da_devolucao(request.POST, "data_devolucao")
-            aviso_km = suspeita_de_km(
+            aviso_km = _aviso_km_abaixo_da_vistoria(
+                km_devolucao,
+                _maior_km_de_vistoria(
+                    troca.alocacao, troca.veiculo_substituto_id, troca.data_retirada
+                ),
+            ) or suspeita_de_km(
                 km_devolucao, data_devolucao, troca.km_retirada, troca.data_retirada, "na retirada"
             )
             if aviso_km and not request.POST.get("confirmar_km"):
                 raise ValidationError(aviso_km)
+            if oficina_principal and not request.POST.get("confirmar_oficina"):
+                raise ValidationError(
+                    f"{principal.placa} ainda consta na oficina. Se ele já voltou, marque "
+                    "“Carro voltou da oficina” ou a confirmação abaixo."
+                )
             troca.devolver(data_devolucao=data_devolucao, km_devolucao=km_devolucao)
             substituto = troca.veiculo_substituto
             messages.success(
@@ -654,6 +1036,7 @@ def troca_devolver(request, troca_id):
             "troca": troca,
             "hoje": date.today(),
             "aviso_km": aviso_km,
+            "oficina_principal": oficina_principal,
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
         },
     )
@@ -696,6 +1079,8 @@ def contrato(request, alocacao_id):
                 "cidade_uf": settings.EMPRESA_CIDADE_UF,
             },
             "hoje": date.today(),
+            "voltar": _voltar(request) or reverse("alocacoes:lista"),
+            "empresa_incompleta": not (settings.EMPRESA_CNPJ and settings.EMPRESA_ENDERECO),
         },
     )
 
@@ -719,6 +1104,7 @@ def vistoria_imprimir(request, alocacao_id):
             "alocacao": alocacao,
             "veiculo": veiculo,
             "itens": checklist.ITENS_CHECKLIST,
+            "checklist_leitura": checklist.disponivel(),
             "hoje": date.today(),
             "combustiveis": Vistoria.Combustivel.choices,
         },
@@ -737,45 +1123,82 @@ def vistoria_nova(request, alocacao_id):
         # vindo dos passos da entrega/devolução, o tipo já chega escolhido
         inicial["tipo"] = request.GET["tipo"]
     else:
-        # sem vistoria de entrega do carro que está com o motorista → é a entrega;
-        # já tem → a próxima é a devolução
-        ja_entregue = alocacao.vistorias.filter(
-            veiculo=vigente, tipo=Vistoria.Tipo.ENTRADA
-        ).exists()
-        inicial["tipo"] = Vistoria.Tipo.SAIDA if ja_entregue else Vistoria.Tipo.ENTRADA
+        inicial["tipo"] = _tipo_sugerido(alocacao, vigente)
+    # KM sugerido: o da entrega (ou da retirada do substituto) na entrega; o atual
+    # do carro na devolução — a pessoa confere no painel
+    km_base = base_da_vistoria(alocacao, vigente)[0]
+    inicial["km"] = (
+        km_base if inicial["tipo"] == Vistoria.Tipo.ENTRADA else max(km_base, vigente.km_atual)
+    )
     form = VistoriaForm(
         request.POST or None, request.FILES or None, initial=inicial, alocacao=alocacao
     )
-    # o KM do painel é digitado de verdade; o último conhecido fica só de dica
     form.fields["km"].widget.attrs.setdefault(
         "placeholder", f"último conhecido: {milhar(vigente.km_atual)} km"
     )
     form.fields["km"].widget.attrs.setdefault("inputmode", "numeric")
-    if request.method == "POST" and form.is_valid():
-        vistoria = form.save(commit=False)
-        vistoria.alocacao = alocacao
-        vistoria.save()
-        messages.success(
-            request,
-            f"Vistoria de {vistoria.get_tipo_display().lower()} registrada "
-            f"para {vistoria.veiculo.placa}.",
-        )
-        # Vindo dos passos da entrega (ficha) ou da devolução, volta para lá.
-        voltar = _voltar(request)
-        if voltar:
-            return redirect(voltar)
-        return redirect("alocacoes:timeline", vistoria.veiculo_id)
+    if request.method == "POST":
+        try:
+            # token único: reenviar o formulário não grava a vistoria duas vezes
+            with _envio_unico(
+                request, "vistoria_tokens_usados", request.POST.get("token", "")
+            ) as repetido:
+                if repetido:
+                    messages.info(
+                        request,
+                        "Esta vistoria já tinha sido registrada — nada foi gravado em dobro.",
+                    )
+                    return redirect(_voltar(request) or reverse("alocacoes:lista"))
+                if not form.is_valid():
+                    raise _FormularioComErro
+                vistoria = form.save(commit=False)
+                vistoria.alocacao = alocacao
+                vistoria.save()
+        except _FormularioComErro:
+            pass
+        else:
+            return _depois_da_vistoria(request, vistoria)
     return render(
         request,
         "alocacoes/vistoria_form.html",
         {
             "alocacao": alocacao,
             "form": form,
+            "token": uuid4().hex,
+            "km_sugerido": not form.is_bound,
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
             "checklist_leitura": checklist.disponivel(),
             "vistorias": alocacao.vistorias.select_related("veiculo"),
         },
     )
+
+
+def _tipo_sugerido(alocacao, vigente):
+    """Entrega ou devolução, pela vistoria mais recente do carro que está com o motorista.
+
+    Sem vistoria, ou a última foi devolução (ou o substituto foi devolvido
+    depois dela — o motorista retomou o carro): a próxima é a entrega.
+    """
+    ultima = alocacao.vistorias.filter(veiculo=vigente).order_by("-data", "-pk").first()
+    if ultima is None or ultima.tipo == Vistoria.Tipo.SAIDA:
+        return Vistoria.Tipo.ENTRADA
+    fim_troca = alocacao.trocas.aggregate(m=Max("data_devolucao"))["m"]
+    if vigente.pk == alocacao.veiculo_id and fim_troca and fim_troca > ultima.data:
+        return Vistoria.Tipo.ENTRADA
+    return Vistoria.Tipo.SAIDA
+
+
+def _depois_da_vistoria(request, vistoria):
+    messages.success(
+        request,
+        f"Vistoria de {vistoria.get_tipo_display().lower()} registrada "
+        f"para {vistoria.veiculo.placa}.",
+    )
+    # Vindo dos passos da entrega (ficha) ou da devolução, volta para lá.
+    voltar = _voltar(request)
+    if voltar:
+        return redirect(voltar)
+    return redirect("alocacoes:timeline", vistoria.veiculo_id)
 
 
 def vistoria_extrair(request):

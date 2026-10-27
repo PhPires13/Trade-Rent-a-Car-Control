@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from datetime import date
 
+from django.utils import timezone
+
 from apps.frota.models import Veiculo
 from apps.km.models import RegistroKm
 
@@ -23,6 +25,19 @@ def frota_acompanhada():
     )
 
 
+def texto_faltam_km(faltam_km):
+    """Quanto falta (ou passou) para a troca, em texto simples."""
+    from apps.formatos import milhar
+
+    if faltam_km is None:
+        return None
+    if faltam_km == 0:
+        return "vence agora"
+    if faltam_km < 0:
+        return f"vencida há {milhar(-faltam_km)} km"
+    return f"faltam {milhar(faltam_km)} km"
+
+
 @dataclass
 class StatusPreventiva:
     item: ItemPreventiva
@@ -34,7 +49,7 @@ class StatusPreventiva:
     #: última leitura mensal (km, data): base da projeção do KM de hoje
     km_leitura: int | None = None
     data_leitura: date | None = None
-    hoje: date = field(default_factory=date.today)
+    hoje: date = field(default_factory=timezone.localdate)
 
     # Impede o Django template de tentar instanciar a classe ao resolver Status.X
     do_not_call_in_templates = True
@@ -88,6 +103,14 @@ class StatusPreventiva:
         if self.sem_registro:
             return self.SEM_REGISTRO  # pelo KM da compra ainda falta, mas não há troca confirmada
         return self.OK
+
+    @property
+    def texto_km(self):
+        """ "vence agora" / "vencida há 1.200 km" / "faltam 800 km" (None sem registro).
+
+        Texto único para o quadro de preventivas e o painel ("vencida há 0 km" não existe).
+        """
+        return texto_faltam_km(self.faltam_km)
 
     @property
     def em_alerta(self):
@@ -166,7 +189,7 @@ def _status_do_veiculo(veiculo, itens, personalizados, ultimas, medias, hoje=Non
                 media_km_dia=media,
                 km_leitura=km_leitura,
                 data_leitura=data_leitura,
-                hoje=hoje or date.today(),
+                hoje=hoje or timezone.localdate(),
             )
         )
     return resultado

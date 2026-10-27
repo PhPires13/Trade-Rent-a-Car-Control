@@ -113,8 +113,8 @@
             </span>
           {% endif %}{% endfor %}</span>
         </td>
-        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/dia</span>{{ registro.media_dia|floatformat:0|default:"—" }}</td>
-        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/mês</span>{{ registro.media_mes|floatformat:0|default:"—" }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/dia</span>{% if registro.media_dia is not None %}{{ registro.media_dia|floatformat:0|milhar }}{% else %}—{% endif %}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/mês</span>{% if registro.media_mes is not None %}{{ registro.media_mes|floatformat:0|milhar }}{% else %}—{% endif %}</td>
         <td class="block pt-2 sm:table-cell sm:px-3 sm:py-2 sm:text-right">
           <a href="{% url 'km:corrigir' registro.pk %}?voltar=lista"
              class="block rounded border border-gray-300 px-3 py-2 text-center font-medium hover:bg-gray-50 sm:inline-block sm:py-1">Corrigir<span class="sr-only"> a leitura de {{ registro.veiculo.placa }}</span></a>

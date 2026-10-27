@@ -28,6 +28,7 @@
       <tr>
         <td class="px-3 py-2">
           <input name="nome" form="categoria-{{ categoria.pk }}" value="{{ categoria.nome }}" required
+                 aria-label="Nome da categoria {{ categoria.nome }}"
                  class="w-full rounded border border-gray-300 px-2 py-1"></td>
         <td class="px-3 py-2">
           <input name="valor_semanal_referencia" form="categoria-{{ categoria.pk }}" type="text" inputmode="decimal"
@@ -36,6 +37,7 @@
                  class="w-36 rounded border border-gray-300 px-2 py-1"></td>
         <td class="px-3 py-2">
           <input name="observacoes" form="categoria-{{ categoria.pk }}" value="{{ categoria.observacoes }}"
+                 aria-label="Observações de {{ categoria.nome }}"
                  class="w-full rounded border border-gray-300 px-2 py-1"></td>
         <td class="px-3 py-2 text-center font-semibold">{{ categoria.total_veiculos }}</td>
         <td class="px-3 py-2">

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -6,15 +6,17 @@ from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 
-from .correcao import apagar_leitura, corrigir_leitura, suspeita_do_km
+from .correcao import apagar_leitura, corrigir_leitura, origens_do_km, suspeita_do_km
 from .excedente import gerar_cobrancas_excedente
-from .forms import CorrecaoLeituraForm, data_nao_futura, km_digitado
+from .forms import CorrecaoLeituraForm, ano_razoavel, data_nao_futura, km_digitado
 from .models import (
+    DIAS_DE_FECHAMENTO,
     RegistroKm,
     leitura_cabe_no_mes,
     mes_da_leitura,
@@ -33,7 +35,7 @@ def _mes_do_valor(valor, hoje=None):
     try:
         ano, mes = (valor or "").split("-")
         ano = int(ano)
-        if not ANO_MINIMO <= ano <= (hoje or date.today()).year + 1:
+        if not ANO_MINIMO <= ano <= (hoje or timezone.localdate()).year + 1:
             return None
         return date(ano, int(mes), 1)
     except (ValueError, TypeError):
@@ -41,7 +43,7 @@ def _mes_do_valor(valor, hoje=None):
 
 
 def _mes_da_query(request):
-    hoje = date.today()
+    hoje = timezone.localdate()
     return _mes_do_valor(request.GET.get("mes"), hoje) or mes_padrao_da_lista(hoje)
 
 
@@ -135,9 +137,34 @@ def _pendentes_anotados(mes, veiculos=None):
     )
 
 
+def _anotar_maior_km(veiculos, mes):
+    """ "Última" da linha = o maior KM conhecido do carro e de onde ele veio.
+
+    A última leitura mensal pode estar atrás do KM atual (manutenção, devolução,
+    vistoria): mostrar só ela faria a pessoa aceitar um número menor sem estranhar.
+    Lançamento de depois do mês da tela não conta (num mês passado ele é o futuro).
+    """
+    limite = primeiro_dia_do_mes(mes + timedelta(days=32)) + timedelta(days=DIAS_DE_FECHAMENTO)
+    for veiculo in veiculos:
+        veiculo.maior_km = veiculo.ultimo_km
+        veiculo.maior_km_data = veiculo.ultima_leitura
+        veiculo.maior_km_origem = "leitura mensal" if veiculo.ultimo_km is not None else None
+    atras = [v for v in veiculos if v.ultimo_km is None or v.ultimo_km < v.km_atual]
+    # de onde veio o KM atual: em lote (eram 7 consultas por carro da lista)
+    origens = origens_do_km({v.pk: v.km_atual for v in atras})
+    for veiculo in atras:
+        rotulo, data = origens[veiculo.pk]
+        if rotulo == "leitura mensal" or (data is not None and data > limite):
+            continue  # leitura do próprio mês (ou de depois) não é a "Última" de antes dele
+        veiculo.maior_km = veiculo.km_atual
+        veiculo.maior_km_data = data
+        veiculo.maior_km_origem = rotulo if data is not None else None
+    return veiculos
+
+
 def _contexto_da_linha(mes):
     """O que cada linha de pendente precisa além do próprio veículo."""
-    hoje = date.today()
+    hoje = timezone.localdate()
     return {
         "mes": mes,
         "data_sugerida": _data_sugerida(mes, hoje),
@@ -165,7 +192,7 @@ def _pagina_da_lista(request, mes, estados=None):
     clientes = _clientes_das_leituras(registros)
     for registro in registros:
         registro.cliente = clientes[registro.pk]
-    pendentes = list(_pendentes_anotados(mes))
+    pendentes = _anotar_maior_km(list(_pendentes_anotados(mes)), mes)
     for veiculo in pendentes:
         veiculo.estado = (estados or {}).get(veiculo.pk)
     return render(
@@ -199,6 +226,7 @@ def _linha_nao_gravada(request, veiculo, mes, estado):
         # Sem o filtro de pendente: numa leitura repetida o carro já saiu da lista,
         # mas a linha ainda precisa da "Última: ..." para não ficar em branco.
         veiculo = _pendentes_anotados(mes, Veiculo.objects.filter(pk=veiculo.pk)).first()
+        _anotar_maior_km([veiculo], mes)
         veiculo.estado = estado
         return render(request, "km/_pendente.html", {"veiculo": veiculo, **_contexto_da_linha(mes)})
     if estado.get("erro"):
@@ -227,7 +255,7 @@ def registrar(request, veiculo_id):
         "observacoes": request.POST.get("observacoes", ""),
     }
     try:
-        data_leitura = date.fromisoformat(request.POST["data_leitura"])
+        data_leitura = ano_razoavel(date.fromisoformat(request.POST["data_leitura"]))
         mes_da_tela = mes_da_tela or primeiro_dia_do_mes(data_leitura)
         registro = RegistroKm(
             veiculo=veiculo,
@@ -265,12 +293,12 @@ def registrar(request, veiculo_id):
     except ValidationError as erro:
         estado["erro"] = "; ".join(erro.messages)
         return _linha_nao_gravada(
-            request, veiculo, mes_da_tela or primeiro_dia_do_mes(date.today()), estado
+            request, veiculo, mes_da_tela or primeiro_dia_do_mes(timezone.localdate()), estado
         )
     except (KeyError, ValueError):
         estado["erro"] = "preencha a data e o KM (só números)."
         return _linha_nao_gravada(
-            request, veiculo, mes_da_tela or primeiro_dia_do_mes(date.today()), estado
+            request, veiculo, mes_da_tela or primeiro_dia_do_mes(timezone.localdate()), estado
         )
 
     sucesso = f"KM de {veiculo.placa} registrado: {milhar(registro.km)} km"

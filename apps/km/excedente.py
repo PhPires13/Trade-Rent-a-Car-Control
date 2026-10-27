@@ -221,7 +221,7 @@ def gerar_cobrancas_excedente(registro, hoje=None):
     leitura — senão a rotina diária marcaria atraso/inadimplência na hora.
     Devolve as cobranças criadas, a principal primeiro.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     momentos = _momentos_dos_termos(registro)
     vinculos = _vinculos_limitados_no_periodo(
         registro.veiculo, _inicio_busca(registro), registro.data_leitura, momentos
@@ -278,7 +278,7 @@ def gerar_excedentes_pendentes(hoje=None):
     são os da hora da leitura, então reavaliar não cobra mudança de contrato
     feita depois (D30).
     """
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     criadas = []
     recentes = (
         RegistroKm.objects.filter(

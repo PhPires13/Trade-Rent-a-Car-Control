@@ -230,7 +230,7 @@ def test_registrar_ja_vem_com_data_km_e_item(usuario_logado, veiculo, oleo):
     assert form.initial["data"] == HOJE
     assert form.initial["km"] == 100_000
     assert form.initial["item"] == oleo.pk
-    assert form.initial["tipo"] == Manutencao.Tipo.PREVENTIVA
+    assert "tipo" not in form.fields  # o tipo sai do item (preventiva), não se escolhe
 
 
 def test_registrar_vinculado_ao_sinistro(usuario_logado, veiculo):
@@ -245,7 +245,7 @@ def test_registrar_vinculado_ao_sinistro(usuario_logado, veiculo):
         f"/manutencao/registrar/{veiculo.pk}/?sinistro={sinistro.pk}"
     ).context["form"]
     assert form.initial["sinistro"] == sinistro.pk
-    assert form.initial["tipo"] == Manutencao.Tipo.CORRETIVA
+    assert "item" not in form.initial  # sem item: grava como corretiva
     assert form.initial["data_entrada"] == HOJE
 
 
@@ -315,7 +315,8 @@ def test_preventivas_abre_so_no_que_precisa_de_atencao(usuario_logado, oleo):
     html = usuario_logado.get("/manutencao/preventivas/").content.decode()
     assert "VEN1A23" in html
     assert "vencida há 2.000 km" in html
-    assert "DIA1A23" not in html
+    # o seletor "Qual carro?" lista todos; o quadro só o que precisa de atenção
+    assert f'id="veiculo-{em_dia.pk}"' not in html
     assert "?ver=todas" in html
     assert f"?item={oleo.pk}" in html  # botão "Registrar feita"
 
@@ -330,7 +331,7 @@ def test_preventivas_ordena_o_mais_atrasado_primeiro(usuario_logado, oleo):
     muito = Veiculo.objects.create(placa="ZZZ9Z99", marca_modelo="Gol", km_atual=100_000)
     _preventiva(muito, oleo, 80_000)  # vencida há 10.000
     html = usuario_logado.get("/manutencao/preventivas/").content.decode()
-    assert html.index("ZZZ9Z99") < html.index("AAA1A11")
+    assert html.index(f'id="veiculo-{muito.pk}"') < html.index(f'id="veiculo-{pouco.pk}"')
 
 
 def test_preventivas_sem_alerta_mostra_tudo_em_dia(usuario_logado, veiculo):

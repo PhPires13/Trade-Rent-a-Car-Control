@@ -1,2 +1,3 @@
-{% if multa.pagamento == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Paga{% if multa.pago_por %} ({{ multa.pago_por }}){% endif %}</span>
+{% if multa.anulada and multa.pagamento != "pago" %}<span class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500" title="Multa cancelada, convertida em advertência ou não exigível">Nada a pagar</span>
+{% elif multa.pagamento == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Paga{% if multa.pago_por %} ({{ multa.pago_por }}){% endif %}</span>
 {% else %}<span class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">A pagar</span>{% endif %}

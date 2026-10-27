@@ -335,11 +335,11 @@ def test_encerrar_com_caucao_retida_leva_ao_acerto(usuario_logado, veiculo, clie
     assert resposta.url == f"/financeiro/caucoes/{alocacao.caucao.pk}/"
 
 
-def test_encerrar_sem_caucao_volta_para_lista(usuario_logado, veiculo, cliente):
+def test_encerrar_sem_caucao_volta_para_a_ficha(usuario_logado, veiculo, cliente):
     alocacao = alocar(veiculo, cliente)
     resposta = usuario_logado.post(
         f"/alocacoes/{alocacao.pk}/encerrar/",
         {"data_termino": "2026-07-20", "km_devolucao": "52000"},
     )
     assert resposta.status_code == 302
-    assert resposta.url == "/alocacoes/"
+    assert resposta.url == f"/clientes/{cliente.pk}/"

@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
+from apps.alocacoes.models import Alocacao
 from apps.alocacoes.services import cliente_vigente
 from apps.alocacoes.views import _avisar_acerto_das_semanas
 from apps.campos import CampoDinheiro, FormularioBR
@@ -145,6 +146,10 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         campos["franquia_valor"].validators.append(SEM_NEGATIVO)
         # a caixa liga/desliga a data do evento e a franquia na tela (Alpine)
         campos["acionou_protecao"].widget.attrs["x-model"] = "protecao"
+        if not self.instance.pk:
+            # no cadastro todo sinistro começa "Aberto": a situação só muda na edição
+            del campos["status"]
+            del campos["observacoes"]
 
     def clean_data(self):
         dia = self.cleaned_data["data"]
@@ -168,7 +173,56 @@ class SinistroForm(FormularioBR, forms.ModelForm):
                 "data_evento",
                 f"O evento não pode ter sido aberto antes do ocorrido ({ocorrido:%d/%m/%Y}).",
             )
+        if (
+            dados.get("acionou_protecao")
+            and dados.get("franquia_valor")
+            and not evento
+            and "data_evento" not in self._errors
+        ):
+            # os relatórios lançam a franquia no mês do evento: sem a data ela sumia
+            self.add_error(
+                "data_evento",
+                "Informe a data em que o evento foi aberto — a franquia entra nas "
+                "despesas desse mês.",
+            )
+        self._conferir_franquia_cobrada(dados)
         return dados
+
+    def _conferir_franquia_cobrada(self, dados):
+        """Franquia já cobrada do motorista: não deixa mudar o que a cobrança usou.
+
+        Mudar o valor, quem paga, a proteção ou o motorista (pelo carro, pela data
+        ou escolhendo outro) deixava a cobrança antiga ativa — valor errado ou
+        motorista errado. Primeiro cancela no Financeiro, depois muda aqui.
+        """
+        if not self.instance.pk or not self.instance.cobranca_franquia_id:
+            return
+        cobranca = self.instance.cobranca_franquia
+        if cobranca.status == "cancelada":
+            return
+        mudou = set(self.changed_data)
+        aviso = (
+            f"A franquia já foi cobrada de {cobranca.cliente.nome} ({brl(cobranca.valor)}). "
+            "Cancele a cobrança em Financeiro antes de mudar."
+        )
+        for campo in ("franquia_valor", "responsavel_custo", "acionou_protecao"):
+            if campo in mudou and campo in self.fields:
+                self.add_error(campo, aviso)
+        if not {"veiculo", "data", "cliente"} & mudou:
+            return
+        veiculo, dia = dados.get("veiculo"), dados.get("data")
+        if "cliente" in mudou:
+            cliente = dados.get("cliente")
+        elif {"veiculo", "data"} & mudou:
+            cliente = None  # o save() recalcula pela data
+        else:
+            cliente = self.instance.cliente
+        if cliente is None and veiculo and dia:
+            cliente = cliente_vigente(veiculo, dia)
+        if (cliente.pk if cliente else None) != cobranca.cliente_id:
+            campo = next(c for c in ("cliente", "data", "veiculo") if c in mudou)
+            if campo in dados:
+                self.add_error(campo, aviso)
 
     def save(self, commit=True):
         sinistro = super().save(commit=False)
@@ -185,10 +239,15 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         return sinistro
 
     def blocos(self):
-        """Blocos com os campos já prontos para o template; na edição, situação no topo."""
+        """Blocos com os campos já prontos para o template; na edição, situação no topo.
+
+        No cadastro o bloco "Situação" não aparece (o sinistro nasce Aberto).
+        """
         ordem = list(self.BLOCOS)
         if self.instance.pk:
             ordem.sort(key=lambda bloco: bloco["chave"] != "situacao")
+        else:
+            ordem = [bloco for bloco in ordem if bloco["chave"] != "situacao"]
         return [{**bloco, "campos": [self[nome] for nome in bloco["campos"]]} for bloco in ordem]
 
 
@@ -203,23 +262,48 @@ def _valor_digitado(request):
     return campo.clean(request.POST.get("valor", "").strip())
 
 
+def _data_digitada(request, minimo=None, rotulo_minimo=""):
+    """Data do POST (campo "data", AAAA-MM-DD); vazio → hoje.
+
+    Recusa data futura e, com `minimo`, data antes dele (ValidationError).
+    """
+    hoje = date.today()
+    texto = request.POST.get("data", "").strip()
+    if not texto:
+        return hoje
+    try:
+        dia = date.fromisoformat(texto)
+    except ValueError:
+        raise ValidationError("Data inválida — escolha no calendário.") from None
+    if dia > hoje:
+        raise ValidationError("A data não pode ser no futuro.")
+    if minimo and dia < minimo:
+        raise ValidationError(f"A data não pode ser antes de {rotulo_minimo} ({minimo:%d/%m/%Y}).")
+    return dia
+
+
 def _volta(request):
     """Para onde voltar depois de salvar: a lista com os filtros que estavam abertos.
 
     Só aceita endereço deste site (evita redirecionar para fora pelo ?volta=).
     """
     destino = request.POST.get("volta") or request.GET.get("volta") or ""
-    if destino and url_has_allowed_host_and_scheme(
-        destino, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    # "lista" (sem barra) virava redirect("lista") → NoReverseMatch (erro 500)
+    if (
+        destino.startswith("/")
+        and not destino.startswith("//")
+        and url_has_allowed_host_and_scheme(
+            destino, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+        )
     ):
         return destino
     return reverse("sinistros:lista")
 
 
 def lista(request):
-    sinistros = Sinistro.objects.select_related("veiculo", "cliente").prefetch_related(
-        "manutencoes", "auxilios"
-    )
+    sinistros = Sinistro.objects.select_related(
+        "veiculo", "cliente", "cobranca_franquia"
+    ).prefetch_related("manutencoes", "auxilios")
     status = request.GET.get("status")
     if status:
         sinistros = sinistros.filter(status=status)
@@ -239,12 +323,42 @@ def lista(request):
             "statuses": Sinistro.Status.choices,
             "filtro": status or "",
             "aqui": request.get_full_path(),
+            "hoje": date.today(),
         },
     )
 
 
 def _mensagem_motorista(sinistro):
     return sinistro.cliente.nome if sinistro.cliente else "nenhum cliente na data"
+
+
+def _lembrar_franquia(request, sinistro):
+    """Depois de salvar: franquia do motorista ainda não cobrada vira lembrete."""
+    if sinistro.franquia_a_cobrar and sinistro.cliente:
+        messages.info(
+            request,
+            f"Franquia de {brl(sinistro.franquia_valor)} a cobrar de {sinistro.cliente.nome}: "
+            "use o botão “Cobrar do cliente” na lista de sinistros.",
+        )
+
+
+def _avisar_data_do_roubo(request, sinistro, data_antiga):
+    """Data de um roubo já aplicado corrigida: a locação encerrada continua na data antiga."""
+    alocacao = (
+        Alocacao.objects.filter(
+            veiculo_id=sinistro.veiculo_id,
+            status=Alocacao.Status.ENCERRADA,
+            data_termino=data_antiga,
+        )
+        .select_related("cliente")
+        .first()
+    )
+    if alocacao is not None:
+        messages.warning(
+            request,
+            f"A locação de {alocacao.cliente.nome} foi encerrada em {data_antiga:%d/%m/%Y} "
+            "pela data antiga do roubo; ajuste o término em Alocações.",
+        )
 
 
 def _aplicar_roubo(request, sinistro):
@@ -328,6 +442,7 @@ def novo(request):
         )
         if sinistro.tipo == Sinistro.Tipo.ROUBO:
             _aplicar_roubo(request, sinistro)
+        _lembrar_franquia(request, sinistro)
         return redirect("sinistros:lista")
     return render(
         request,
@@ -346,6 +461,7 @@ def editar(request, sinistro_id):
     # o is_valid() já troca o tipo na instância: guarda o de antes
     era_roubo_aberto = sinistro.tipo == Sinistro.Tipo.ROUBO and not sinistro.data_recuperacao
     veiculo_antes = sinistro.veiculo_id
+    data_antes = sinistro.data
     form = SinistroForm(request.POST or None, instance=sinistro)
     if request.method == "POST" and form.is_valid():
         virou_roubo = (
@@ -365,11 +481,18 @@ def editar(request, sinistro_id):
         )
         if virou_roubo:
             _aplicar_roubo(request, sinistro)
+        elif (
+            era_roubo_aberto
+            and sinistro.tipo == Sinistro.Tipo.ROUBO
+            and sinistro.data != data_antes
+        ):
+            _avisar_data_do_roubo(request, sinistro, data_antes)
+        _lembrar_franquia(request, sinistro)
         return redirect(_volta(request))
     return render(
         request,
         "sinistros/editar.html",
-        {"form": form, "sinistro": sinistro, "volta": _volta(request)},
+        {"form": form, "sinistro": sinistro, "volta": _volta(request), "hoje": date.today()},
     )
 
 
@@ -439,6 +562,7 @@ def receber_auxilio(request, auxilio_id):
             return redirect(_volta(request))
         try:
             valor = _valor_digitado(request)
+            recebido_em = _data_digitada(request)
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
             return redirect(_volta(request))
@@ -448,7 +572,7 @@ def receber_auxilio(request, auxilio_id):
         if valor is not None:  # vazio mantém o valor informado na solicitação
             auxilio.valor = valor
         auxilio.status = AuxilioMotorista.Status.RECEBIDO
-        auxilio.data_recebimento = date.today()
+        auxilio.data_recebimento = recebido_em
         auxilio.save()
         messages.success(
             request,
@@ -479,7 +603,12 @@ def carro_recuperado(request, sinistro_id):
     sinistro = get_object_or_404(Sinistro.objects.select_related("veiculo"), pk=sinistro_id)
     if request.method == "POST":
         try:
-            services.carro_recuperado(sinistro)
+            voltou_em = _data_digitada(request, sinistro.data, "a data do roubo")
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+            return redirect(_volta(request))
+        try:
+            services.carro_recuperado(sinistro, voltou_em)
         except ValidationError as erro:
             messages.info(request, "; ".join(erro.messages))
         else:
@@ -488,7 +617,7 @@ def carro_recuperado(request, sinistro_id):
                 texto = f"{sinistro.veiculo.placa} recuperado — já está Disponível para alugar."
             else:
                 texto = (
-                    f"{sinistro.veiculo.placa} recuperado em {date.today():%d/%m/%Y}. A situação "
+                    f"{sinistro.veiculo.placa} recuperado em {voltou_em:%d/%m/%Y}. A situação "
                     f"do carro agora é {sinistro.veiculo.get_status_display()}."
                 )
             messages.success(request, texto)

@@ -14,7 +14,7 @@
       <div class="{% if field.name in form.CAMPOS_LARGOS %}sm:col-span-2{% endif %}"
            {% if field.name in form.CAMPOS_DA_PROTECAO %}x-show="protecao" x-cloak{% endif %}>
         {% if field.name == "acionou_protecao" %}
-          <label class="flex cursor-pointer items-center gap-3 rounded border border-gray-300 px-3 py-3 text-base font-medium" for="{{ field.id_for_label }}">
+          <label class="flex min-h-[44px] cursor-pointer items-center gap-3 rounded border border-gray-300 px-3 py-3 text-base font-medium" for="{{ field.id_for_label }}">
             {{ field }} <span>{{ field.label }}</span>
           </label>
         {% else %}

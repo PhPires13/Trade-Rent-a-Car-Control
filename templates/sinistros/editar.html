@@ -48,6 +48,9 @@
           onsubmit="return confirm('Confirmar que {{ sinistro.veiculo.placa|escapejs }} foi recuperado? Ele sai de Inativo e volta para a frota.')">
       {% csrf_token %}
       <input type="hidden" name="volta" value="{{ request.get_full_path }}">
+      <label for="data-recuperacao" class="mb-1 block text-sm font-medium">Data em que o carro voltou</label>
+      <input id="data-recuperacao" type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" min="{{ sinistro.data|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required
+             class="mb-3 block rounded border border-gray-300 px-3 py-2">
       <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Carro recuperado</button>
     </form>
   {% elif sinistro.veiculo.status == "vendido" %}
@@ -97,6 +100,9 @@
         <label for="aux-rec-{{ auxilio.pk }}" class="sr-only">Valor recebido</label>
         <input id="aux-rec-{{ auxilio.pk }}" type="text" name="valor" inputmode="decimal" placeholder="valor recebido (R$)"
                title="Deixe em branco para manter o valor solicitado" class="rounded border border-gray-300 px-3 py-2 sm:w-44">
+        <label for="aux-data-{{ auxilio.pk }}" class="text-sm">Data em que o dinheiro entrou</label>
+        <input id="aux-data-{{ auxilio.pk }}" type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required
+               class="rounded border border-gray-300 px-3 py-2">
         <button class="rounded bg-marca-amarelo px-4 py-2 font-semibold text-marca-preto hover:brightness-95">Marcar recebido</button>
       </form>
     {% endif %}

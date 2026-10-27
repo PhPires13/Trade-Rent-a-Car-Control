@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block titulo %}{% if veiculo %}Editar {{ veiculo.placa }}{% else %}Novo veículo{% endif %} — Trade Rent a Car{% endblock %}
+{% block titulo %}{% if veiculo %}Editar {{ veiculo.placa }}{% else %}Novo carro{% endif %} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <h1 class="mb-6 text-2xl font-bold">
-  {% if veiculo %}Editar veículo — {{ veiculo.placa }}{% else %}Novo veículo{% endif %}
+  {% if veiculo %}Editar veículo — {{ veiculo.placa }}{% else %}Novo carro{% endif %}
 </h1>
 
 <form method="post" enctype="multipart/form-data" class="space-y-6">
@@ -50,6 +50,16 @@
     </div>
   </div>
   {% endfor %}
+
+  {% if form.pede_confirmacao_uso %}
+  {# carro com lançamentos indo para "Fora de locação": os relatórios passados mudam #}
+  <div class="rounded border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">
+    <label class="flex items-start gap-2 font-semibold" for="{{ form.confirmar_fora_locacao.id_for_label }}">
+      {{ form.confirmar_fora_locacao }} <span>{{ form.confirmar_fora_locacao.label }}</span>
+    </label>
+    {% for erro in form.confirmar_fora_locacao.errors %}<p class="mt-1 text-xs">{{ erro }}</p>{% endfor %}
+  </div>
+  {% endif %}
 
   <div class="flex gap-3">
     <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Salvar</button>

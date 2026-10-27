@@ -9,6 +9,9 @@ class RegistroKmAdmin(SimpleHistoryAdmin):
     list_display = ["veiculo", "mes_referencia", "data_leitura", "km", "km_anterior", "dias"]
     list_filter = ["mes_referencia"]
     search_fields = ["veiculo__placa"]
+    list_select_related = ["veiculo"]
+    # select com todas as cobranças fazia centenas de consultas por tela
+    raw_id_fields = ["veiculo", "cobranca_excedente"]
 
 
 @admin.register(AcertoExcedenteKm)

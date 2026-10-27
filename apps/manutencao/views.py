@@ -1,26 +1,31 @@
-from datetime import date
 from uuid import uuid4
 
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
+from django.db import transaction
 from django.db.models import Max
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from apps.alocacoes.km_aviso import suspeita_de_km
 from apps.alocacoes.models import VALIDADOR_KM
 from apps.campos import FormularioBR
+from apps.financeiro.models import Cobranca
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
+from apps.km.correcao import ajustar_km_atual
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
 from .repasse import cliente_do_repasse, gerar_repasse
 from .services import (
+    STATUS_FORA_DO_ACOMPANHAMENTO,
     StatusPreventiva,
     frota_acompanhada,
     oficina_por_veiculo,
@@ -53,18 +58,56 @@ def _ultima_anotacao_de_km(veiculo, ignorar=None):
     return max(datas) if datas else None
 
 
-def suspeita_do_km_da_manutencao(veiculo, km, data, instancia=None):
-    """Aviso quando o KM digitado sobe o KM do carro além do normal (D27); None se ok.
+def _km_menor_que_o_atual(veiculo, km, data, instancia=None):
+    """Aviso quando o KM digitado é menor que o que o carro já marcou antes desta data.
 
-    Só olha o KM que passa do KM atual — é ele que mexe no carro (preventivas
-    "Vencida", excedente). Mesma régua da vistoria e da leitura mensal.
+    Ex.: 5.000 digitado num carro que já marcou 50.000 — faltou um dígito, e a
+    preventiva ficaria "Vencida" na hora. Manutenção retroativa (de antes do
+    lançamento que marcou o KM atual) é normal e não avisa.
+    """
+    from apps.km.correcao import origem_do_km
+
+    if instancia is not None and instancia.pk and instancia.km == veiculo.km_atual:
+        return None  # é esta manutenção que marcou o KM atual: corrigir para menos é normal
+    _rotulo, data_base = origem_do_km(veiculo, veiculo.km_atual)
+    if data_base is None:
+        data_base = _ultima_anotacao_de_km(veiculo, ignorar=instancia)
+    if data_base is None:
+        # Só o KM do cadastro: a última troca feita antes de o carro entrar no
+        # sistema é normal ("informar a última"), mas menos da metade é dígito faltando.
+        if km * 2 >= veiculo.km_atual:
+            return None
+        return (
+            f"Você digitou {milhar(km)} km, mas o carro está cadastrado com "
+            f"{milhar(veiculo.km_atual)} km. Confira se faltou um dígito; se estiver certo, "
+            f"marque “Confirmo o KM”."
+        )
+    if data < data_base:
+        return None
+    return (
+        f"Você digitou {milhar(km)} km, mas o carro já marcou {milhar(veiculo.km_atual)} km "
+        f"em {data_base:%d/%m}. Confira se faltou um dígito; se estiver certo, marque "
+        f"“Confirmo o KM”."
+    )
+
+
+def suspeita_do_km_da_manutencao(veiculo, km, data, instancia=None):
+    """Aviso quando o KM digitado foge do normal (D27); None se ok.
+
+    Acima do KM atual: mesma régua da vistoria e da leitura mensal (é ele que
+    mexe no carro — preventivas "Vencida", excedente). Abaixo: avisa quando a
+    manutenção é de depois do lançamento que marcou o KM atual.
     """
     from apps.km.correcao import SALTO_MAXIMO_SEM_LEITURA
 
-    if veiculo is None or km is None or data is None or km <= veiculo.km_atual:
+    if veiculo is None or km is None or data is None:
         return None
     if instancia is not None and instancia.pk and instancia.km == km:
         return None  # editando sem mexer no KM: já foi aceito antes
+    if km < veiculo.km_atual:
+        return _km_menor_que_o_atual(veiculo, km, data, instancia)
+    if km == veiculo.km_atual:
+        return None
     data_base = _ultima_anotacao_de_km(veiculo, ignorar=instancia)
     if data_base is not None:
         return suspeita_de_km(km, data, veiculo.km_atual, data_base, "na última anotação de KM")
@@ -80,7 +123,7 @@ def suspeita_do_km_da_manutencao(veiculo, km, data, instancia=None):
 
 def _datas_da_oficina(entrada, saida):
     """Erros de datas da oficina que valem no registro e no "Carro voltou": {campo: texto}."""
-    hoje = date.today()
+    hoje = timezone.localdate()
     erros = {}
     if entrada and entrada > hoje:
         # entrada no futuro deixaria o selo "Na oficina" com dias parado negativos
@@ -110,7 +153,6 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Manutencao
         fields = [
-            "tipo",
             "item",
             "data",
             "km",
@@ -184,9 +226,23 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
             for item in self.fields["item"].queryset
         }
 
+    def tipo_escolhido(self, dados):
+        """O tipo sai do item (mesma regra de tipos_por_item) — não se escolhe à mão.
+
+        Item com intervalo → preventiva; item sem intervalo → esporádica; sem
+        item → corretiva (conserto, inclusive o do atalho de sinistro).
+        """
+        item = dados.get("item")
+        if item is None:
+            return Manutencao.Tipo.CORRETIVA
+        if item.intervalo_km_padrao:
+            return Manutencao.Tipo.PREVENTIVA
+        return Manutencao.Tipo.ESPORADICA
+
     def clean(self):
         dados = super().clean()
         item = dados.get("item")
+        self.instance.tipo = self.tipo_escolhido(dados)
         if item and item.intervalo_km_padrao and dados.get("km") is None:
             self.add_error("km", "Informe o KM para a contagem da próxima troca recomeçar.")
         aviso_km = suspeita_do_km_da_manutencao(
@@ -203,7 +259,7 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
             self.add_error("data_entrada", "Informe também quando o carro entrou na oficina.")
         for campo, erro in _datas_da_oficina(entrada, saida).items():
             self.add_error(campo, erro)
-        if dados.get("tipo") == Manutencao.Tipo.PREVENTIVA:
+        if self.instance.tipo == Manutencao.Tipo.PREVENTIVA:
             dados["sinistro"] = None  # campo escondido nesse tipo: não grava sobra
         if (
             "valor_cobrado_cliente" in self.fields
@@ -225,10 +281,10 @@ class VoltouDaOficinaForm(FormularioBR, forms.ModelForm):
         fields = ["data_saida", "custo_real", "pagamento_custo"]
         labels = {
             "data_saida": "Saiu da oficina em",
-            "custo_real": "Custo final (R$)",
+            "custo_real": "Quanto a oficina cobrou (R$)",
             "pagamento_custo": "Já pagou a oficina?",
         }
-        help_texts = {"custo_real": "Quanto a oficina cobrou. Zero se a proteção cobriu."}
+        help_texts = {"custo_real": "Zero se a proteção cobriu."}
         widgets = {"data_saida": forms.DateInput(attrs={"type": "date"})}
 
     def __init__(self, *args, **kwargs):
@@ -381,6 +437,10 @@ def preventivas(request):
                 1 for p in todos_itens if p.status == StatusPreventiva.SEM_REGISTRO
             ),
             "na_oficina": sorted(na_oficina.values(), key=lambda m: m.data_entrada),
+            # "Qual carro?": todos os ativos, sem depender do filtro de atenção
+            "carros": Veiculo.objects.exclude(status__in=STATUS_FORA_DO_ACOMPANHAMENTO).order_by(
+                "placa"
+            ),
         },
     )
 
@@ -388,8 +448,13 @@ def preventivas(request):
 def _volta(request, padrao):
     """Para onde voltar depois de salvar: a tela de onde a pessoa veio (só deste site)."""
     destino = request.POST.get("volta") or request.GET.get("volta") or ""
-    if destino and url_has_allowed_host_and_scheme(
-        destino, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    # só caminho deste site ("/frota/..."): "historico" sem barra virava erro 500 no redirect
+    if (
+        destino.startswith("/")
+        and not destino.startswith("//")
+        and url_has_allowed_host_and_scheme(
+            destino, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+        )
     ):
         return destino
     return padrao
@@ -448,23 +513,16 @@ def registrar(request, veiculo_id):
     # data e KM ficam em branco — com hoje e o KM atual, salvar sem olhar marcaria
     # o item como "Em dia" sem ter sido feito.
     informar_ultima = request.GET.get("ultima") == "1"
-    inicial = {} if informar_ultima else {"data": date.today(), "km": veiculo.km_atual}
+    inicial = {} if informar_ultima else {"data": timezone.localdate(), "km": veiculo.km_atual}
     item_id = request.GET.get("item", "")
     if item_id.isdigit():
         item = ItemPreventiva.objects.filter(pk=item_id, ativo=True).first()
         if item:
             inicial["item"] = item.pk
-            inicial["tipo"] = (
-                Manutencao.Tipo.PREVENTIVA
-                if item.intervalo_km_padrao
-                else Manutencao.Tipo.ESPORADICA
-            )
             inicial["descricao"] = item.nome
     sinistro_id = request.GET.get("sinistro", "")
     if sinistro_id.isdigit() and veiculo.sinistros.filter(pk=sinistro_id).exists():
-        inicial.update(
-            sinistro=int(sinistro_id), tipo=Manutencao.Tipo.CORRETIVA, data_entrada=date.today()
-        )
+        inicial.update(sinistro=int(sinistro_id), data_entrada=timezone.localdate())
     # Cada formulário leva um código único (como a ND e a multa): clique duplo,
     # internet lenta ou "Voltar" não gravam a mesma manutenção duas vezes.
     token = request.POST.get("token", "") if request.method == "POST" else ""
@@ -505,10 +563,19 @@ def editar(request, manutencao_id):
     manutencao = get_object_or_404(Manutencao.objects.select_related("veiculo"), pk=manutencao_id)
     veiculo = manutencao.veiculo
     estava_aberta = manutencao.data_entrada and not manutencao.data_saida
+    km_antigo = manutencao.km
     form = ManutencaoForm(request.POST or None, instance=manutencao)
     if request.method == "POST" and form.is_valid():
-        manutencao = form.save()
+        with transaction.atomic():
+            manutencao = form.save()
+            aviso_km = None
+            if km_antigo is not None and manutencao.km != km_antigo:
+                # KM corrigido para menos (ou apagado): o KM atual do carro não fica
+                # preso no número errado (preventivas "Vencida" para sempre).
+                aviso_km = ajustar_km_atual(veiculo, km_antigo)
         messages.success(request, f"Manutenção de {veiculo.placa} atualizada.")
+        if aviso_km:
+            messages.info(request, aviso_km)
         _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
         _carro_foi_para_oficina(request, manutencao)
         segue_aberta = manutencao.data_entrada and not manutencao.data_saida
@@ -521,6 +588,49 @@ def editar(request, manutencao_id):
         "manutencao/registrar.html",
         {"veiculo": veiculo, "form": form, "editando": manutencao, "volta": _volta(request, "")},
     )
+
+
+@require_POST
+def apagar(request, manutencao_id):
+    """Apaga uma manutenção lançada por engano e desfaz o que ela mudou no carro."""
+    manutencao = get_object_or_404(
+        Manutencao.objects.select_related("veiculo", "cobranca_repasse"), pk=manutencao_id
+    )
+    veiculo = manutencao.veiculo
+    historico_url = reverse("manutencao:historico", args=[veiculo.pk])
+    cobranca = manutencao.cobranca_repasse
+    if cobranca is not None and cobranca.status != Cobranca.Status.CANCELADA:
+        messages.error(
+            request,
+            f"Esta manutenção já gerou cobrança de {brl(cobranca.valor)} para o cliente. "
+            f"Cancele a cobrança no Financeiro antes de apagar.",
+        )
+        return redirect("manutencao:editar", manutencao.pk)
+    km = manutencao.km
+    estava_aberta = manutencao.data_entrada and not manutencao.data_saida
+    with transaction.atomic():
+        manutencao.delete()
+        aviso_km = ajustar_km_atual(veiculo, km) if km is not None else None
+        # só a ida à oficina apagada solta o carro (o "Em manutenção" à mão fica)
+        voltou = bool(estava_aberta) and pode_voltar_a_disponivel(veiculo)
+        if voltou:
+            veiculo.status = Veiculo.Status.DISPONIVEL
+            veiculo.save(update_fields=["status"])
+    messages.success(request, f"Manutenção de {veiculo.placa} apagada.")
+    if aviso_km:
+        messages.info(request, aviso_km)
+    if voltou:
+        messages.info(request, f"{veiculo.placa} voltou a ficar disponível para alugar.")
+    return redirect(_volta(request, historico_url))
+
+
+def escolher_carro(request):
+    """ "Qual carro?" do quadro de preventivas: leva ao registro do carro escolhido."""
+    veiculo_id = request.GET.get("veiculo", "")
+    if veiculo_id.isdigit() and Veiculo.objects.filter(pk=veiculo_id).exists():
+        return redirect("manutencao:registrar", int(veiculo_id))
+    messages.error(request, "Escolha o carro na lista.")
+    return redirect("manutencao:preventivas")
 
 
 def voltou(request, manutencao_id):
@@ -538,7 +648,7 @@ def voltou(request, manutencao_id):
         messages.info(request, "Esta manutenção não tem data de entrada na oficina. Corrija aqui.")
         return redirect("manutencao:editar", manutencao.pk)
     form = VoltouDaOficinaForm(
-        request.POST or None, instance=manutencao, initial={"data_saida": date.today()}
+        request.POST or None, instance=manutencao, initial={"data_saida": timezone.localdate()}
     )
     if request.method == "POST" and form.is_valid():
         manutencao = form.save()

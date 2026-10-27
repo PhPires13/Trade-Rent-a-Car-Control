@@ -20,9 +20,15 @@ def registrar_nic(multa, data_infracao=None, valor=None):
     """FICI perdido → multa NIC contra a empresa, vinculada à original (docs.md §4.7)."""
     # trava a multa: dois envios ao mesmo tempo esperam um pelo outro e o segundo
     # recebe o aviso abaixo (antes, o banco recusava a 2ª NIC com erro 500)
-    list(Multa.objects.select_for_update().filter(pk=multa.pk).values_list("pk", flat=True))
+    atual = Multa.objects.select_for_update().filter(pk=multa.pk).values("fici_status", "resultado")
+    atual = atual.first() or {"fici_status": multa.fici_status, "resultado": multa.resultado}
     if Multa.objects.filter(multa_origem_nic_id=multa.pk).exists():
         raise ValidationError("Esta multa já tem NIC registrada.")
+    if atual["resultado"] in Multa.RESULTADOS_ANULADORES:
+        raise ValidationError("Esta multa foi anulada (cancelada, advertência ou não exigível).")
+    if atual["fici_status"] not in (Multa.Fici.PENDENTE, Multa.Fici.PRAZO_PERDIDO):
+        # motorista já indicado, ou multa que já é uma NIC: não há NIC a registrar
+        raise ValidationError("Não há indicação de motorista pendente nesta multa.")
     multa.fici_status = Multa.Fici.PRAZO_PERDIDO
     multa.save(update_fields=["fici_status"])
     nic = Multa.objects.create(
@@ -93,7 +99,7 @@ def alertas_fici(hoje=None):
     hoje = hoje or date.today()
     limite = hoje + timedelta(days=DIAS_ALERTA_FICI)
     return (
-        Multa.objects.filter(fici_status=Multa.Fici.PENDENTE)
+        Multa.objects.fici_pendente()
         .filter(Q(fici_prazo__lte=limite) | Q(fici_prazo__isnull=True))
         .select_related("veiculo", "cliente")
         .order_by(F("fici_prazo").asc(nulls_first=True), "-data_infracao")
@@ -107,6 +113,7 @@ TAREFAS = (
     ("indicar", "Indicar condutor"),
     ("pagar", "Pagar ao órgão"),
     ("cobrar", "Cobrar do cliente"),
+    ("definir", "Definir responsável"),
     ("concluidas", "Concluídas"),
 )
 
@@ -116,24 +123,29 @@ def _filtros_tarefa():
 
     "Cobrar do cliente" espelha `Multa.repasse == "A cobrar"` no banco: sem ND,
     responsável cliente/condutor, com valor, resultado que não anulou a multa e
-    que não foi paga pelo próprio cliente direto ao órgão.
-    "Concluídas" é o que não está em nenhuma das outras três.
+    que não foi paga pelo próprio cliente direto ao órgão — e com cliente (sem
+    cliente não dá para gerar ND).
+    "Definir responsável" é o mesmo caso sem cliente (`repasse` = "Sem cliente").
+    "Concluídas" é o que não está em nenhuma das outras.
     """
     anulada = Q(resultado__in=Multa.RESULTADOS_ANULADORES)
     indicar = Q(fici_status=Multa.Fici.PENDENTE) & ~anulada
     pagar = Q(pagamento=Multa.Pagamento.PENDENTE, valor__gt=0) & ~anulada
     paga_pelo_cliente = Q(pagamento=Multa.Pagamento.PAGO, pago_por__iexact=Multa.PAGO_POR_CLIENTE)
-    cobrar = (
+    devida_pelo_motorista = (
         Q(_tem_nd=False, valor__gt=0)
         & Q(responsavel__in=[Multa.Responsavel.CLIENTE, Multa.Responsavel.CONDUTOR])
         & ~anulada
         & ~paga_pelo_cliente
     )
+    cobrar = devida_pelo_motorista & Q(cliente__isnull=False)
+    definir = devida_pelo_motorista & Q(cliente__isnull=True)
     return {
         "indicar": indicar,
         "pagar": pagar,
         "cobrar": cobrar,
-        "concluidas": ~indicar & ~pagar & ~cobrar,
+        "definir": definir,
+        "concluidas": ~indicar & ~pagar & ~cobrar & ~definir,
     }
 
 

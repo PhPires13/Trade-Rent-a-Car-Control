@@ -59,8 +59,8 @@ def test_d06_ipva_parcelado_entra_no_mes_de_cada_parcela(veiculo, usuario_logado
     resposta = usuario_logado.get(
         "/relatorios/", {"mes": "2026-02", "exportar": "despesas", "formato": "csv"}
     )
-    linhas = list(csv.reader(io.StringIO(resposta.content.decode())))
-    assert ["10/02/2026", "QXQ6C10", "IPVA", "IPVA 2026 — parcela 2", "400.0"] in linhas
+    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
+    assert ["10/02/2026", "QXQ6C10", "IPVA", "IPVA 2026 — parcela 2", "400,00"] in linhas
 
 
 # --- D07: cota da proteção só no sinistro -------------------------------------------
@@ -189,9 +189,9 @@ def test_c12_export_da_frota_inclui_o_ipva_nas_despesas(usuario_logado, veiculo)
         veiculo=veiculo, ano=2026, valor=Decimal("1200.00"), pago_em=date(2026, 1, 15)
     )
     resposta = usuario_logado.get("/relatorios/", {"exportar": "frota", "formato": "csv"})
-    linhas = list(csv.reader(io.StringIO(resposta.content.decode())))
+    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
     linha = next(linha for linha in linhas if linha[0] == "QXQ6C10")
-    assert float(linha[4]) == 1200.0
+    assert linha[4] == "1200,00"  # CSV em português: vírgula nos centavos
 
 
 # --- C23: texto que parece fórmula ---------------------------------------------------
@@ -223,6 +223,6 @@ def test_c23_csv_prefixa_apostrofo_em_texto_que_parece_formula(usuario_logado, v
     resposta = usuario_logado.get(
         "/relatorios/", {"mes": "2026-07", "exportar": "despesas", "formato": "csv"}
     )
-    linhas = list(csv.reader(io.StringIO(resposta.content.decode())))
+    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
     assert linhas[1][3] == '\'=HIPERLINK("http://x";"ver nota")'
-    assert linhas[1][4] == "100.0"  # número continua número
+    assert linhas[1][4] == "100,00"  # número continua número (vírgula decimal)

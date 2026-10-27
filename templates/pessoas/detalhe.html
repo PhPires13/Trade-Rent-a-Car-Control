@@ -32,22 +32,22 @@
 {% load entrega_tags %}
 {% for ativa in alocacoes_ativas %}{% passos_entrega ativa %}{% endfor %}
 
-<div class="grid gap-6 lg:grid-cols-3">
-  <div class="rounded-lg bg-white p-5 shadow lg:col-span-2">
+<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+  <div class="min-w-0 rounded-lg bg-white p-4 shadow sm:p-5 lg:col-span-2">
     <h2 class="mb-3 font-semibold">Dados cadastrais</h2>
     <dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-      <div><dt class="text-gray-500">CPF/CNPJ</dt><dd>{{ cliente.cpf_cnpj }}</dd></div>
+      <div><dt class="text-gray-500">CPF/CNPJ</dt><dd class="whitespace-nowrap">{{ cliente.cpf_cnpj }}</dd></div>
       <div>
         <dt class="text-gray-500">Telefone</dt>
         <dd>
           {% if telefone_digitos %}
             <a href="https://wa.me/{{ telefone_digitos }}" target="_blank" rel="noopener"
-               class="text-green-700 underline">{{ cliente.telefone }}</a>
+               class="inline-flex min-h-11 items-center whitespace-nowrap text-green-700 underline sm:min-h-0">{{ cliente.telefone }}</a>
           {% else %}—{% endif %}
         </dd>
       </div>
-      <div><dt class="text-gray-500">E-mail</dt><dd>{{ cliente.email|default:"—" }}</dd></div>
-      <div><dt class="text-gray-500">Endereço</dt><dd>{{ cliente.endereco|default:"—" }}</dd></div>
+      <div><dt class="text-gray-500">E-mail</dt><dd class="break-all">{{ cliente.email|default:"—" }}</dd></div>
+      <div><dt class="text-gray-500">Endereço</dt><dd class="break-words">{{ cliente.endereco|default:"—" }}</dd></div>
       <div>
         <dt class="text-gray-500">CNH</dt>
         <dd>
@@ -66,16 +66,23 @@
           {% endif %}
         </dd>
       </div>
-      <div><dt class="text-gray-500">Dia de vencimento</dt><dd>{{ cliente.get_dia_vencimento_display|default:"—" }}</dd></div>
       <div>
-        <dt class="text-gray-500">Caução acordada</dt>
+        <dt class="text-gray-500">Dia de vencimento</dt>
+        <dd>
+          {% if cliente.dia_vencimento is not None %}{{ cliente.get_dia_vencimento_display }}
+          {% elif alocacoes_ativas %}Mesmo dia em que pegar o carro — o da alocação: {{ alocacoes_ativas.0.get_dia_vencimento_display }}
+          {% else %}Mesmo dia em que pegar o carro{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-gray-500">Caução padrão para novas alocações</dt>
         <dd>{% if cliente.caucao_referencia %}{{ cliente.caucao_referencia|brl }}{% else %}—{% endif %}</dd>
       </div>
       <div><dt class="text-gray-500">Observações</dt><dd>{{ cliente.observacoes|default:"—" }}</dd></div>
     </dl>
   </div>
 
-  <div class="space-y-3">
+  <div class="min-w-0 space-y-3">
     <div class="rounded-lg bg-white p-4 shadow">
       <div class="text-sm text-gray-500">Saldo devedor</div>
       <div class="text-2xl font-black {% if saldo_devedor > 0 %}text-red-700{% endif %}">{{ saldo_devedor|brl }}</div>
@@ -109,7 +116,7 @@
 
 <h2 class="mb-3 mt-8 text-xl font-bold">Alocações</h2>
 {% for alocacao_ativa in alocacoes_ativas %}
-<div class="mb-4 rounded-lg border-l-4 border-marca-amarelo bg-white p-5 shadow">
+<div class="mb-4 rounded-lg border-l-4 border-marca-amarelo bg-white p-4 shadow sm:p-5">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div>
       <a href="{% url 'alocacoes:timeline' alocacao_ativa.veiculo.pk %}"
@@ -123,6 +130,21 @@
       {% if cliente.dia_vencimento is not None and cliente.dia_vencimento != alocacao_ativa.dia_vencimento %}<span class="text-gray-600">(preferência do cadastro: {{ cliente.get_dia_vencimento_display|lower }})</span>{% endif %}
     </div>
   </div>
+  {% if alocacao_ativa.caucao_valor %}
+  <p class="mt-1 text-sm">
+    <span class="text-gray-500">Caução da alocação:</span> {{ alocacao_ativa.caucao_valor|brl }}
+    {% if alocacao_ativa.caucao_recebida >= alocacao_ativa.caucao_valor %}<span class="text-green-700">— depositada</span>
+    {% elif alocacao_ativa.caucao_recebida > 0 %}<span class="font-semibold text-yellow-800">— depositado {{ alocacao_ativa.caucao_recebida|brl }}</span>
+    {% else %}<span class="font-semibold text-yellow-800">— ainda não depositada</span>{% endif %}
+  </p>
+  {% endif %}
+  {% if alocacao_ativa.na_oficina and not alocacao_ativa.troca_ativa %}
+  <p class="mt-2 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-1.5 text-sm text-orange-900" role="alert">
+    Carro na oficina desde {{ alocacao_ativa.na_oficina.data_entrada|date:"d/m" }} —
+    <a href="{% url 'alocacoes:troca_nova' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}"
+       class="inline-flex min-h-11 items-center font-semibold underline sm:min-h-0">Emprestar um substituto</a>
+  </p>
+  {% endif %}
   {% if alocacao_ativa.troca_ativa %}
   <p class="mt-2 rounded bg-yellow-50 px-3 py-1.5 text-sm text-yellow-800">
     Está com o substituto {{ alocacao_ativa.troca_ativa.veiculo_substituto.placa }}
@@ -137,7 +159,7 @@
     {% else %}
     <a href="{% url 'alocacoes:troca_nova' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Trocar carro</a>
     {% endif %}
-    <a href="{% url 'alocacoes:contrato' alocacao_ativa.pk %}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Contrato</a>
+    <a href="{% url 'alocacoes:contrato' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Contrato</a>
     <a href="{% url 'alocacoes:vistoria_nova' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Registrar vistoria</a>
     <a href="{% url 'alocacoes:editar' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded border border-gray-300 px-2.5 py-1 font-medium hover:bg-gray-50">Editar valores</a>
     <a href="{% url 'alocacoes:encerrar' alocacao_ativa.pk %}?voltar={{ request.path|urlencode }}" class="rounded px-2.5 py-1 font-medium text-red-700 underline hover:bg-red-50">Encerrar</a>
@@ -183,64 +205,60 @@
 </div>
 {% endif %}
 
-<div class="mt-8 grid gap-6 lg:grid-cols-2">
-  <div class="rounded-lg bg-white p-5 shadow">
+<div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+  <div class="min-w-0 rounded-lg bg-white p-4 shadow sm:p-5">
     <div class="mb-3 flex items-center justify-between">
       <h2 class="font-semibold">Multas ({{ total_multas }})</h2>
-      <a href="{% url 'multas:lista' %}?cliente={{ cliente.pk }}" class="text-sm underline">ver todas</a>
+      <a href="{% url 'multas:lista' %}?cliente={{ cliente.pk }}" class="inline-flex min-h-11 items-center text-sm underline sm:min-h-0">ver todas</a>
     </div>
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <tbody class="divide-y divide-gray-100">
-        {% for multa in ultimas_multas %}
-        <tr>
-          <td class="px-2 py-1.5">{{ multa.data_infracao|date:"d/m/y" }}</td>
-          <td class="px-2 py-1.5">{{ multa.veiculo.placa }}</td>
-          <td class="px-2 py-1.5">{{ multa.descricao|default:multa.codigo|truncatechars:30 }}</td>
-          <td class="px-2 py-1.5 text-right">{% if multa.valor %}{{ multa.valor|brl }}{% else %}—{% endif %}</td>
-          <td class="px-2 py-1.5 text-xs text-gray-500">{{ multa.repasse }}</td>
-        </tr>
-        {% empty %}
-        <tr><td class="px-2 py-3 text-gray-500">Nenhuma multa.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
+    {# lista empilhada: cabe no celular sem rolar para o lado #}
+    <ul class="divide-y divide-gray-100 text-sm">
+      {% for multa in ultimas_multas %}
+      <li class="flex items-start justify-between gap-3 py-2">
+        <span class="min-w-0 flex-1">
+          <span class="whitespace-nowrap">{{ multa.data_infracao|date:"d/m/y" }}</span> ·
+          <span class="whitespace-nowrap">{{ multa.veiculo.placa }}</span> ·
+          <span class="break-words">{{ multa.descricao|default:multa.codigo|truncatechars:40 }}</span>
+        </span>
+        <span class="shrink-0 whitespace-nowrap text-right">{% if multa.valor %}{{ multa.valor|brl }}{% else %}—{% endif %}<span class="block text-xs text-gray-500">{{ multa.repasse }}</span></span>
+      </li>
+      {% empty %}
+      <li class="py-3 text-gray-500">Nenhuma multa.</li>
+      {% endfor %}
+    </ul>
   </div>
 
-  <div class="rounded-lg bg-white p-5 shadow">
+  <div class="min-w-0 rounded-lg bg-white p-4 shadow sm:p-5">
     <h2 class="mb-1 font-semibold">Condutores autorizados</h2>
     <p class="mb-3 text-xs text-gray-500">Outras pessoas que podem dirigir o carro deste cliente.</p>
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <tbody class="divide-y divide-gray-100">
-        {% for condutor in condutores %}
-        <tr>
-          <td class="px-2 py-1.5 font-medium">{{ condutor.nome }}</td>
-          <td class="px-2 py-1.5 text-gray-600">{{ condutor.cpf|default:"—" }}</td>
-          <td class="px-2 py-1.5 text-gray-600">{{ condutor.contato|default:"—" }}</td>
-          <td class="whitespace-nowrap px-2 py-1.5 text-right text-xs">
-            <a href="{% url 'pessoas:condutor_editar' condutor.pk %}" class="underline">editar</a>
-            <form method="post" action="{% url 'pessoas:condutor_remover' condutor.pk %}" class="ml-2 inline"
-                  onsubmit="return confirm('Tirar a autorização de {{ condutor.nome|escapejs }} para dirigir?')">
-              {% csrf_token %}
-              <button class="text-red-700 underline">remover</button>
-            </form>
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td class="px-2 py-3 text-gray-500">Nenhum condutor autorizado.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
+    <ul class="divide-y divide-gray-100 text-sm">
+      {% for condutor in condutores %}
+      <li class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2">
+        <span class="min-w-0">
+          <span class="block font-medium">{{ condutor.nome }}</span>
+          <span class="text-gray-600"><span class="whitespace-nowrap">CPF {{ condutor.cpf|default:"—" }}</span> ·
+            <span class="whitespace-nowrap">{{ condutor.contato|default:"sem contato" }}</span></span>
+        </span>
+        <span class="flex items-center gap-1 whitespace-nowrap text-xs">
+          <a href="{% url 'pessoas:condutor_editar' condutor.pk %}" class="inline-flex min-h-11 items-center px-2 underline sm:min-h-0">editar</a>
+          <form method="post" action="{% url 'pessoas:condutor_remover' condutor.pk %}" class="inline"
+                onsubmit="return confirm('Tirar a autorização de {{ condutor.nome|escapejs }} para dirigir?')">
+            {% csrf_token %}
+            <button class="inline-flex min-h-11 items-center px-2 text-red-700 underline sm:min-h-0">remover</button>
+          </form>
+        </span>
+      </li>
+      {% empty %}
+      <li class="py-3 text-gray-500">Nenhum condutor autorizado.</li>
+      {% endfor %}
+    </ul>
 
     <form method="post" action="{% url 'pessoas:condutor_novo' cliente.pk %}"
-          class="mt-4 flex flex-wrap items-end gap-2 border-t border-gray-100 pt-3">
+          class="form-condutor mt-4 flex flex-wrap items-end gap-2 border-t border-gray-100 pt-3">
       <p class="w-full text-xs font-semibold text-gray-700">Adicionar condutor</p>
       {% csrf_token %}
       {% for field in form_condutor %}
-      <div>
+      <div class="w-full sm:w-auto">
         <label class="mb-1 block text-xs text-gray-500" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
         {{ field }}
       </div>
@@ -252,7 +270,8 @@
 
 <style>
   form input, form select, form textarea {
-    border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.3rem 0.5rem; font-size: 0.875rem;
+    max-width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.3rem 0.5rem; font-size: 0.875rem;
   }
+  @media (max-width: 639px) { .form-condutor input { width: 100%; } }
 </style>
 {% endblock %}

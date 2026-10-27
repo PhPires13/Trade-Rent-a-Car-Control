@@ -14,6 +14,9 @@ from .models import PagamentoIpva, Veiculo
 
 DIAS_ALERTA_VIGENCIA = 30
 
+#: "ainda não buscado" — a tela que já sabe se o carro está na oficina passa o valor
+_BUSCAR = object()
+
 
 def _alerta(data, hoje, descricao):
     return {"data": data, "vencido": data < hoje, "descricao": descricao}
@@ -98,7 +101,7 @@ def _dias_texto(data, hoje):
     return f"vence em {dias} dia{'s' if dias > 1 else ''} ({data:%d/%m/%Y})"
 
 
-def pendencias_do_veiculo(veiculo, hoje=None):
+def pendencias_do_veiculo(veiculo, hoje=None, na_oficina=_BUSCAR):
     """O que precisa ser feito com um carro, para a faixa no topo do detalhe (proposta #16).
 
     Cada pendência: {"texto", "detalhe", "url", "acao", "grave"} — `url`/`acao`
@@ -107,7 +110,11 @@ def pendencias_do_veiculo(veiculo, hoje=None):
     """
     # imports locais: estes apps importam apps.frota.models
     from apps.km.models import pendencias_de_leitura
-    from apps.manutencao.services import STATUS_FORA_DO_ACOMPANHAMENTO, resumo_preventivas
+    from apps.manutencao.services import (
+        STATUS_FORA_DO_ACOMPANHAMENTO,
+        oficina_por_veiculo,
+        resumo_preventivas,
+    )
     from apps.multas.models import Multa
     from apps.sinistros.models import Sinistro
 
@@ -224,6 +231,38 @@ def pendencias_do_veiculo(veiculo, hoje=None):
             url_editar,
             "Atualizar a data",
             veiculo.licenciamento_vencimento < hoje,
+        )
+    # mesmas vigências do painel (vigencias_a_vencer), agora também na página do carro
+    if veiculo.rastreador_vigencia_fim and veiculo.rastreador_vigencia_fim <= limite:
+        adicionar(
+            "Rastreador"
+            + (f" ({veiculo.rastreador_fornecedor})" if veiculo.rastreador_fornecedor else ""),
+            _dias_texto(veiculo.rastreador_vigencia_fim, hoje),
+            url_editar,
+            "Atualizar a data",
+            veiculo.rastreador_vigencia_fim < hoje,
+        )
+    if veiculo.bateria_garantia_fim and veiculo.bateria_garantia_fim <= limite:
+        adicionar(
+            "Garantia da bateria",
+            _dias_texto(veiculo.bateria_garantia_fim, hoje),
+            url_editar,
+            "Atualizar a data",
+            veiculo.bateria_garantia_fim < hoje,
+        )
+
+    if na_oficina is _BUSCAR:
+        na_oficina = oficina_por_veiculo([veiculo.pk]).get(veiculo.pk)
+    if na_oficina:
+        dias = na_oficina.dias_parado
+        adicionar(
+            f"Na oficina desde {na_oficina.data_entrada:%d/%m/%Y}"
+            + (f" ({na_oficina.oficina})" if na_oficina.oficina else ""),
+            f"{dias} dia{'s' if dias != 1 else ''} parado — quando o carro voltar, registre aqui",
+            f"{reverse('manutencao:voltou', args=[na_oficina.pk])}"
+            f"?volta={quote(reverse('frota:detalhe', args=[veiculo.pk]))}",
+            "Carro voltou da oficina",
+            False,
         )
 
     # mesma regra do atalho "Indicar condutor" da lista de multas: multa anulada

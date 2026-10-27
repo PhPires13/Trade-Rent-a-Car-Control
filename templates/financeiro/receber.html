@@ -20,6 +20,9 @@
     {% endif %}
   </h2>
   <ul class="mb-3 space-y-1 text-green-950">
+    {% if resumo.credito_usado %}
+    <li><strong>Crédito usado junto:</strong> {{ resumo.credito_usado|brl }} do crédito guardado (não é dinheiro novo)</li>
+    {% endif %}
     {% for cobranca, valor in resumo.quitadas %}
     <li><strong>Quitou:</strong> {{ cobranca.descricao }} ({{ valor|brl }})</li>
     {% endfor %}
@@ -53,8 +56,9 @@
     {% endif %}
     {% if resumo.pode_desfazer %}
     <form method="post" action="{% url 'financeiro:desfazer_recebimento' resumo.recebimento.pk %}"
-          onsubmit="if (!confirm('Desfazer este lançamento de {{ resumo.recebimento.valor|brl }}? As cobranças voltam a ficar em aberto e o crédito ou reforço de caução gerado por ele é removido.')) return false; this.querySelector('button').disabled = true; return true;">
+          onsubmit="if (!confirm('Desfazer este lançamento de {{ resumo.recebimento.valor|brl }}{% if resumo.credito_usado %} (e o uso de {{ resumo.credito_usado|brl }} do crédito){% endif %}? As cobranças voltam a ficar em aberto e o crédito ou reforço de caução gerado por ele é removido.')) return false; this.querySelector('button').disabled = true; return true;">
       {% csrf_token %}
+      {% if resumo.recebimento_credito %}<input type="hidden" name="junto" value="{{ resumo.recebimento_credito.pk }}">{% endif %}
       <button class="w-full rounded border border-red-300 bg-white px-4 py-3 font-semibold text-red-700 hover:bg-red-50 sm:w-auto sm:py-2">
         ↩ Desfazer este lançamento
       </button>
@@ -71,8 +75,12 @@
   <label for="cliente" class="font-medium">De qual cliente você recebeu?</label>
   <select name="cliente" id="cliente" class="w-full rounded border border-gray-300 px-2 py-2 sm:w-auto sm:py-1" onchange="this.form.submit()">
     <option value="">— escolha —</option>
-    {% for c in clientes %}
-    <option value="{{ c.pk }}" {% if cliente and cliente.pk == c.pk %}selected{% endif %}>{{ c.nome }}</option>
+    {% for grupo, opcoes in grupos_clientes %}
+    <optgroup label="{{ grupo }}">
+      {% for pk, rotulo in opcoes %}
+      <option value="{{ pk }}" {% if cliente and cliente.pk == pk %}selected{% endif %}>{{ rotulo }}</option>
+      {% endfor %}
+    </optgroup>
     {% endfor %}
   </select>
   <noscript><button class="rounded bg-marca-preto px-3 py-1 text-white">Carregar cobranças</button></noscript>
@@ -85,10 +93,12 @@
 {% endif %}
 
 {% if cliente %}
-<div class="mb-4 text-sm text-gray-600">
-  {% if devido > 0 %}{{ cliente.nome }} deve <strong class="text-red-700">{{ devido|brl }}</strong> · {% endif %}
-  Crédito guardado: <strong>{{ credito|brl }}</strong>
-  · <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="underline">ver extrato</a>
+<div class="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
+  {# mesmo número do "Quem deve": vencido até hoje; o que vence depois aparece à parte #}
+  <span class="whitespace-nowrap">Vencido: <strong class="{% if vencido > 0 %}text-red-700{% endif %}">{{ vencido|brl }}</strong></span>
+  {% if a_vencer > 0 %}<span class="whitespace-nowrap">A vencer: <strong>{{ a_vencer|brl }}</strong></span>{% endif %}
+  <span class="whitespace-nowrap">Crédito guardado: <strong>{{ credito|brl }}</strong></span>
+  <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="underline">ver extrato</a>
 </div>
 
 {# Distribuição automática (decisão do dono, proposta nº 1-A): ao digitar o valor, ele vai da #}
@@ -98,8 +108,9 @@
       data-devido="{{ devido|stringformat:'.2f' }}"
       data-nome="{{ cliente.nome }}"
       data-cobrancas="{{ linhas|length }}"
-      x-data='{ valor: 0, aplicado: 0, destino: "credito", usandoCredito: false, enviando: false,
-                credito: 0, devido: 0, nome: "", temCobrancas: false,
+      data-mes-passado="{{ inicio_mes_passado|date:'Y-m-d' }}"
+      x-data='{ valor: 0, aplicado: 0, destino: "credito", usandoCredito: false, usarJunto: false, enviando: false,
+                credito: 0, devido: 0, nome: "", temCobrancas: false, dataPag: "", inicioMesPassado: "",
                 br(texto) {
                   let t = String(texto || "").replace(/R\$|\s/g, "");
                   if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
@@ -107,13 +118,21 @@
                   return parseFloat(t) || 0;
                 },
                 reais(n) { return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); },
-                recalc() { this.aplicado = Array.from(document.querySelectorAll(".aplicacao"))
-                  .reduce((s, el) => s + this.br(el.value), 0); },
+                /* dinheiro novo + crédito usado junto = o que pode ir para as cobranças */
+                get disponivel() { return this.valor + (this.usarJunto && !this.usandoCredito ? this.credito : 0); },
+                get creditoDemais() { return this.usandoCredito && this.valor > this.credito + 0.005; },
+                get mesPassado() { return this.dataPag && this.inicioMesPassado && this.dataPag < this.inicioMesPassado; },
+                campos() { return Array.from(document.querySelectorAll(".aplicacao")).filter((el) => !el.disabled); },
+                saldoDe(el) {
+                  /* linha do encargo: o saldo é o valor do encargo digitado ao lado */
+                  if (el.dataset.encargoDe) return this.br(document.getElementById("encargo_" + el.dataset.encargoDe).value);
+                  return parseFloat(el.dataset.saldo) || 0;
+                },
+                recalc() { this.aplicado = this.campos().reduce((s, el) => s + this.br(el.value), 0); },
                 distribuir() {
-                  let resta = this.valor;
-                  document.querySelectorAll(".aplicacao").forEach((el) => {
-                    const saldo = parseFloat(el.dataset.saldo) || 0;
-                    const usar = Math.min(resta, saldo);
+                  let resta = this.disponivel;
+                  this.campos().forEach((el) => {
+                    const usar = Math.min(resta, this.saldoDe(el));
                     el.value = usar > 0.004 ? usar.toFixed(2).replace(".", ",") : "";
                     resta = Math.max(Math.round((resta - usar) * 100) / 100, 0);
                   });
@@ -123,6 +142,7 @@
                 usarCredito() {
                   const v = this.devido > 0 ? Math.min(this.credito, this.devido) : this.credito;
                   this.usandoCredito = true;
+                  this.usarJunto = false;
                   document.getElementById("valor").value = v.toFixed(2).replace(".", ",");
                   this.digitouValor(document.getElementById("valor").value);
                 },
@@ -144,9 +164,12 @@
                 } }'
       x-init="credito = parseFloat($el.dataset.credito) || 0; devido = parseFloat($el.dataset.devido) || 0;
               nome = $el.dataset.nome; temCobrancas = parseInt($el.dataset.cobrancas) > 0;
+              inicioMesPassado = $el.dataset.mesPassado; dataPag = document.getElementById('data').value;
               destino = document.getElementById('sobra_destino').value;
               usandoCredito = {% if post.forma == 'credito' %}true{% else %}false{% endif %};
-              valor = br(document.getElementById('valor').value); recalc()"
+              usarJunto = {% if post.usar_credito_junto == '1' %}true{% else %}false{% endif %};
+              valor = br(document.getElementById('valor').value); recalc();
+              {% if abrir_com_credito and credito > 0 and devido > 0 %}usarCredito();{% endif %}"
       x-on:submit="enviar($event)"
       x-on:pageshow.window="enviando = false"
       class="rounded-lg bg-white p-4 shadow sm:p-6">
@@ -157,15 +180,22 @@
 
   {# só com algo a pagar: sem cobrança, "usar o crédito" só trocaria crédito por crédito #}
   {% if credito > 0 and devido > 0 %}
-  <div class="mb-4">
+  <div class="mb-4 space-y-2">
     <button type="button" x-show="!usandoCredito" x-on:click="usarCredito()"
             class="w-full rounded border border-green-600 bg-green-50 px-4 py-3 font-semibold text-green-800 hover:bg-green-100 sm:w-auto sm:py-2">
-      Usar o crédito de {{ credito|brl }}
+      Usar o crédito de {{ credito|brl }} (sem dinheiro novo)
     </button>
     <p x-show="usandoCredito" x-cloak class="rounded bg-green-50 px-3 py-2 text-sm text-green-900">
       Pagando com o crédito guardado de {{ cliente.nome }} — não entra dinheiro novo.
       <button type="button" x-on:click="pararCredito()" class="ml-1 underline">voltar para pagamento normal</button>
     </p>
+    {# crédito + dinheiro novo num lançamento só (ex.: 50 de crédito + Pix de 600 = 650) #}
+    <label x-show="!usandoCredito" class="flex items-start gap-2 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
+      <input type="checkbox" name="usar_credito_junto" value="1" x-model="usarJunto" x-on:change="distribuir()" class="mt-1 h-4 w-4"
+             {% if post.usar_credito_junto == "1" %}checked{% endif %}>
+      <span>Usar também o crédito de {{ credito|brl }} junto com o dinheiro recebido
+        <span x-show="usarJunto && valor > 0" x-cloak>(fica <strong x-text="reais(disponivel)"></strong> para distribuir)</span></span>
+    </label>
   </div>
   {% endif %}
 
@@ -177,11 +207,15 @@
              inputmode="decimal" autocomplete="off" placeholder="ex.: 1.250,00"
              x-on:input="digitouValor($event.target.value)"
              class="w-full rounded border border-gray-300 px-2 py-2 text-base sm:py-1 sm:text-sm">
+      <p x-show="creditoDemais" x-cloak class="mt-1 text-xs font-semibold text-red-700">
+        O crédito guardado é só {{ credito|brl }} — diminua o valor.
+      </p>
     </div>
     <div>
       <label for="data" class="mb-1 block text-sm font-medium">Data do pagamento</label>
-      <input type="date" name="data" id="data" required
+      <input type="date" name="data" id="data" required max="{{ hoje|date:'Y-m-d' }}" min="2000-01-01"
              value="{% if post.data %}{{ post.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}"
+             x-on:input="dataPag = $event.target.value" x-on:change="dataPag = $event.target.value"
              class="w-full rounded border border-gray-300 px-2 py-2 sm:py-1">
     </div>
     <div x-show="!usandoCredito">
@@ -193,14 +227,22 @@
         {% endfor %}
       </select>
     </div>
-    <div>
-      <label for="sobra_destino" class="mb-1 block text-sm font-medium" title="Quando o cliente paga mais do que foi colocado nas cobranças abaixo">Se sobrar dinheiro, vira</label>
+    {# só aparece quando sobra dinheiro, mas é sempre enviado #}
+    <div x-show="!usandoCredito && disponivel > aplicado + 0.005" x-cloak>
+      <label for="sobra_destino" class="mb-1 block text-sm font-medium" title="Quando o cliente paga mais do que foi colocado nas cobranças abaixo">O que sobrar vira</label>
       <select name="sobra_destino" id="sobra_destino" x-model="destino" class="w-full rounded border border-gray-300 px-2 py-2 sm:py-1">
         <option value="credito">Crédito do cliente</option>
-        <option value="caucao" {% if post.sobra_destino == "caucao" %}selected{% endif %}>Reforço de caução</option>
+        {% if tem_caucao %}<option value="caucao" {% if post.sobra_destino == "caucao" %}selected{% endif %}>Reforço de caução</option>{% endif %}
       </select>
     </div>
   </div>
+
+  {# data antes do mês passado: o DAS daquele mês já foi para a contabilidade #}
+  <label x-show="mesPassado" x-cloak class="mb-4 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+    <input type="checkbox" name="confirmar_mes_passado" value="1" class="mt-1 h-4 w-4"
+           {% if post.confirmar_mes_passado == "1" %}checked{% endif %}>
+    <span><strong>Confirmo: pagamento de mês passado</strong> — o DAS daquele mês muda. Confira a data antes de lançar.</span>
+  </label>
 
   {# No celular cada cobrança vira um cartão; do sm para cima, tabela. Um só conjunto de campos. #}
   <div class="mb-4">
@@ -224,17 +266,34 @@
     </thead>
     <tbody class="block space-y-3 sm:table-row-group sm:space-y-0 sm:divide-y sm:divide-gray-100">
       {% for cobranca, digitado in linhas %}
-      <tr class="block rounded-lg border border-gray-200 p-3 sm:table-row sm:rounded-none sm:border-0 sm:p-0 {% if cobranca.status == 'atrasado' %}bg-red-50{% elif cobranca.status == 'judicial' %}bg-purple-50{% endif %}">
+      <tr class="block rounded-lg border border-gray-200 p-3 sm:table-row sm:rounded-none sm:border-0 sm:p-0 {% if cobranca.status == 'atrasado' %}bg-red-50{% elif cobranca.status == 'judicial' %}bg-purple-50{% endif %}"
+          {% if cobranca.encargo_sugerido %}x-data="{ incluir: {% if cobranca.encargo_incluido %}true{% else %}false{% endif %} }"{% endif %}>
         <td class="block sm:table-cell sm:px-3 sm:py-2">
-          <span class="text-xs text-gray-500 sm:hidden">Vence em </span>{{ cobranca.vencimento|date:"d/m/Y" }}
+          <span class="text-xs text-gray-500 sm:hidden">Vence em </span><span class="whitespace-nowrap">{{ cobranca.vencimento|date:"d/m/Y" }}</span>
           {% if cobranca.status == 'atrasado' %}<span class="text-xs font-semibold text-red-700 sm:hidden">· atrasada</span>{% endif %}
         </td>
         <td class="block font-medium sm:table-cell sm:px-3 sm:py-2 sm:font-normal">
           {{ cobranca.descricao }}
           {% if cobranca.status == 'judicial' %}<span class="rounded bg-purple-100 px-1 text-xs font-semibold text-purple-800">Judicial</span>{% endif %}
+          {% if cobranca.encargo_sugerido %}
+          {# o motorista pagou o atraso + encargo: cobra o encargo no mesmo lançamento #}
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-xs font-normal text-gray-700">
+            <label class="flex items-center gap-1">
+              <input type="checkbox" name="incluir_encargo_{{ cobranca.pk }}" value="1" x-model="incluir"
+                     x-on:change="$nextTick(() => distribuir())" class="h-4 w-4">
+              Cobrar junto o encargo por atraso (sugerido {{ cobranca.encargo_sugerido|brl }})
+            </label>
+            <span x-show="incluir" x-cloak class="flex items-center gap-1">
+              <label for="encargo_{{ cobranca.pk }}">valor R$</label>
+              <input type="text" name="encargo_{{ cobranca.pk }}" id="encargo_{{ cobranca.pk }}" value="{{ cobranca.encargo_digitado }}"
+                     inputmode="decimal" autocomplete="off" x-bind:disabled="!incluir" {% if not cobranca.encargo_incluido %}disabled{% endif %}
+                     x-on:input="distribuir()" class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs">
+            </span>
+          </div>
+          {% endif %}
         </td>
         <td class="block sm:table-cell sm:px-3 sm:py-2">
-          <span class="text-xs font-normal text-gray-500 sm:hidden">Falta receber: </span><strong>{{ cobranca.saldo|brl }}</strong>
+          <span class="text-xs font-normal text-gray-500 sm:hidden">Falta receber: </span><strong class="whitespace-nowrap">{{ cobranca.saldo|brl }}</strong>
         </td>
         <td class="mt-2 block sm:mt-0 sm:table-cell sm:px-3 sm:py-2">
           <label for="aplicar_{{ cobranca.pk }}" class="mb-1 block text-xs text-gray-500 sm:sr-only">Quanto deste pagamento vai para ela (R$)</label>
@@ -244,10 +303,20 @@
                  data-saldo="{{ cobranca.saldo|stringformat:'.2f' }}"
                  class="aplicacao w-full rounded border border-gray-300 px-2 py-2 text-base sm:w-28 sm:py-1 sm:text-sm"
                  x-on:input="recalc()">
+          {% if cobranca.encargo_sugerido %}
+          <div x-show="incluir" x-cloak class="mt-2">
+            <label for="aplicar_encargo_{{ cobranca.pk }}" class="mb-1 block text-xs text-gray-500">Para o encargo (R$)</label>
+            <input type="text" name="aplicar_encargo_{{ cobranca.pk }}" id="aplicar_encargo_{{ cobranca.pk }}" placeholder="0,00"
+                   value="{{ cobranca.encargo_para_aplicar }}" inputmode="decimal" autocomplete="off"
+                   data-encargo-de="{{ cobranca.pk }}" x-bind:disabled="!incluir" {% if not cobranca.encargo_incluido %}disabled{% endif %}
+                   class="aplicacao w-full rounded border border-gray-300 px-2 py-2 text-base sm:w-28 sm:py-1 sm:text-sm"
+                   x-on:input="recalc()">
+          </div>
+          {% endif %}
         </td>
       </tr>
       {% empty %}
-      <tr class="block sm:table-row"><td colspan="4" class="block px-3 py-4 text-gray-500 sm:table-cell">Nenhuma cobrança em aberto para este cliente — o valor recebido vai inteiro para o destino escolhido em "Se sobrar dinheiro".</td></tr>
+      <tr class="block sm:table-row"><td colspan="4" class="block px-3 py-4 text-gray-500 sm:table-cell">Nenhuma cobrança em aberto para este cliente — o valor recebido vai inteiro para o crédito{% if tem_caucao %} ou a caução{% endif %} do cliente.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -261,23 +330,24 @@
 
   <div class="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
     <div><span x-text="usandoCredito ? 'Crédito usado:' : 'Valor recebido:'">Valor recebido:</span> <strong x-text="reais(valor)"></strong></div>
+    <div x-show="usarJunto && !usandoCredito" x-cloak>+ crédito: <strong x-text="reais(credito)"></strong></div>
     <div>Colocado nas cobranças: <strong x-text="reais(aplicado)"></strong></div>
   </div>
-  <p class="mb-4 rounded bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900" x-show="valor - aplicado > 0.005" x-cloak>
-    <span x-text="reais(valor - aplicado)"></span> vai ficar guardado como
+  <p class="mb-4 rounded bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900" x-show="!usandoCredito && valor > 0 && disponivel - aplicado > 0.005" x-cloak>
+    <span x-text="reais(disponivel - aplicado)"></span> vai ficar guardado como
     <span x-text="destino === 'caucao' ? 'reforço da caução de ' + nome : 'crédito de ' + nome"></span>.
   </p>
-  <p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700" x-show="aplicado > valor + 0.005" x-cloak>
+  <p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700" x-show="aplicado > disponivel + 0.005" x-cloak>
     ⚠ Você colocou nas cobranças mais do que o cliente pagou. Diminua os valores nas cobranças ou corrija o valor recebido.
   </p>
 
   <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
     <label for="observacoes" class="sr-only">Observações (opcional)</label>
-    <input type="text" name="observacoes" id="observacoes" placeholder="observações (opcional)" value="{{ post.observacoes|default:'' }}"
+    <input type="text" name="observacoes" id="observacoes" placeholder="observações (opcional)" value="{{ post.observacoes|default:'' }}" maxlength="500"
            class="min-w-[12rem] rounded border border-gray-300 px-2 py-2 text-sm sm:order-2 sm:flex-1 sm:py-1">
     <button class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 sm:order-1 sm:py-2"
-            x-bind:disabled="enviando || aplicado > valor + 0.005"
-            x-bind:class="enviando || aplicado > valor + 0.005 ? 'opacity-50 cursor-not-allowed' : ''">
+            x-bind:disabled="enviando || aplicado > disponivel + 0.005 || creditoDemais"
+            x-bind:class="enviando || aplicado > disponivel + 0.005 || creditoDemais ? 'opacity-50 cursor-not-allowed' : ''">
       <span x-text="enviando ? 'Lançando…' : 'Confirmar recebimento'">Confirmar recebimento</span>
     </button>
   </div>

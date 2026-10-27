@@ -1,9 +1,9 @@
-from datetime import date
 from decimal import Decimal
 
 from django.db import models
 from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.alocacoes.models import Alocacao
@@ -24,8 +24,8 @@ class Cobranca(models.Model):
     class Origem(models.TextChoices):
         ALUGUEL = "aluguel", "Aluguel semanal"
         NOTA_DEBITO = "nota_debito", "Nota de débito"
-        REPASSE_MANUTENCAO = "repasse_manutencao", "Repasse de manutenção"
-        REPASSE_SINISTRO = "repasse_sinistro", "Repasse de sinistro"
+        REPASSE_MANUTENCAO = "repasse_manutencao", "Conserto cobrado do cliente"
+        REPASSE_SINISTRO = "repasse_sinistro", "Franquia de sinistro cobrada do cliente"
         EXCEDENTE_KM = "excedente_km", "Excedente de km"
         ENCARGO = "encargo", "Encargo por atraso"
         OUTRO = "outro", "Outro"
@@ -158,7 +158,7 @@ class Cobranca(models.Model):
         Só grava quando o status muda — a rotina diária passa por todas as
         cobranças em aberto e não deve gerar versão repetida no histórico.
         """
-        hoje = hoje or date.today()
+        hoje = hoje or timezone.localdate()
         # as aplicações podem ter mudado desde o fetch — não confiar em anotação
         self.__dict__.pop("_total_quitado_anotado", None)
         if self.status == self.Status.CANCELADA:

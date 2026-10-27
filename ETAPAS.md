@@ -238,9 +238,35 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 - Conferir em celular de verdade: painel, menu "Mais" das alocações, formulário de manutenção com "Confirmo o KM".
 - Deploy Railway/Neon e carga de dados reais.
 
+### Etapa 17 — Varredura final (PARCIAL — interrompida por limite de uso)
+- 13 lentes (10 no código com teste de reprodução + 3 testadores E2E no navegador, num banco sandbox): 106 achados consolidados por área.
+- Corrigidos e revisados: financeiro (28 itens; revisão não concluída), alocações/clientes (19), frota (12), KM/manutenção (14), multas/sinistros (14), relatórios (8). Suíte inteira, ruff e migrações passando no commit.
+- Já entraram parcialmente na área global: páginas próprias de erro 404/500/CSRF, página de saída e middleware.
+
+**Para retomar (próxima rodada):**
+1. Revisão adversarial do financeiro (não chegou a rodar).
+2. Área global/painel (implementação estava em andamento; conferir o que falta):
+   - CRÍTICO: campos de data vazios na edição (valor dd/mm/aaaa num input type=date) e salvar apaga datas opcionais; no celular, ano "26" gravado como 0026.
+   - Painel acusa "rotina parada" falso depois de mudar o dia de vencimento; usar services.proximo_vencimento em config/views._alugueis_da_semana.
+   - Selects mostram "---------" (31 campos) → texto amigável.
+   - Sessão expirada em telas HTMX enfia o login dentro da linha/caixa.
+   - Login aberto mesmo logado; GET /sair/ em branco.
+   - Painel: textos técnicos ("rotina_diaria", "ver ranking", "Candidatos à desmobilização", "vencida há 0 km" → usar p.texto_km); alertas de FICI/auxílio/franquia sem link.
+   - Admin sem a marca do sistema; seção Axes em inglês.
+   - Datas com date.today() → timezone.localdate().
+   - Contrato com CNPJ/endereço da locadora em branco (variáveis EMPRESA_* no .env).
+3. Sobras entre áreas:
+   - frota/views.py (contagem FICI do hub) e frota/alertas.py ainda contam multas anuladas.
+   - Relatórios: franquia sem data do evento; aba DAS do arquivo da contabilidade sem a lista de pagamentos.
+   - VeiculoForm.clean_km_atual usar ajustar_km_atual.
+   - Vistoria do substituto: data mínima deveria ser a data de retirada.
+   - Validar o ano da data de emissão da ND.
+4. Regressão no navegador (computador e celular) depois das correções. Sandbox: copiar db.sqlite3, migrar, criar usuário de teste e subir com DATABASE_URL/MEDIA_ROOT apontando para a cópia (porta 8001).
+5. Ainda dos donos: devolver crédito em dinheiro (decisão), conferir em celular de verdade, deploy Railway/Neon e carga de dados reais.
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:
-1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY` (**obrigatória**), `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` e, de preferência, `CREDENCIAIS_KEY` antes de cadastrar credenciais de portais; opcionais `ANTHROPIC_API_KEY` (leitura de CNH), `CHAVE_PIX` (mensagem de cobrança) e volume persistente com `MEDIA_ROOT` para as fotos; cron diário `python manage.py rotina_diaria` com o agendamento `5 3 * * *` (o cron do Railway é em UTC; isso dá 00:05 em Brasília). Se a rotina ficar parada, o painel mostra um aviso. Atrás do proxy do Railway, deixe `PROXIES_CONFIAVEIS` no padrão (1) para o bloqueio de login usar o IP real.
+1. **Deploy**: criar Postgres no Neon (free) + serviço no Railway apontando para o GitHub; configurar `SECRET_KEY` (**obrigatória**), `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` e, de preferência, `CREDENCIAIS_KEY` antes de cadastrar credenciais de portais; opcionais `ANTHROPIC_API_KEY` (leitura de CNH), `CHAVE_PIX` (mensagem de cobrança), **dados da locadora no contrato** `EMPRESA_RAZAO_SOCIAL`, `EMPRESA_CNPJ`, `EMPRESA_ENDERECO` e `EMPRESA_CIDADE_UF` (sem eles o contrato sai com CNPJ e endereço em branco) e volume persistente com `MEDIA_ROOT` para as fotos; cron diário `python manage.py rotina_diaria` com o agendamento `5 3 * * *` (o cron do Railway é em UTC; isso dá 00:05 em Brasília). Se a rotina ficar parada, o painel mostra um aviso. Atrás do proxy do Railway, deixe `PROXIES_CONFIAVEIS` no padrão (1) para o bloqueio de login usar o IP real.
 2. **Carga inicial**: cadastrar frota/clientes reais (ou preparar os "outros dados organizados" — decisão nº 9).
 3. **Fase 2 do roadmap** (docs.md §7): anexos, notificações WhatsApp/e-mail, emissão de fatura/ND, importação de planilhas.

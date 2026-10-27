@@ -10,10 +10,21 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from django.db.models import (
+    DecimalField,
+    ExpressionWrapper,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+)
+from django.db.models.functions import Coalesce
 from django.shortcuts import render
+from django.utils import timezone
 
 from . import whatsapp
-from .models import ZERO, Cobranca
+from .models import ZERO, Cobranca, MovimentoCredito
 
 #: Linhas do bloco "Hoje" no Painel; o resto fica em "ver todos".
 LINHAS_NO_PAINEL = 5
@@ -32,6 +43,8 @@ class Devedor:
     placas: list = field(default_factory=list)
     link_whatsapp: str = ""
     dias_atraso: int = 0
+    #: crédito guardado do cliente (sobra de pagamento) — dá para usar nas cobranças
+    credito: Decimal = ZERO
 
     @property
     def total(self):
@@ -50,12 +63,16 @@ def devedores(hoje=None):
     ali a conversa é pelo advogado). Ordem: atraso mais antigo primeiro;
     depois quem só tem a semana vencendo hoje, por nome.
     """
-    hoje = hoje or date.today()
-    cobrancas = Cobranca.com_quitacao_anotada(
-        Cobranca.objects.filter(
-            status__in=Cobranca.STATUS_DEVIDOS, vencimento__lte=hoje
-        ).select_related("cliente", "alocacao__veiculo")
-    ).order_by("vencimento", "pk")
+    hoje = hoje or timezone.localdate()
+    cobrancas = (
+        Cobranca.com_quitacao_anotada(
+            Cobranca.objects.filter(
+                status__in=Cobranca.STATUS_DEVIDOS, vencimento__lte=hoje
+            ).select_related("cliente", "alocacao__veiculo")
+        )
+        .annotate(credito_do_cliente=_credito_do_cliente())
+        .order_by("vencimento", "pk")
+    )
 
     por_cliente = {}
     for cobranca in cobrancas:
@@ -65,6 +82,8 @@ def devedores(hoje=None):
         devedor = por_cliente.get(cobranca.cliente_id)
         if devedor is None:
             devedor = por_cliente[cobranca.cliente_id] = Devedor(cliente=cobranca.cliente)
+        # crédito do cliente vem anotado na própria consulta (sem consulta a mais)
+        devedor.credito = max(cobranca.credito_do_cliente or ZERO, ZERO)
         devedor.cobrancas.append(cobranca)
         if cobranca.vencimento < hoje:
             devedor.atrasado += saldo
@@ -94,9 +113,69 @@ def devedores(hoje=None):
     return lista
 
 
+def _credito_do_cliente():
+    """Subconsulta: crédito guardado (entradas − usos) do cliente da cobrança."""
+    dinheiro = DecimalField(max_digits=10, decimal_places=2)
+
+    def soma(tipo):
+        return Coalesce(
+            Subquery(
+                MovimentoCredito.objects.filter(cliente_id=OuterRef("cliente_id"), tipo=tipo)
+                .values("cliente_id")
+                .annotate(t=Sum("valor"))
+                .values("t")
+            ),
+            Value(ZERO),
+            output_field=dinheiro,
+        )
+
+    return ExpressionWrapper(
+        soma(MovimentoCredito.Tipo.ENTRADA) - soma(MovimentoCredito.Tipo.USO),
+        output_field=dinheiro,
+    )
+
+
+def creditos_por_cliente(cliente_ids):
+    """{cliente_id: crédito guardado > 0} numa consulta só (entradas − usos)."""
+    somas = (
+        MovimentoCredito.objects.filter(cliente_id__in=list(cliente_ids))
+        .values("cliente_id")
+        .annotate(
+            entradas=Sum("valor", filter=Q(tipo=MovimentoCredito.Tipo.ENTRADA)),
+            usos=Sum("valor", filter=Q(tipo=MovimentoCredito.Tipo.USO)),
+        )
+    )
+    creditos = {}
+    for linha in somas:
+        saldo = (linha["entradas"] or ZERO) - (linha["usos"] or ZERO)
+        if saldo > ZERO:
+            creditos[linha["cliente_id"]] = saldo
+    return creditos
+
+
+def vencido_ate_hoje(cliente_ids=None, incluir_judicial=True, hoje=None):
+    """{cliente_id: saldo vencido até hoje (inclusive)} — a conta única do "deve".
+
+    É o mesmo número do "Quem deve" e do Receber ("Vencido"): o que vence
+    depois de hoje não entra. `incluir_judicial=False` deixa de fora as
+    cobranças na Justiça (ex.: o que dá para cobrar pelo WhatsApp).
+    Painel e alocações podem reutilizar em vez de refazer a conta.
+    """
+    hoje = hoje or timezone.localdate()
+    status = Cobranca.STATUS_DEVIDOS if incluir_judicial else Cobranca.STATUS_EM_ABERTO
+    cobrancas = Cobranca.objects.filter(status__in=status, vencimento__lte=hoje)
+    if cliente_ids is not None:
+        cobrancas = cobrancas.filter(cliente_id__in=list(cliente_ids))
+    totais = {}
+    for cobranca in Cobranca.com_quitacao_anotada(cobrancas):
+        if cobranca.saldo > ZERO:
+            totais[cobranca.cliente_id] = totais.get(cobranca.cliente_id, ZERO) + cobranca.saldo
+    return totais
+
+
 def pagaram_hoje(hoje=None, exceto=()):
     """Nomes de quem tinha cobrança vencendo hoje e já quitou (fica em verde)."""
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     return list(
         Cobranca.objects.filter(vencimento=hoje, status=Cobranca.Status.PAGO)
         .exclude(cliente_id__in=list(exceto))
@@ -108,7 +187,7 @@ def pagaram_hoje(hoje=None, exceto=()):
 
 def resumo_do_dia(hoje=None):
     """Contexto do bloco "Hoje" do Painel: até 5 linhas + totais para o "ver todos"."""
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     lista = devedores(hoje)
     return {
         "hoje_linhas": lista[:LINHAS_NO_PAINEL],
@@ -121,7 +200,7 @@ def resumo_do_dia(hoje=None):
 
 def quem_deve(request):
     """Tela "Quem deve": uma linha por cliente, com total, desde quando e atalhos."""
-    hoje = date.today()
+    hoje = timezone.localdate()
     lista = devedores(hoje)
     return render(
         request,

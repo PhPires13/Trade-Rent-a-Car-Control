@@ -71,6 +71,15 @@ class ClienteForm(FormularioBR, forms.ModelForm):
             choices.insert(1, (Cliente.Status.INADIMPLENTE, "Inadimplente (automático)"))
         self.fields["status"].choices = choices
         self.fields["status"].help_text = "Inadimplente é controlado pelos atrasos, todo dia."
+        if not self.instance.pk:
+            # cliente novo é sempre ativo — o campo só confundia no cadastro
+            del self.fields["status"]
+        dia = self.fields["dia_vencimento"]
+        dia.choices = [("", "Mesmo dia em que pegar o carro"), *Cliente.DiaSemana.choices]
+        self.fields["caucao_referencia"].label = "Caução padrão para novas alocações (R$)"
+        self.fields[
+            "caucao_referencia"
+        ].help_text = "Sugerida ao alocar um carro — o valor que vale é o da alocação."
 
     def clean_telefone(self):
         """Telefone sem DDD gera link de WhatsApp inválido — só valida ao salvar."""
@@ -110,6 +119,15 @@ class CondutorInlineForm(forms.ModelForm):
             "cnh_numero": forms.TextInput(attrs={"inputmode": "numeric"}),
             "contato": forms.TextInput(attrs={"inputmode": "tel"}),
         }
+
+
+def _condutor_repetido(cliente, nome, excluir=None):
+    """Mesmo nome (sem diferença de maiúscula/acento) já autorizado para o cliente."""
+    alvo = sem_acento(nome.strip())
+    condutores = cliente.condutores_autorizados.all()
+    if excluir is not None:
+        condutores = condutores.exclude(pk=excluir)
+    return next((c for c in condutores if sem_acento(c.nome.strip()) == alvo), None)
 
 
 class CondutorForm(forms.ModelForm):
@@ -215,6 +233,20 @@ def _resumo(cliente, hoje):
         cliente, hoje, _saldos_em_lote([cliente.pk])[cliente.pk], ativas[0] if ativas else None
     )
     card["alocacoes_ativas"] = ativas
+    if ativas:
+        from apps.financeiro.models import Caucao  # import local evita ciclo de import
+        from apps.manutencao.services import oficina_por_veiculo
+
+        # carro na oficina e caução da alocação (depositada ou não) no cartão do carro
+        oficina = oficina_por_veiculo([a.veiculo_id for a in ativas])
+        caucoes = {
+            c.alocacao_id: c
+            for c in Caucao.com_saldos_anotados(Caucao.objects.filter(alocacao__in=ativas))
+        }
+        for alocacao in ativas:
+            alocacao.na_oficina = oficina.get(alocacao.veiculo_id)
+            caucao = caucoes.get(alocacao.pk)
+            alocacao.caucao_recebida = caucao.recebido if caucao else ZERO
     return card
 
 
@@ -222,6 +254,14 @@ def _cards_em_lote(clientes, hoje):
     """Cards da lista com queries fixas — nada por cliente."""
     ids = [cliente.pk for cliente in clientes]
     saldos = _saldos_em_lote(ids)
+    # "R$ X vencido" com a mesma conta do Quem deve; o resto é "a vencer"
+    from apps.alocacoes.views import dividas_por_cliente  # import local evita ciclo
+
+    dividas = dividas_por_cliente(ids)
+    for cliente_id, saldo in saldos.items():
+        divida = dividas.get(cliente_id) or {}
+        saldo["vencido"] = divida.get("ate_hoje", ZERO)
+        saldo["a_vencer"] = divida.get("a_vencer", ZERO)
     alocacoes = {
         alocacao.cliente_id: alocacao
         for alocacao in Alocacao.objects.filter(
@@ -330,7 +370,13 @@ def condutor_novo(request, cliente_id):
     cliente = get_object_or_404(Cliente, pk=cliente_id)
     if request.method == "POST":
         form = CondutorInlineForm(request.POST)
-        if form.is_valid():
+        repetido = form.is_valid() and _condutor_repetido(cliente, form.cleaned_data["nome"])
+        if repetido:
+            # reenvio do formulário (ou cadastro em dobro): não cria outro igual
+            messages.warning(
+                request, f"{repetido.nome} já é condutor(a) autorizado(a) deste cliente."
+            )
+        elif form.is_valid():
             condutor = form.save(commit=False)
             condutor.cliente = cliente
             condutor.save()

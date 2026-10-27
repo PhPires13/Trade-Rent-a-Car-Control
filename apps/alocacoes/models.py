@@ -160,6 +160,13 @@ class Alocacao(models.Model):
     def clean(self):
         erros = {}
         if self._state.adding:
+            # data no futuro deixava o carro preso: o encerramento e a cobrança
+            # recusavam tudo até lá (vale também no Admin)
+            if self.data_inicio and self.data_inicio > date.today():
+                erros["data_inicio"] = (
+                    "A data de início não pode ser no futuro — cadastre a alocação "
+                    "no dia em que o carro sair."
+                )
             if self.veiculo_id and self.veiculo.status != Veiculo.Status.DISPONIVEL:
                 erros["veiculo"] = (
                     f"Veículo {self.veiculo.placa} não está disponível "
@@ -209,13 +216,23 @@ class Alocacao(models.Model):
         """
         if self.status != self.Status.ATIVA:
             raise ValidationError("Alocação já encerrada.")
-        if self.trocas.filter(data_devolucao__isnull=True).exists():
+        trocas = self.trocas.aggregate(
+            abertas=models.Count("pk", filter=models.Q(data_devolucao__isnull=True)),
+            ultima=Max("data_devolucao"),
+        )
+        if trocas["abertas"]:
             raise ValidationError("Devolva o carro substituto antes de encerrar a alocação.")
         if data_termino < self.data_inicio:
             raise ValidationError(
                 f"Data de término anterior ao início da alocação ({self.data_inicio:%d/%m/%Y})."
             )
         _validar_data_nao_futura(data_termino)
+        ultima_troca = trocas["ultima"]
+        if ultima_troca and data_termino < ultima_troca:
+            raise ValidationError(
+                f"O cliente ficou com o substituto até {ultima_troca:%d/%m/%Y} — a "
+                "devolução não pode ser antes disso."
+            )
         if km_devolucao < self.km_entrega:
             raise ValidationError("KM de devolução menor que o KM de entrega.")
         _validar_km_maximo(km_devolucao)
@@ -449,6 +466,9 @@ class TrocaTemporaria(models.Model):
                         f"O substituto {self.veiculo_substituto.placa} só voltou do motorista "
                         f"anterior em {liberado:%d/%m/%Y}. A retirada não pode ser antes disso."
                     )
+        if self._state.adding and self.data_retirada and self.data_retirada > date.today():
+            # retirada no futuro travava a devolução e o encerramento
+            erros["data_retirada"] = "A data de retirada não pode ser no futuro."
         if self._state.adding and self.alocacao_id and self.data_retirada:
             if self.data_retirada < self.alocacao.data_inicio:
                 erros["data_retirada"] = (

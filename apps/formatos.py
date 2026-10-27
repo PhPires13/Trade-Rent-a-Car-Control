@@ -48,3 +48,14 @@ def milhar(valor, vazio="—"):
 
 register.filter("brl", brl)
 register.filter("milhar", milhar)
+
+
+def hoje():
+    """Data de hoje no fuso do sistema (America/Sao_Paulo), não no relógio do servidor.
+
+    Use no lugar de date.today(): no Railway o servidor roda em UTC, e entre
+    21h e meia-noite date.today() já diria que é amanhã.
+    """
+    from django.utils import timezone
+
+    return timezone.localdate()

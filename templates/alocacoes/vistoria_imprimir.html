@@ -15,14 +15,14 @@
     {% elif alocacao.troca_ativa %}
     <a href="?veiculo={{ alocacao.troca_ativa.veiculo_substituto_id }}" class="py-3 underline">Imprimir do substituto ({{ alocacao.troca_ativa.veiculo_substituto.placa }})</a>
     {% endif %}
-    <a href="{% url 'alocacoes:vistoria_nova' alocacao.pk %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-medium">Registrar vistoria (ler foto)</a>
+    <a href="{% url 'alocacoes:vistoria_nova' alocacao.pk %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-medium">{% if checklist_leitura %}Registrar vistoria (ler foto){% else %}Registrar vistoria{% endif %}</a>
     <a href="{% url 'alocacoes:lista' %}" class="py-3 text-gray-500 underline">← alocações</a>
   </div>
 </div>
 <p class="nao-imprime mb-4 text-sm text-gray-600">
   Imprima <strong>2 vias</strong> (uma fica com a locadora, outra com o motorista), preencha à mão
-  na entrega ou na devolução do carro e depois fotografe o papel preenchido em
-  "Registrar vistoria" — o sistema lê a foto e carrega os dados para você conferir e salvar.
+  na entrega ou na devolução do carro e
+  {% if checklist_leitura %}depois fotografe o papel preenchido em "Registrar vistoria" — o sistema lê a foto e carrega os dados para você conferir e salvar.{% else %}depois guarde a foto do papel em "Registrar vistoria" e preencha os campos.{% endif %}
 </p>
 
 <div class="checklist mx-auto max-w-3xl rounded-lg bg-white p-4 text-[14px] shadow sm:p-8 print:p-0 print:shadow-none">

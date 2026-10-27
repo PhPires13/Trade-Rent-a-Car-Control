@@ -15,11 +15,11 @@
 
 {{ form.tipos_por_item|json_script:"tipos-por-item" }}
 <form method="post" class="form-cadastro max-w-lg space-y-6 rounded-lg bg-white p-4 shadow sm:p-6"
-      x-data="{ tipo: '{{ form.tipo.value|default:''|escapejs }}', item: '{{ form.item.value|default:''|escapejs }}', responsavel: '{{ form.responsavel.value|default:'empresa'|escapejs }}', tipos: JSON.parse(document.getElementById('tipos-por-item').textContent) }"
+      x-data="{ item: '{{ form.item.value|default:''|escapejs }}', responsavel: '{{ form.responsavel.value|default:'empresa'|escapejs }}', tipos: JSON.parse(document.getElementById('tipos-por-item').textContent),
+               get tipo() { return this.tipos[this.item] || 'corretiva' } }"
       @change="const n = $event.target.name;
-               if (n === 'tipo') tipo = $event.target.value;
                if (n === 'responsavel') responsavel = $event.target.value;
-               if (n === 'item') { item = $event.target.value; if (tipos[item]) { tipo = tipos[item]; document.getElementById('id_tipo').value = tipo; } }">
+               if (n === 'item') item = $event.target.value;">
   {% csrf_token %}
   {% if volta %}<input type="hidden" name="volta" value="{{ volta }}">{% endif %}
   {% if not editando %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
@@ -28,7 +28,6 @@
   <fieldset class="space-y-4">
     <legend class="mb-2 text-lg font-bold">O que foi feito</legend>
     {% include "manutencao/_campo.html" with field=form.item %}
-    {% include "manutencao/_campo.html" with field=form.tipo %}
     <div class="grid gap-4 sm:grid-cols-2">
       {% include "manutencao/_campo.html" with field=form.data %}
       <div>
@@ -77,6 +76,21 @@
     <a href="{% if volta %}{{ volta }}{% else %}{% url 'manutencao:historico' veiculo.pk %}{% endif %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
   </div>
 </form>
+
+{% if editando %}
+{# Apagar fica fora do formulário de edição (form aninhado não existe em HTML). #}
+<form method="post" action="{% url 'manutencao:apagar' editando.pk %}" class="mt-6 max-w-lg rounded-lg border border-red-200 bg-white p-4 sm:p-6"
+      onsubmit="return confirm('Apagar esta manutenção de {{ veiculo.placa|escapejs }}? Isso não tem volta.');">
+  {% csrf_token %}
+  {% if volta %}<input type="hidden" name="volta" value="{{ volta }}">{% endif %}
+  <p class="mb-3 text-sm text-gray-600">Lançou por engano (carro errado, manutenção repetida)? Apague aqui. O KM e a situação do carro são refeitos.</p>
+  {% if editando.cobranca_repasse_id and editando.cobranca_repasse.status != "cancelada" %}
+  <p class="text-sm font-semibold text-red-800">Esta manutenção já gerou cobrança para o cliente. Cancele a cobrança no Financeiro antes de apagar.</p>
+  {% else %}
+  <button class="w-full rounded border border-red-600 px-4 py-3 font-semibold text-red-700 hover:bg-red-50 sm:w-auto sm:py-2">Apagar manutenção</button>
+  {% endif %}
+</form>
+{% endif %}
 
 <style>
   /* só os campos deste formulário — sem vazar para a busca do cabeçalho */

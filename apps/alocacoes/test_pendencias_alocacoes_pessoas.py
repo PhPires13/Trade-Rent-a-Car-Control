@@ -200,7 +200,7 @@ def test_lista_mostra_divida_e_recebi_so_para_quem_deve(usuario_logado, alocacao
     )
     html = usuario_logado.get("/alocacoes/").content.decode()
     assert html.count(f"/financeiro/receber/?cliente={cliente.pk}") == 2  # cartão + tabela
-    assert "deve R$ 700,00" in html
+    assert "R$ 700,00 vencido" in html  # mesma conta do Quem deve (etapa final)
 
 
 # ---------- revisão: vistoria de devolução não perde o ?voltar= ----------

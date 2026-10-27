@@ -108,12 +108,18 @@ def test_export_despesas_total_fecha_com_as_linhas(usuario_logado, db):
         custos_venda=Decimal("500.00"),
     )
     resposta = usuario_logado.get("/relatorios/?mes=2026-07&exportar=despesas&formato=csv")
-    linhas = [linha for linha in csv.reader(io.StringIO(resposta.content.decode())) if linha]
+    linhas = [
+        linha
+        for linha in csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";")
+        if linha
+    ]
     corpo = [linha for linha in linhas[1:] if linha[2] != "TOTAL"]
     total = next(linha for linha in linhas if linha[2] == "TOTAL")
     origens = {linha[2] for linha in corpo}
     assert {"Multa absorvida pela empresa", "Custos de compra", "Custos de venda"} <= origens
-    assert sum(Decimal(linha[4]) for linha in corpo) == Decimal(total[4])  # a planilha fecha
+    assert sum(Decimal(linha[4].replace(",", ".")) for linha in corpo) == Decimal(
+        total[4].replace(",", ".")
+    )  # a planilha fecha
 
 
 # ---------- ?mes= inválido não derruba os relatórios ----------

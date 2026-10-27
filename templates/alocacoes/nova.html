@@ -32,17 +32,37 @@
         clientes: JSON.parse(document.getElementById('dados-clientes').textContent),
         sugeridoDia: false,
         sugeridaCaucao: false,
+        sugeridoValor: false,
+        contratoAntigo: {{ abrir_contrato_antigo|yesno:'true,false' }},
         campo(nome) { return document.getElementById('id_' + nome) },
         init() {
           const c = this.clientes[this.cliente];
           this.sugeridoDia = !!(c && c.dia !== '' && this.campo('dia_vencimento').value === c.dia);
           this.sugeridaCaucao = !!(c && c.caucao && this.campo('caucao_valor').value === c.caucao);
+          const v = this.veiculos[this.veiculo];
+          this.sugeridoValor = !!(v && v.valor && this.campo('valor_semanal').value === v.valor);
+          this.conferirInicio();
+        },
+        conferirInicio() {
+          // início antigo (contrato que já rodava): abre o campo de cobrar a partir de
+          const valor = this.campo('data_inicio').value;
+          if (!valor) return;
+          const dias = (Date.now() - new Date(valor + 'T12:00:00').getTime()) / 86400000;
+          if (dias > {{ dias_inicio_antigo }}) this.contratoAntigo = true;
         },
         mudou(alvo) {
           if (alvo.name === 'veiculo') {
+            const anterior = this.veiculos[this.veiculo];
             this.veiculo = alvo.value;
             const v = this.veiculos[alvo.value];
             if (v) this.campo('km_entrega').value = v.km;
+            // preço da categoria: só entra se o campo está vazio ou com a sugestão anterior
+            const valor = this.campo('valor_semanal');
+            const intocado = valor.value === '' || (anterior && anterior.valor && valor.value === anterior.valor);
+            if (intocado) {
+              valor.value = (v && v.valor) ? v.valor : '';
+              this.sugeridoValor = !!(v && v.valor);
+            }
           } else if (alvo.name === 'cliente') {
             this.cliente = alvo.value;
             const c = this.clientes[alvo.value];
@@ -55,14 +75,19 @@
             if (this.sugeridaCaucao) this.campo('caucao_valor').value = c.caucao;
           } else if (alvo.name === 'dia_vencimento') {
             this.sugeridoDia = false;
+          } else if (alvo.name === 'data_inicio') {
+            this.conferirInicio();
           }
         }
       }"
       @change="mudou($event.target)"
-      @input="if ($event.target.name === 'caucao_valor') sugeridaCaucao = false">
+      @input="if ($event.target.name === 'caucao_valor') sugeridaCaucao = false; if ($event.target.name === 'valor_semanal') sugeridoValor = false">
   {% csrf_token %}
+  {# token único: toque duplo em "Alocar" não cria nada em dobro #}
+  <input type="hidden" name="token" value="{{ token }}">
   {% include "_erros_form.html" %}
   {% for field in form %}
+  {% if field.name != "cobrar_a_partir_de" and field.name|slice:":10" != "confirmar_" %}
   <div {% if field.name == "franquia_km_mensal" or field.name == "taxa_km_excedido" %}x-show="limite === 'limitado'"{% endif %}>
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
     {% if field.name == "limite_km" %}
@@ -70,21 +95,10 @@
         <option value="ilimitado">Ilimitado</option>
         <option value="limitado">Limitado</option>
       </select>
-    {% elif field.name == "confirmar_divida" %}
-      <p class="mb-1 text-sm text-red-900">{{ form.texto_divida }}</p>
-      <input type="checkbox" name="confirmar_divida" id="{{ field.id_for_label }}" style="width:auto"{% if field.value %} checked{% endif %}>
     {% else %}
       {{ field }}
     {% endif %}
     {% if field.name == "veiculo" %}
-    <template x-if="veiculos[veiculo] && veiculos[veiculo].valor">
-      <p class="mt-1 rounded bg-yellow-50 px-2 py-1.5 text-xs text-yellow-900">
-        Categoria <strong x-text="veiculos[veiculo].categoria"></strong>: preço de referência
-        <strong>R$ <span x-text="veiculos[veiculo].valor"></span></strong>/semana.
-        <button type="button" class="ml-1 py-1 font-semibold underline"
-                @click="campo('valor_semanal').value = veiculos[veiculo].valor">Usar este valor</button>
-      </p>
-    </template>
     <p x-data="{ oficina: JSON.parse(document.getElementById('carros-na-oficina').textContent) }"
        x-show="oficina[veiculo]" x-cloak role="alert"
        class="mt-1 rounded border-l-4 border-orange-400 bg-orange-50 px-2 py-1.5 text-sm text-orange-900">
@@ -92,12 +106,25 @@
       Confira se ele já voltou antes de entregar ao motorista.
     </p>
     {% elif field.name == "cliente" %}
+    <p x-show="clientes[cliente] && clientes[cliente].com_carro" x-cloak role="alert"
+       class="mt-1 rounded border-l-4 border-orange-400 bg-orange-50 px-2 py-1.5 text-sm text-orange-900">
+      <span x-text="clientes[cliente] && clientes[cliente].com_carro"></span>
+      Para ficar com os dois carros, você vai precisar confirmar.
+    </p>
     <p x-show="clientes[cliente] && clientes[cliente].divida" x-cloak role="alert"
        class="mt-1 rounded border-l-4 border-red-400 bg-red-50 px-2 py-1.5 text-sm text-red-900">
       <span x-text="clientes[cliente] && clientes[cliente].divida"></span>
       Para alocar mesmo assim, você vai precisar confirmar.
     </p>
-    {% elif field.name == "confirmar_divida" %}
+    {% elif field.name == "valor_semanal" %}
+    <p x-show="sugeridoValor" x-cloak class="mt-1 rounded bg-blue-50 px-2 py-1 text-xs text-blue-900">
+      Preço da categoria <strong x-text="veiculos[veiculo] && veiculos[veiculo].categoria"></strong> — pode mudar.
+    </p>
+    <p x-show="!sugeridoValor && veiculos[veiculo] && veiculos[veiculo].valor" x-cloak class="mt-1 text-xs text-gray-600">
+      Preço de referência da categoria: R$ <span x-text="veiculos[veiculo] && veiculos[veiculo].valor"></span>/semana.
+      <button type="button" class="ml-1 min-h-11 font-semibold underline sm:min-h-0"
+              @click="campo('valor_semanal').value = veiculos[veiculo].valor; sugeridoValor = true">Usar este valor</button>
+    </p>
     {% elif field.name == "km_entrega" %}
     <p x-show="veiculos[veiculo]" x-cloak class="mt-1 text-xs text-gray-600">Preenchido com o KM que o sistema já tem deste carro — confira no painel.</p>
     {% elif field.name == "dia_vencimento" %}
@@ -108,7 +135,39 @@
     {% if field.help_text and field.name != "dia_vencimento" %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
   </div>
+  {% endif %}
   {% endfor %}
+
+  {# Contrato antigo (carga inicial, D01): abre sozinho com início antigo, valor ou erro #}
+  <details class="rounded border border-gray-200 bg-gray-50 p-3" :open="contratoAntigo"
+           {% if abrir_contrato_antigo %}open{% endif %}>
+    <summary class="flex min-h-11 cursor-pointer items-center text-sm font-medium">Contrato que já rodava antes do sistema?</summary>
+    <div class="mt-2">
+      <label class="mb-1 block text-sm font-medium" for="{{ form.cobrar_a_partir_de.id_for_label }}">{{ form.cobrar_a_partir_de.label }}</label>
+      {{ form.cobrar_a_partir_de }}
+      <p class="mt-1 text-xs text-gray-500">{{ form.cobrar_a_partir_de.help_text }}</p>
+      {% for erro in form.cobrar_a_partir_de.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+    </div>
+  </details>
+
+  {# Confirmações (aparecem só quando há algo fora do normal) #}
+  {% for field in form %}
+  {% if field.name|slice:":10" == "confirmar_" and field.errors or field.name|slice:":10" == "confirmar_" and field.value %}
+  <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
+    {% if field.name == "confirmar_divida" %}<p class="mb-1">{{ form.texto_divida }}</p>
+    {% elif field.name == "confirmar_dois_carros" %}<p class="mb-1">{{ form.texto_dois_carros }}</p>
+    {% elif field.name == "confirmar_km" %}<p class="mb-1">{{ form.texto_km }}</p>
+    {% elif field.name == "confirmar_semanas" %}<p class="mb-1">Serão lançadas {{ form.semanas }} semanas de aluguel de uma vez, todas atrasadas.</p>
+    {% endif %}
+    <label class="flex min-h-11 items-center gap-2 font-semibold" for="{{ field.id_for_label }}">
+      <input type="checkbox" name="{{ field.name }}" id="{{ field.id_for_label }}" style="width:auto"{% if field.value %} checked{% endif %}>
+      {{ field.label }}
+    </label>
+    {% for erro in field.errors %}<p class="mt-1 text-xs text-red-700">{{ erro }}</p>{% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+
   <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
     <button class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 sm:py-2">Alocar carro</button>
     <a href="{% url 'alocacoes:lista' %}" class="px-4 py-2 text-center text-sm text-gray-600 underline">Cancelar</a>

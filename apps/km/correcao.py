@@ -52,12 +52,112 @@ def media_diaria_do_carro(registro):
     return total_km / total_dias
 
 
+def _fontes_de_km():
+    """(rótulo, modelo, campo do carro, campo do KM, campo da data) de cada lançamento."""
+    from apps.alocacoes.models import Alocacao, TrocaTemporaria, Vistoria
+    from apps.manutencao.models import Manutencao
+
+    return [
+        ("manutenção", Manutencao, "veiculo_id", "km", "data"),
+        ("vistoria", Vistoria, "veiculo_id", "km", "data"),
+        ("entrega", Alocacao, "veiculo_id", "km_entrega", "data_inicio"),
+        ("devolução", Alocacao, "veiculo_id", "km_devolucao", "data_termino"),
+        (
+            "retirada do substituto",
+            TrocaTemporaria,
+            "veiculo_substituto_id",
+            "km_retirada",
+            "data_retirada",
+        ),
+        (
+            "devolução do substituto",
+            TrocaTemporaria,
+            "veiculo_substituto_id",
+            "km_devolucao",
+            "data_devolucao",
+        ),
+        ("leitura mensal", RegistroKm, "veiculo_id", "km", "data_leitura"),
+    ]
+
+
+def origens_do_km(kms_por_carro):
+    """{id do carro: (rótulo, data)} para vários carros de uma vez ({id: km}).
+
+    Uma consulta por tipo de lançamento, não por carro (a lista de KM tem a frota toda).
+    """
+    from django.db.models import Q
+
+    achados = {}
+    if not kms_por_carro:
+        return {}
+    for rotulo, modelo, campo_carro, campo_km, campo_data in _fontes_de_km():
+        filtro = Q()
+        for veiculo_id, km in kms_por_carro.items():
+            filtro |= Q(**{campo_carro: veiculo_id, campo_km: km})
+        linhas = (
+            modelo.objects.filter(filtro)
+            .filter(**{f"{campo_data}__isnull": False})
+            .values_list(campo_carro, campo_data)
+        )
+        for veiculo_id, data in linhas:
+            atual = achados.get(veiculo_id)
+            if atual is None or data > atual[1]:
+                achados[veiculo_id] = (rotulo, data)
+    return {veiculo_id: achados.get(veiculo_id, ("cadastro", None)) for veiculo_id in kms_por_carro}
+
+
+def origem_do_km(veiculo, km):
+    """(rótulo, data) do lançamento mais recente que marcou este KM no carro.
+
+    Ex.: ("manutenção", 02/10/2026). Sem lançamento com o número: ("cadastro", None).
+    """
+    return origens_do_km({veiculo.pk: km})[veiculo.pk]
+
+
+def texto_da_origem(rotulo, data):
+    """ "manutenção de 02/10" / "cadastro do carro" — para os avisos e a lista de KM."""
+    if data is None:
+        return "cadastro do carro"
+    return f"{rotulo} de {data:%d/%m}"
+
+
+def _menor_que_o_km_atual(registro):
+    """Aviso quando a leitura nova é menor que o KM que o carro já marcou em outro
+    lançamento (manutenção, devolução, vistoria...). None se não for o caso.
+
+    Só para leitura nova e que seja a mais recente: num mês esquecido (há
+    leitura depois) o número menor é o esperado.
+    """
+    veiculo = registro.veiculo
+    if registro.pk is not None or registro.km >= veiculo.km_atual:
+        return None
+    if registro.registro_seguinte() is not None:
+        return None
+    rotulo, data = origem_do_km(veiculo, veiculo.km_atual)
+    if data is not None and data > registro.data_leitura:
+        return None  # o lançamento com o KM maior é de depois desta leitura: normal
+    if data is None:
+        return (
+            f"Você digitou {milhar(registro.km)} km, mas o cadastro do carro está com "
+            f"{milhar(veiculo.km_atual)} km (o número é menor). Confira o painel. Confirma?"
+        )
+    return (
+        f"Você digitou {milhar(registro.km)} km, mas o carro já marcou "
+        f"{milhar(veiculo.km_atual)} km ({texto_da_origem(rotulo, data)}). "
+        f"Confira o painel. Confirma?"
+    )
+
+
 def suspeita_do_km(registro):
     """Texto do aviso quando o KM digitado foge do normal; None se está ok.
 
     Espera o registro já validado (full_clean) — KM menor que a leitura
-    anterior é bloqueado lá, não chega aqui.
+    anterior é bloqueado lá, não chega aqui. KM menor que o KM atual do carro
+    (vindo de manutenção, devolução, vistoria) também avisa.
     """
+    menor = _menor_que_o_km_atual(registro)
+    if menor:
+        return menor
     digitado = f"Você digitou {milhar(registro.km)} km"
     anterior = registro.registro_anterior()
     if anterior is None:
@@ -137,16 +237,31 @@ def km_atual_recalculado(veiculo):
     return max(km for km in candidatos if km is not None)
 
 
-def _ajustar_km_atual(veiculo, km_errado):
+def _km_do_cadastro_antes(veiculo, km_errado):
+    """Último KM atual do histórico do carro menor que o número errado (0 se não houver)."""
+    anterior = (
+        veiculo.history.filter(km_atual__lt=km_errado)
+        .order_by("-history_date")
+        .values_list("km_atual", flat=True)
+        .first()
+    )
+    return anterior or 0
+
+
+def ajustar_km_atual(veiculo, km_errado):
     """Baixa o KM atual do carro se ele veio da leitura errada. Devolve o aviso.
 
     Só mexe quando o KM atual é exatamente o da leitura corrigida/apagada — se
     outra fonte (devolução, manutenção, cadastro) já o levou além, ela manda.
     """
-    veiculo.refresh_from_db(fields=["km_atual"])
+    veiculo.refresh_from_db(fields=["km_atual", "km_compra"])
     if veiculo.km_atual != km_errado:
         return None
     novo = km_atual_recalculado(veiculo)
+    if novo == (veiculo.km_compra or 0):
+        # Nenhum lançamento além do cadastro: volta ao KM que o cadastro tinha antes
+        # do número errado (senão um carro sem KM de compra iria para 0 km).
+        novo = max(novo, _km_do_cadastro_antes(veiculo, km_errado))
     if novo == veiculo.km_atual:
         if RegistroKm.objects.filter(veiculo=veiculo, km=novo).exists():
             return None  # a leitura continua com esse número (só mudou data/observação)
@@ -300,8 +415,12 @@ def corrigir_leitura(registro, km_errado):
             seguinte = registro.seguinte_reencadeado
             if seguinte is not None:
                 avisos.append(refazer_excedente(seguinte))
-        avisos.append(_ajustar_km_atual(registro.veiculo, km_errado))
+        avisos.append(ajustar_km_atual(registro.veiculo, km_errado))
     return [aviso for aviso in avisos if aviso]
+
+
+#: nome antigo, mantido para quem já importava a função privada
+_ajustar_km_atual = ajustar_km_atual
 
 
 def apagar_leitura(registro):
@@ -344,5 +463,5 @@ def apagar_leitura(registro):
         if seguinte is not None:
             seguinte.save()  # recalcula KM ANT/dias a partir da leitura que sobrou antes
             avisos.append(refazer_excedente(seguinte))
-        avisos.append(_ajustar_km_atual(veiculo, km_errado))
+        avisos.append(ajustar_km_atual(veiculo, km_errado))
     return [aviso for aviso in avisos if aviso]

@@ -72,12 +72,12 @@ def test_planilha_de_receitas_lista_o_adiantamento_depois_do_total(usuario_logad
     resposta = usuario_logado.get(
         "/relatorios/", {"mes": "2026-09", "exportar": "receitas", "formato": "csv"}
     )
-    linhas = list(csv.reader(io.StringIO(resposta.content.decode())))
+    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
     grupos = [linha[0] for linha in linhas]
     i_total = grupos.index("TOTAL DAS RECEITAS")
     i_adiantamento = next(i for i, g in enumerate(grupos) if g.startswith("Adiantamentos"))
     assert i_adiantamento > i_total
-    assert linhas[i_adiantamento][1:] == ["350.0", "Não"]
+    assert linhas[i_adiantamento][1:] == ["350,00", "Não"]
 
 
 # --- "Entrou" com venda de carro avisa ----------------------------------------------
@@ -196,7 +196,7 @@ def test_d09_franquia_cobrada_do_cliente_e_receita_do_carro_na_ficha(veiculo, cl
     # no relatório do mês a franquia (despesa) e o repasse (ND) também se anulam
     receitas = services.receitas_do_mes(2026, 9)
     despesas = services.despesas_do_mes(2026, 9)
-    assert receitas["diversos"] == {"Repasse de sinistro": Decimal("1500.00")}
+    assert receitas["diversos"] == {Cobranca.Origem.REPASSE_SINISTRO.label: Decimal("1500.00")}
     assert despesas["total_franquias"] == Decimal("1500.00")
 
 
@@ -260,4 +260,4 @@ def test_d09_repasse_de_manutencao_e_franquia_somam_no_mesmo_carro(veiculo, clie
 
 def test_ficha_do_carro_explica_que_repasse_inclui_franquia(usuario_logado, veiculo):
     html = usuario_logado.get(f"/frota/veiculo/{veiculo.pk}/ficha/").content.decode()
-    assert "Repasses recebidos (manutenção e franquia)" in html
+    assert "Consertos e franquias cobrados dos clientes" in html

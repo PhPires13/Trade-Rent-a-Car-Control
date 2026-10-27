@@ -38,8 +38,8 @@
         <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">KM anterior</span>{{ registro.km_anterior|milhar }}</td>
         <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Dias</span>{{ registro.dias|default:"—" }}</td>
         <td class="flex justify-between gap-3 py-0.5 font-semibold sm:table-cell sm:px-3 sm:py-2"><span class="font-normal text-gray-500 sm:hidden">KM rodado</span>{{ registro.km_utilizado|milhar }}</td>
-        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/dia</span>{{ registro.media_dia|floatformat:0|default:"—" }}</td>
-        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/mês</span>{{ registro.media_mes|floatformat:0|default:"—" }}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/dia</span>{% if registro.media_dia is not None %}{{ registro.media_dia|floatformat:0|milhar }}{% else %}—{% endif %}</td>
+        <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Média/mês</span>{% if registro.media_mes is not None %}{{ registro.media_mes|floatformat:0|milhar }}{% else %}—{% endif %}</td>
         <td class="block py-0.5 text-gray-500 sm:table-cell sm:px-3 sm:py-2">{{ registro.observacoes|default:"" }}</td>
         <td class="block pt-2 sm:table-cell sm:px-3 sm:py-2 sm:text-right">
           <a href="{% url 'km:corrigir' registro.pk %}"

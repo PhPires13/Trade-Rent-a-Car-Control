@@ -59,5 +59,6 @@ class VeiculoAdmin(SimpleHistoryAdmin):
         "km_atual",
         "mensalidade_protecao",
     ]
+    list_select_related = ["categoria"]
     list_filter = ["status", "uso", "categoria"]
     search_fields = ["placa", "marca_modelo", "renavam", "chassi"]

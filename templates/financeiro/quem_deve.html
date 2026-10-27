@@ -12,7 +12,7 @@
   <p class="text-sm">
     Em aberto: <strong class="text-red-700">{{ total_geral|brl }}</strong>
     de {{ devedores|length }} cliente{{ devedores|length|pluralize }}
-    {% if total_atrasado and total_hoje %}<span class="text-gray-500">({{ total_atrasado|brl }} atrasado + {{ total_hoje|brl }} vence hoje)</span>{% endif %}
+    {% if total_atrasado and total_hoje %}<span class="text-gray-500">({{ total_atrasado|brl }} atrasado e {{ total_hoje|brl }} vence hoje)</span>{% endif %}
   </p>
   {% endif %}
 </div>

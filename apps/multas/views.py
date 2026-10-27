@@ -92,6 +92,8 @@ def lista(request):
             "ativo": tarefa == chave,
         }
         for chave, rotulo in services.TAREFAS
+        # "Definir responsável" só aparece quando há o que definir
+        if chave != "definir" or contadores[chave] or tarefa == chave
     ]
     return render(
         request,
@@ -205,7 +207,12 @@ def quem_estava(request):
 
 def indicar_fici(request, multa_id):
     multa = get_object_or_404(Multa, pk=multa_id)
-    if request.method == "POST" and multa.fici_status != Multa.Fici.PENDENTE:
+    if request.method == "POST" and multa.anulada:
+        messages.info(
+            request,
+            f"Esta multa está como “{multa.get_resultado_display()}” — não há condutor a indicar.",
+        )
+    elif request.method == "POST" and multa.fici_status != Multa.Fici.PENDENTE:
         # aba antiga/clique repetido: não desfaz uma NIC nem troca a data já gravada
         messages.info(
             request,
@@ -223,9 +230,24 @@ def indicar_fici(request, multa_id):
 def registrar_nic(request, multa_id):
     multa = get_object_or_404(Multa, pk=multa_id)
     if request.method == "POST":
+        if multa.anulada:
+            # cancelada / advertência / não exigível: não há condutor a indicar nem NIC
+            messages.info(
+                request,
+                f"Esta multa está como “{multa.get_resultado_display()}” — não há NIC a registrar.",
+            )
+            return _voltar_para_lista(request)
         if multa.fici_status == Multa.Fici.INDICADO:
             # aba antiga: o motorista já foi indicado, não há NIC a registrar
-            messages.error(request, "O motorista desta multa já foi indicado — não há NIC.")
+            messages.info(request, "O motorista desta multa já foi indicado — não há NIC.")
+            return _voltar_para_lista(request)
+        if multa.fici_status != Multa.Fici.PENDENTE:
+            # aba antiga, NIC já registrada ou multa que já é uma NIC (NIC de NIC)
+            messages.info(
+                request,
+                "A indicação do motorista desta multa já está como "
+                f"“{multa.get_fici_status_display()}” — não há NIC a registrar.",
+            )
             return _voltar_para_lista(request)
         if multa.fici_prazo and multa.fici_prazo >= date.today():
             # dentro do prazo ainda dá para indicar — a NIC criaria multa à toa (UX #13)

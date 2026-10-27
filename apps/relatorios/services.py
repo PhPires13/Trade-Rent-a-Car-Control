@@ -3,7 +3,8 @@
 from calendar import monthrange
 from datetime import date
 
-from django.db.models import Q, Sum
+from django.db.models import Sum
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 
 from apps.financeiro.models import (
     ZERO,
@@ -87,17 +88,19 @@ def despesas_do_mes(ano, mes):
     fim_mes = date(ano, mes, monthrange(ano, mes)[1])
     frota_protegida = (
         Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO, mensalidade_protecao__isnull=False)
-        .filter(Q(data_aquisicao__isnull=True) | Q(data_aquisicao__lte=fim_mes))
+        # sem data de aquisição não há como saber desde quando o carro existe:
+        # nada a lançar (mesma regra de meses_de_protecao na ficha do carro)
+        .filter(data_aquisicao__lte=fim_mes)
         .exclude(data_venda__lt=inicio_mes)
         .exclude(data_venda__isnull=True, status=Veiculo.Status.VENDIDO)
     )
     total_protecao = sum((v.mensalidade_protecao for v in frota_protegida), ZERO)
-    franquias = Sinistro.objects.filter(
-        data_evento__year=ano,
-        data_evento__month=mes,
-        franquia_valor__isnull=False,
-        veiculo__uso=LOCACAO,
-    ).select_related("veiculo")
+    franquias = (
+        _franquias()
+        .filter(data_ref__year=ano, data_ref__month=mes)
+        .select_related("veiculo")
+        .order_by("data_ref")
+    )
     total_franquias = sum((s.franquia_valor for s in franquias), ZERO)
     vendas = _veiculos_da_locadora().filter(
         data_venda__year=ano, data_venda__month=mes, custos_venda__isnull=False
@@ -150,6 +153,14 @@ def despesas_do_mes(ano, mes):
             + total_ipva
         ),
     }
+
+
+def _franquias():
+    """Franquias da locação com `data_ref`: data do evento na associação ou,
+    sem ela (dado antigo / Admin), a data do sinistro — nenhuma fica de fora."""
+    return Sinistro.objects.filter(franquia_valor__isnull=False, veiculo__uso=LOCACAO).annotate(
+        data_ref=Coalesce("data_evento", "data")
+    )
 
 
 def _meses_da_serie(ano, mes, quantidade):
@@ -212,13 +223,15 @@ def serie_mensal(ano, mes, quantidade=6):
         "data",
         "custo_real",
     )
-    franquias = _somas_por_mes(
-        Sinistro.objects.filter(
-            data_evento__range=(inicio, fim), franquia_valor__isnull=False, veiculo__uso=LOCACAO
-        ),
-        "data_evento",
-        "franquia_valor",
-    )
+    # data_ref é anotação: o "__year" em values_list não chega nela — Extract direto
+    franquias = {
+        (ano_f, mes_f): total or ZERO
+        for ano_f, mes_f, total in _franquias()
+        .filter(data_ref__range=(inicio, fim))
+        .annotate(ano_ref=ExtractYear("data_ref"), mes_ref=ExtractMonth("data_ref"))
+        .values_list("ano_ref", "mes_ref")
+        .annotate(t=Sum("franquia_valor"))
+    }
     custos_venda = _somas_por_mes(
         _veiculos_da_locadora().filter(data_venda__range=(inicio, fim), custos_venda__isnull=False),
         "data_venda",
@@ -258,7 +271,8 @@ def serie_mensal(ano, mes, quantidade=6):
             (
                 v["mensalidade_protecao"]
                 for v in protegidos
-                if (v["data_aquisicao"] is None or v["data_aquisicao"] <= fim_mes)
+                if v["data_aquisicao"] is not None
+                and v["data_aquisicao"] <= fim_mes
                 and not (v["data_venda"] and v["data_venda"] < inicio_mes)
             ),
             ZERO,

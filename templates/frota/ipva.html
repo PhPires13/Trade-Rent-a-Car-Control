@@ -35,7 +35,8 @@
       {% for field in form.visible_fields %}
       {% if field.name != "DELETE" %}
       <div>
-        <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {# ano, parcela e valor são exigidos ao lançar: sem a marca "(opcional)" do ux.js #}
+        <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}"{% if field.name == "ano" or field.name == "parcela" or field.name == "valor" %} data-ux-opcional="1"{% endif %}>{{ field.label }}</label>
         {{ field }}
         {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
       </div>

@@ -42,10 +42,22 @@
              placeholder="saiu com {{ troca.km_retirada|milhar }}" required>
       <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da retirada ({{ troca.km_retirada|milhar }} km).</p>
     </div>
+    {% if oficina_principal %}
+    <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
+      <p><strong>{{ troca.alocacao.veiculo.placa }}</strong> ainda consta na oficina desde
+        {{ oficina_principal.data_entrada|date:"d/m" }}. Ele já voltou?
+        <a href="{% url 'manutencao:voltou' oficina_principal.pk %}?volta={{ request.get_full_path|urlencode }}"
+           class="inline-flex min-h-11 items-center font-semibold underline">Marque “Carro voltou da oficina”</a></p>
+      <label class="mt-1 flex min-h-11 items-center gap-2 font-semibold">
+        <input type="checkbox" name="confirmar_oficina" value="1" style="width:auto"{% if request.POST.confirmar_oficina %} checked{% endif %}>
+        Confirmo: o cliente vai voltar para o {{ troca.alocacao.veiculo.placa }}
+      </label>
+    </div>
+    {% endif %}
     {% if aviso_km %}
           <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
             <p>{{ aviso_km }}</p>
-            <label class="mt-2 flex items-center gap-2 font-semibold">
+            <label class="mt-2 flex min-h-11 items-center gap-2 font-semibold">
               <input type="checkbox" name="confirmar_km" value="1" style="width:auto"> Confirmo o KM
             </label>
           </div>

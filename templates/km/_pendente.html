@@ -21,9 +21,9 @@
 
   <div class="mt-1 text-sm text-gray-700 sm:mt-0">
     <span class="sm:hidden">Última: </span>
-    {% if veiculo.ultimo_km is not None %}
-      <strong class="font-semibold sm:font-normal">{{ veiculo.ultimo_km|milhar }} km</strong>
-      <span class="text-gray-500 sm:block sm:text-xs">em {{ veiculo.ultima_leitura|date:"d/m/Y" }}</span>
+    {% if veiculo.maior_km is not None %}
+      <strong class="font-semibold sm:font-normal">{{ veiculo.maior_km|milhar }} km</strong>
+      <span class="text-gray-500 sm:block sm:text-xs">{% if veiculo.maior_km_data %}em {{ veiculo.maior_km_data|date:"d/m/Y" }}{% if veiculo.maior_km_origem and veiculo.maior_km_origem != "leitura mensal" %} ({{ veiculo.maior_km_origem }}){% endif %}{% else %}KM do cadastro{% endif %}</span>
     {% else %}
       <strong class="font-semibold sm:font-normal">{{ veiculo.km_atual|milhar }} km</strong>
       <span class="text-gray-500 sm:block sm:text-xs">KM do cadastro (sem leitura anterior)</span>
@@ -51,7 +51,7 @@
     <input id="km-{{ veiculo.pk }}-valor" type="text" name="km" required
            inputmode="numeric" enterkeyhint="go" autocomplete="off"
            value="{{ estado.km|default:'' }}"
-           placeholder="ex.: {% if veiculo.ultimo_km is not None %}{{ veiculo.ultimo_km|add:1000 }}{% else %}{{ veiculo.km_atual|add:1000 }}{% endif %}"
+           placeholder="ex.: {% if veiculo.maior_km is not None %}{{ veiculo.maior_km|add:1000 }}{% else %}{{ veiculo.km_atual|add:1000 }}{% endif %}"
            {% if estado.erro %}aria-invalid="true" data-focar-campo{% endif %}
            class="w-full rounded border border-gray-300 px-3 py-3 text-xl sm:w-32 sm:px-2 sm:py-1 sm:text-sm">
   </div>

@@ -69,10 +69,16 @@
     <dl class="mt-3 space-y-0.5 border-t border-gray-100 pt-2 text-sm">
       <div class="flex justify-between">
         <dt class="text-gray-500">Saldo devedor</dt>
-        <dd class="{% if card.saldo_devedor > 0 %}font-bold text-red-700{% else %}text-gray-600{% endif %}">
-          {{ card.saldo_devedor|brl }}
+        <dd class="{% if card.vencido > 0 %}font-bold text-red-700{% else %}text-gray-600{% endif %}">
+          {% if card.vencido > 0 %}{{ card.vencido|brl }} vencido{% elif card.a_vencer > 0 %}nada vencido{% else %}{{ card.saldo_devedor|brl }}{% endif %}
         </dd>
       </div>
+      {% if card.a_vencer > 0 %}
+      <div class="flex justify-between">
+        <dt class="text-gray-500">A vencer</dt>
+        <dd class="text-gray-600">{{ card.a_vencer|brl }}</dd>
+      </div>
+      {% endif %}
       {% if card.credito > 0 %}
       <div class="flex justify-between">
         <dt class="text-gray-500">Crédito</dt>

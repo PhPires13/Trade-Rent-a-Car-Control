@@ -1,8 +1,8 @@
 import re
-from datetime import date
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.formatos import milhar
 
@@ -34,10 +34,21 @@ def km_digitado(texto):
 
 def data_nao_futura(data, hoje=None):
     """Leitura é do odômetro que alguém olhou — não pode ser de um dia que ainda não chegou."""
-    if data > (hoje or date.today()):
+    if data > (hoje or timezone.localdate()):
         raise ValidationError(
             f"A data {data:%d/%m/%Y} ainda não chegou — use a data em que olhou o painel."
         )
+    return data
+
+
+#: Data com ano fora disso é erro de digitação (e 0001 quebrava a conta do mês anterior).
+ANO_MINIMO = 2000
+
+
+def ano_razoavel(data, hoje=None):
+    """Recusa ano torto (ex.: 0001 ou 20026) antes de qualquer conta com a data."""
+    if not ANO_MINIMO <= data.year <= (hoje or timezone.localdate()).year + 1:
+        raise ValidationError("Confira o ano da data (ex.: 2026).")
     return data
 
 
@@ -78,7 +89,7 @@ class CorrecaoLeituraForm(forms.ModelForm):
         }
 
     def clean_data_leitura(self):
-        data = data_nao_futura(self.cleaned_data["data_leitura"])
+        data = data_nao_futura(ano_razoavel(self.cleaned_data["data_leitura"]))
         if not leitura_cabe_no_mes(data, self.instance.mes_referencia):
             raise forms.ValidationError(
                 f"A data precisa ficar em {self.instance.mes_referencia:%m/%Y} (ou nos "

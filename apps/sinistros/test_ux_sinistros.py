@@ -1,6 +1,6 @@
 """Proposta #10 (sinistros): edição, formulário em blocos, aviso ao vivo e lista."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -250,7 +250,8 @@ def test_data_no_futuro_e_recusada(usuario_logado, veiculo):
         reverse("sinistros:novo"),
         {
             "veiculo": veiculo.pk,
-            "data": "2999-01-01",
+            # ano plausível: um ano absurdo cai antes no "Confira o ano"
+            "data": (date.today() + timedelta(days=30)).isoformat(),
             "tipo": "colisao",
             "envolvido": "associado",
             "responsabilidade": "indefinida",

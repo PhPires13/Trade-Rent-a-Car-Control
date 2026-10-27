@@ -162,7 +162,7 @@ def test_frota_vira_cartoes_no_celular(usuario_logado, cenario):
 
 def test_planilha_de_receitas_tem_total_e_caucao_depois(usuario_logado, cenario):
     resposta = usuario_logado.get("/relatorios/?mes=2026-07&exportar=receitas&formato=csv")
-    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig"))))
+    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
     grupos = [linha[0] for linha in linhas]
     i_total = grupos.index("TOTAL DAS RECEITAS")
     i_caucao = next(i for i, g in enumerate(grupos) if g.startswith("Caução recebida"))
@@ -206,11 +206,14 @@ def test_exportar_com_ano_absurdo_nao_quebra(usuario_logado, db):
     assert resposta.status_code == 200
 
 
-def test_mes_futuro_sem_seta_pra_frente_mas_com_voltar(usuario_logado, db):
+def test_mes_futuro_cai_no_mes_atual_com_aviso(usuario_logado, db):
+    # qualidade final: mês que ainda não começou mostra o mês atual e avisa
     hoje = date.today()
-    html = usuario_logado.get(f"/relatorios/?mes={hoje.year + 1}-01").content.decode()
+    resposta = usuario_logado.get(f"/relatorios/?mes={hoje.year + 1}-01")
+    html = resposta.content.decode()
+    assert (resposta.context["ano"], resposta.context["mes"]) == (hoje.year, hoje.month)
     assert "próximo mês" not in html
-    assert "voltar para o mês de hoje" in html
+    assert "Mês inválido — mostrando o mês atual" in html
 
 
 def test_caucao_fora_da_tabela_de_receitas(usuario_logado, cenario):
@@ -224,7 +227,7 @@ def test_caucao_fora_da_tabela_de_receitas(usuario_logado, cenario):
 
 def test_planilha_total_soma_as_linhas_de_receita(usuario_logado, cenario):
     resposta = usuario_logado.get("/relatorios/?mes=2026-07&exportar=receitas&formato=csv")
-    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig"))))
+    linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
     grupos = [linha[0] for linha in linhas]
     i_total = grupos.index("TOTAL DAS RECEITAS")
 

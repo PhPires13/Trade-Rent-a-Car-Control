@@ -1,10 +1,14 @@
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from urllib.parse import urlsplit
 
 from django.conf import settings
-from django.db.models import Count, Max, Q
+from django.contrib.auth import views as auth_views
+from django.contrib.auth.decorators import login_not_required
+from django.db.models import Count, Max, OuterRef, Q, Subquery
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.static import serve
 
@@ -176,40 +180,66 @@ def _alugueis_da_semana(semana, hoje):
     Devolve (valor, alocações com semana vencida e não lançada há mais de 1 dia
     — sinal de rotina parada). Uma query só; usa o valor semanal da alocação
     (troca temporária com valor ajustado entra quando a cobrança for lançada).
+
+    Mesma conta de financeiro.services._proximo_vencimento e
+    gerar_cobrancas_semanais: a âncora é a última cobrança de aluguel e o
+    período que ela já pagou. Depois de mudar o dia de vencimento, o 1º dia
+    novo pode ser uma data que já passou (ou cair dentro do período já pago):
+    só conta como "não lançada" a semana cujos dias a cobrar já começaram há
+    mais de 1 dia — senão o painel acusava "rotina parada" à toa.
     """
     inicio, fim = semana
+    aluguel = Q(cobrancas__origem=Cobranca.Origem.ALUGUEL)
+    ultima_cobranca = Cobranca.objects.filter(
+        alocacao=OuterRef("pk"), origem=Cobranca.Origem.ALUGUEL
+    ).order_by("-vencimento")
     alocacoes = Alocacao.objects.filter(
         status=Alocacao.Status.ATIVA, data_inicio__lte=fim
     ).annotate(
-        ultima=Max("cobrancas__vencimento", filter=Q(cobrancas__origem=Cobranca.Origem.ALUGUEL))
+        ultima=Max("cobrancas__vencimento", filter=aluguel),
+        ultima_fim=Subquery(ultima_cobranca.values("periodo_fim")[:1]),
     )
     previsto, atrasadas = ZERO, 0
     for alocacao in alocacoes:
-        # mesma conta de financeiro.services._proximo_vencimento e
-        # gerar_cobrancas_semanais, sem 1 query por carro
         dia = alocacao.dia_vencimento
         if alocacao.ultima:
             data = _proximo_dia(alocacao.ultima + timedelta(days=1), dia)
+            # primeiro dia ainda não pago (antigas, sem período: a semana do vencimento)
+            nao_pago = (alocacao.ultima_fim or alocacao.ultima + timedelta(days=6)) + timedelta(
+                days=1
+            )
         else:
             # 1ª cobrança: no "cobrar a partir de" (contrato antigo, D01) ou na
             # entrega, proporcional até o 1º dia de pagar (D12)
-            data = alocacao.cobrar_a_partir_de or alocacao.data_inicio
+            data = nao_pago = alocacao.cobrar_a_partir_de or alocacao.data_inicio
         # pré-paga: semana que começa no dia do término (ou depois) não é devida
         termino = alocacao.data_termino and alocacao.data_termino - timedelta(days=1)
-        if data < hoje - timedelta(days=1) and (not termino or data <= termino):
-            atrasadas += 1
-        limite = min(fim, termino) if termino else fim
-        while data <= limite:
+        primeira_devida = True
+        while data <= fim:
+            if alocacao.data_termino and nao_pago >= alocacao.data_termino:
+                break
             proximo = _proximo_dia(data + timedelta(days=1), dia)
-            if data >= inicio:
-                dias = (proximo - data).days
-                previsto += (
-                    alocacao.valor_semanal
-                    if dias == 7
-                    else (alocacao.valor_semanal * dias / 7).quantize(
-                        Decimal("0.01"), ROUND_HALF_UP
+            dias = (proximo - nao_pago).days
+            if dias > 0:  # vencimento que ainda cobra algum dia (senão a rotina o pula)
+                if primeira_devida:
+                    primeira_devida = False
+                    # mudou o dia de vencimento: o 1º dia novo pode ser uma data que já
+                    # passou, mas o que ele cobra (a partir de `nao_pago`) ainda não
+                    # começou — nada de uso ficou sem cobrança, a rotina não está parada
+                    devido_desde = max(data, nao_pago)
+                    if devido_desde < hoje - timedelta(days=1) and (
+                        not termino or data <= termino
+                    ):
+                        atrasadas += 1
+                if inicio <= data <= fim and (not termino or data <= termino):
+                    previsto += (
+                        alocacao.valor_semanal
+                        if dias == 7
+                        else (alocacao.valor_semanal * dias / 7).quantize(
+                            Decimal("0.01"), ROUND_HALF_UP
+                        )
                     )
-                )
+                nao_pago = proximo
             data = proximo
     return previsto, atrasadas
 
@@ -259,7 +289,7 @@ def painel(request):
     Cada bloco consulta em lote: o número de queries não acompanha o tamanho
     da frota nem o de cobranças (config/tests.py mede os dois).
     """
-    hoje = date.today()
+    hoje = timezone.localdate()
     veiculos = Veiculo.objects.exclude(status=Veiculo.Status.VENDIDO)
     status_no_painel = [
         (valor, rotulo)
@@ -288,6 +318,8 @@ def painel(request):
         Cobranca.com_quitacao_anotada(
             Cobranca.objects.filter(
                 Q(status=Cobranca.Status.ATRASADO)
+                # judicial também é dívida vencida: o card bate com "Quem deve"
+                | Q(status=Cobranca.Status.JUDICIAL, vencimento__lt=hoje)
                 | Q(
                     status__in=[Cobranca.Status.PENDENTE, Cobranca.Status.PARCIAL],
                     vencimento__lt=hoje,
@@ -330,7 +362,11 @@ def painel(request):
         "percentual_semana": (
             min(100, round(100 * semana_recebido / semana_total)) if semana_total else 0
         ),
-        "atrasado_total": sum((c.saldo for c in atrasadas), ZERO),
+        "atrasado_total": sum((c.saldo for c in atrasadas if c.saldo > ZERO), ZERO),
+        "atrasado_judicial": sum(
+            (c.saldo for c in atrasadas if c.status == Cobranca.Status.JUDICIAL and c.saldo > ZERO),
+            ZERO,
+        ),
         "inadimplentes": Cliente.objects.filter(status=Cliente.Status.INADIMPLENTE),
         "nds_abertas": Cobranca.objects.filter(
             origem=Cobranca.Origem.NOTA_DEBITO, status__in=Cobranca.STATUS_EM_ABERTO
@@ -343,3 +379,33 @@ def painel(request):
         **resumo_do_dia(hoje),
     }
     return render(request, "painel.html", contexto)
+
+
+class Entrar(auth_views.LoginView):
+    """Login: quem já está logado vai direto ao Painel; "next" para /sair/ é ignorado.
+
+    Sem o 2º ajuste, entrar depois de abrir /sair/ deslogado caía de novo na
+    pergunta "Deseja sair?" logo após digitar a senha.
+    """
+
+    template_name = "login.html"
+    redirect_authenticated_user = True
+
+    def get_redirect_url(self):
+        destino = super().get_redirect_url()
+        if destino and urlsplit(destino).path == reverse("logout"):
+            return ""
+        return destino
+
+
+@login_not_required
+def sair(request):
+    """GET mostra "Deseja sair?" com botão; o POST (botão do menu) sai de fato.
+
+    Antes, abrir /sair/ pelo endereço dava página em branco (405).
+    """
+    if request.method == "POST":
+        return auth_views.LogoutView.as_view()(request)
+    if not request.user.is_authenticated:
+        return redirect("login")
+    return render(request, "sair.html")

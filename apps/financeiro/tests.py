@@ -439,6 +439,7 @@ def test_receber_pela_tela_com_sobra(usuario_logado, alocacao, cliente):
             "cliente": cliente.pk,
             "valor": "700,00",
             "data": "2026-07-01",
+            "confirmar_mes_passado": "1",  # pagamento de mês já fechado no DAS
             "forma": "pix",
             "sobra_destino": "credito",
             f"aplicar_{cobranca.pk}": "650,00",

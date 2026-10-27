@@ -44,6 +44,15 @@ class OrgaoAutuador(models.Model):
         return self.nome
 
 
+class MultaQuerySet(models.QuerySet):
+    def fici_pendente(self):
+        """FICI ainda por indicar — sem as multas anuladas (cancelada, advertência,
+        não exigível): nessas não há mais condutor a indicar."""
+        return self.filter(fici_status=Multa.Fici.PENDENTE).exclude(
+            resultado__in=Multa.RESULTADOS_ANULADORES
+        )
+
+
 class Multa(models.Model):
     """Multa/autuação com FICI, trâmite e repasse (docs.md §4.7)."""
 
@@ -171,6 +180,8 @@ class Multa(models.Model):
 
     history = HistoricalRecords()
 
+    objects = MultaQuerySet.as_manager()
+
     class Meta:
         verbose_name = "multa"
         ordering = ["-data_infracao"]
@@ -255,11 +266,19 @@ class Multa(models.Model):
         if self.paga_pelo_cliente:
             # o motorista pagou o boleto direto ao órgão: cobrar de novo seria em dobro
             return "Não se aplica (pago pelo cliente)"
-        if self.responsavel == self.Responsavel.CLIENTE and self.cliente_id is None:
+        if (
+            self.responsavel in (self.Responsavel.CLIENTE, self.Responsavel.CONDUTOR)
+            and self.cliente_id is None
+        ):
             # ninguém estava com o carro na data: não há de quem cobrar — o dono decide
             # (condutor identificado, empresa absorve ou vendedor anterior)
             return "Sem cliente: definir responsável"
         return "A cobrar"
+
+    @property
+    def anulada(self):
+        """Cancelada, convertida em advertência ou não exigível: nada a pagar nem indicar."""
+        return self.resultado in self.RESULTADOS_ANULADORES
 
     #: valor de `pago_por` gravado pelo botão "Cliente" de "Marcar paga"
     PAGO_POR_CLIENTE = "Cliente"

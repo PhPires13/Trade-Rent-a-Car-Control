@@ -47,6 +47,10 @@
         <h2 class="font-semibold">Vistoria de devolução</h2>
         {% if vistoria_devolucao %}
         <p class="text-sm text-gray-700">Feita em {{ vistoria_devolucao.data|date:"d/m/Y" }}{% if vistoria_devolucao.km %} — {{ vistoria_devolucao.km|milhar }} km{% endif %}.</p>
+        {% if not data_da_vistoria %}
+        <p class="mt-1 text-sm text-yellow-900">Essa vistoria já tem alguns dias. Se o carro está voltando agora, confira o KM no painel ou
+          <a href="{{ url_vistoria_devolucao }}" class="inline-flex min-h-11 items-center font-semibold underline sm:min-h-0">faça uma nova vistoria</a>.</p>
+        {% endif %}
         {% else %}
         <p class="text-sm text-yellow-900"><strong>Ainda não feita.</strong> Confira o carro com o cliente presente: marcas, combustível e KM.</p>
         <a href="{{ url_vistoria_devolucao }}"
@@ -87,7 +91,10 @@
             <label class="mb-1 block text-sm font-medium" for="data_termino">Data em que o carro voltou</label>
             <input type="date" name="data_termino" id="data_termino"
                    value="{% firstof request.POST.data_termino data_sugerida|date:'Y-m-d' %}"
-                   min="{{ alocacao.data_inicio|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required>
+                   min="{{ data_minima|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required>
+            {% if data_da_vistoria and not request.POST.data_termino %}
+            <p class="mt-1 text-xs text-blue-900">Preenchido com a data da vistoria de devolução — confira.</p>
+            {% endif %}
             <p class="mt-1 text-xs text-gray-500">Não pode ser no futuro: as semanas são cobradas até esta data.</p>
           </div>
           <div>
@@ -103,7 +110,7 @@
           {% if aviso_km %}
           <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
             <p>{{ aviso_km }}</p>
-            <label class="mt-2 flex items-center gap-2 font-semibold">
+            <label class="mt-2 flex min-h-11 items-center gap-2 font-semibold">
               <input type="checkbox" name="confirmar_km" value="1" style="width:auto"> Confirmo o KM
             </label>
           </div>

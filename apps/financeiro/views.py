@@ -1,6 +1,6 @@
 import csv
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -10,10 +10,11 @@ from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, OuterRef, Prefetch, Subquery, Sum
+from django.db.models import Count, Exists, OuterRef, Prefetch, Subquery, Sum
 from django.http import Http404, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import urlencode
 
 from apps.campos import CampoDinheiro, exibir_dinheiro
@@ -31,7 +32,7 @@ from .models import (
     NotaDebito,
     Recebimento,
 )
-from .periodos import ano_mes
+from .periodos import ANO_MINIMO, ano_mes, mes_padrao_do_das, navegacao_de_meses
 
 COBRANCAS_POR_PAGINA = 50
 
@@ -119,11 +120,12 @@ def _envio_unico(request, chave, token):
 FILTROS_DO_PAINEL = ("status", "origem", "pagina")
 
 
-def _voltar_ao_painel(request):
+def _voltar_ao_painel(request, cobranca=None):
     """Volta para onde a pessoa estava: filtros + página do painel, ou a lista de NDs.
 
     O campo "voltar" é remontado só com os parâmetros conhecidos do próprio
-    painel — nunca vira outro endereço.
+    painel — nunca vira outro endereço. Com a cobrança, volta na linha dela
+    (âncora #cobranca-<pk>), e não no topo da lista.
     """
     voltar = request.POST.get("voltar", "")
     if voltar == "nds":
@@ -131,14 +133,35 @@ def _voltar_ao_painel(request):
     recebidos = QueryDict(voltar.lstrip("?"))
     filtros = {chave: recebidos[chave][:30] for chave in FILTROS_DO_PAINEL if recebidos.get(chave)}
     destino = reverse("financeiro:cobrancas")
-    return redirect(f"{destino}?{urlencode(filtros)}" if filtros else destino)
+    if filtros:
+        destino += f"?{urlencode(filtros)}"
+    if cobranca is not None:
+        destino += f"#cobranca-{cobranca.pk}"
+    return redirect(destino)
+
+
+def _anotar_encargos(queryset):
+    """Soma e quantidade de encargos não cancelados de cada cobrança (sugestão sem N+1)."""
+    encargos = (
+        Cobranca.objects.filter(cobranca_origem=OuterRef("pk"))
+        .exclude(status=Cobranca.Status.CANCELADA)
+        .values("cobranca_origem")
+    )
+    return queryset.annotate(
+        encargo_aplicado=Subquery(encargos.annotate(t=Sum("valor")).values("t")),
+        encargos_ativos=Subquery(encargos.annotate(n=Count("pk")).values("n")),
+    )
 
 
 def _cobrancas_devidas(cliente):
     """O que o cliente ainda deve (judicial inclusa), com o saldo anotado em lote."""
     return list(
-        Cobranca.com_quitacao_anotada(
-            cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS).order_by("vencimento")
+        _anotar_encargos(
+            Cobranca.com_quitacao_anotada(
+                cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS).order_by(
+                    "vencimento", "pk"
+                )
+            )
         )
     )
 
@@ -168,15 +191,22 @@ def cobrancas(request):
         .values("cobranca_origem")
     )
     qs = Cobranca.com_quitacao_anotada(
-        Cobranca.objects.select_related("cliente", "alocacao__veiculo")
+        Cobranca.objects.select_related("cliente", "alocacao__veiculo", "nota_debito")
     ).annotate(
         encargo_aplicado=Subquery(encargos.annotate(t=Sum("valor")).values("t")),
         encargos_ativos=Subquery(encargos.annotate(n=Count("pk")).values("n")),
+        # o aviso de cancelar a ND só fala de multas quando ela tem multa
+        nd_com_multas=Exists(
+            ItemNotaDebito.objects.filter(
+                nota_debito_id=OuterRef("nota_debito_id"), multa__isnull=False
+            )
+        ),
     )
     status = request.GET.get("status", "abertas")
     origem = request.GET.get("origem", "")
     if status == "abertas":
-        qs = qs.filter(status__in=Cobranca.STATUS_EM_ABERTO)
+        # judicial também é dívida em aberto: aparece, com o selo "Na Justiça"
+        qs = qs.filter(status__in=Cobranca.STATUS_DEVIDOS)
     elif status != "todas":
         qs = qs.filter(status=status)
     if origem:
@@ -187,7 +217,7 @@ def cobrancas(request):
     cronologica = status in ("abertas", "pendente", "parcial", "atrasado", "judicial")
     qs = qs.order_by(*(("vencimento", "pk") if cronologica else ("-vencimento", "-pk")))
     pagina = Paginator(qs, COBRANCAS_POR_PAGINA).get_page(request.GET.get("pagina"))
-    hoje = date.today()
+    hoje = timezone.localdate()
     abertas_por_cliente = _abertas_por_cliente({c.cliente_id for c in pagina.object_list})
     clientes_com_link = set()
     linhas = []
@@ -241,10 +271,13 @@ def aplicar_encargo(request, cobranca_id):
     cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
     if request.method == "POST":
         try:
-            valor = _dinheiro(
-                request.POST.get("valor", ""),
-                "Valor do encargo inválido — digite só números (ex.: 45,00).",
-            )
+            # aceita "5%"/"10%": vira reais sobre o que falta pagar do aluguel
+            valor = services.valor_do_encargo(request.POST.get("valor", ""), cobranca)
+            if valor is None:
+                valor = _dinheiro(
+                    request.POST.get("valor", ""),
+                    "Valor do encargo inválido — digite só números (ex.: 45,00) ou 5% / 10%.",
+                )
             services.aplicar_encargo(cobranca, valor)
             messages.success(request, f"Encargo de {brl(valor)} aplicado.")
         except (ValidationError, KeyError, InvalidOperation) as erro:
@@ -258,7 +291,7 @@ def aplicar_encargo(request, cobranca_id):
                     )
                 ),
             )
-    return _voltar_ao_painel(request)
+    return _voltar_ao_painel(request, cobranca)
 
 
 def marcar_judicial(request, cobranca_id):
@@ -267,11 +300,11 @@ def marcar_judicial(request, cobranca_id):
         if cobranca.status not in Cobranca.STATUS_EM_ABERTO:
             # paga/cancelada/já judicial: não reabrir dívida encerrada por clique repetido
             messages.error(request, "Só cobrança em aberto pode ir para cobrança judicial.")
-            return _voltar_ao_painel(request)
+            return _voltar_ao_painel(request, cobranca)
         cobranca.status = Cobranca.Status.JUDICIAL
         cobranca.save(update_fields=["status"])
         messages.success(request, f"'{cobranca.descricao}' marcada como cobrança judicial.")
-    return _voltar_ao_painel(request)
+    return _voltar_ao_painel(request, cobranca)
 
 
 def reabrir_judicial(request, cobranca_id):
@@ -290,7 +323,7 @@ def reabrir_judicial(request, cobranca_id):
                 f"'{cobranca.descricao}' saiu da cobrança judicial "
                 f"(status: {cobranca.get_status_display()}).",
             )
-    return _voltar_ao_painel(request)
+    return _voltar_ao_painel(request, cobranca)
 
 
 def cancelar(request, cobranca_id):
@@ -315,7 +348,7 @@ def cancelar(request, cobranca_id):
             cobranca.status = Cobranca.Status.CANCELADA
             cobranca.save(update_fields=["status"])
             messages.success(request, f"Cancelada (não será cobrada): {cobranca.descricao}.")
-    return _voltar_ao_painel(request)
+    return _voltar_ao_painel(request, cobranca)
 
 
 @transaction.atomic
@@ -383,9 +416,153 @@ def _resumo_do_recibo(request, cliente):
     if recebimento is None:  # desfeito ou de outro cliente: some sem erro
         return None
     resumo = services.resumo_recebimento(recebimento)
+    # crédito usado junto com o dinheiro novo (?recibo_credito=<pk>): entra no resumo
+    credito_id = request.GET.get("recibo_credito", "")
+    junto = (
+        Recebimento.objects.filter(
+            pk=credito_id, cliente=cliente, forma=Recebimento.Forma.CREDITO
+        ).first()
+        if _id_valido(credito_id)
+        else None
+    )
+    resumo["recebimento_credito"] = junto
+    if junto is not None:
+        services.juntar_resumo_do_credito(resumo, junto)
     resumo["link_whatsapp"] = recibo.link_recibo(resumo)
     resumo["pode_desfazer"] = services.pode_desfazer(recebimento)
     return resumo
+
+
+def _opcoes_de_clientes():
+    """Seletor de cliente do Receber e da ND: "Nome — placa — deve R$ X".
+
+    Homônimos ("Lucas" e "Lucas Martins Ferreira") se distinguem pela placa e
+    pelo saldo; quem tem valor em aberto vem primeiro. Três consultas, sem
+    importar quantos clientes.
+    Devolve [(rótulo do grupo, [(pk, rótulo da opção), ...]), ...].
+    """
+    from apps.alocacoes.models import Alocacao
+
+    placas = {}
+    for cliente_id, placa in (
+        Alocacao.objects.filter(status=Alocacao.Status.ATIVA)
+        .order_by("data_inicio")
+        .values_list("cliente_id", "veiculo__placa")
+    ):
+        placas.setdefault(cliente_id, []).append(placa)
+    devido = {}
+    for cobranca in Cobranca.com_quitacao_anotada(
+        Cobranca.objects.filter(status__in=Cobranca.STATUS_DEVIDOS)
+    ):
+        if cobranca.saldo > ZERO:
+            devido[cobranca.cliente_id] = devido.get(cobranca.cliente_id, ZERO) + cobranca.saldo
+    com_valor, demais = [], []
+    for pk, nome in Cliente.objects.order_by("nome").values_list("pk", "nome"):
+        partes = [nome, *placas.get(pk, [])]
+        if pk in devido:
+            partes.append(f"deve {brl(devido[pk])}")
+            com_valor.append((pk, " — ".join(partes)))
+        else:
+            demais.append((pk, " — ".join(partes)))
+    grupos = []
+    if com_valor:
+        grupos.append(("Com valor em aberto", com_valor))
+    if demais:
+        grupos.append(("Demais clientes" if com_valor else "Clientes", demais))
+    return grupos
+
+
+def _vencido_e_a_vencer(cobrancas, hoje):
+    """(vencido até hoje, a vencer) das cobranças devidas — mesma conta do "Quem deve"."""
+    vencido = sum((c.saldo for c in cobrancas if c.vencimento <= hoje), ZERO)
+    a_vencer = sum((c.saldo for c in cobrancas if c.vencimento > hoje), ZERO)
+    return vencido, a_vencer
+
+
+def _ler_aplicacoes(post, cliente, cobrancas_abertas):
+    """[(cobrança, valor)] de TODAS as chaves aplicar_<pk> do formulário.
+
+    Antes só as cobranças recarregadas eram lidas: um valor digitado numa
+    cobrança que outra aba acabou de quitar era descartado em silêncio e o
+    dinheiro virava crédito. Agora ele trava o lançamento com aviso.
+    """
+    por_pk = {str(c.pk): c for c in cobrancas_abertas}
+    aplicacoes = []
+    for chave in post:
+        if not chave.startswith("aplicar_") or chave.startswith("aplicar_encargo_"):
+            continue
+        pk = chave.removeprefix("aplicar_")
+        bruto = post.get(chave, "").strip()
+        if not bruto or not _id_valido(pk):
+            continue
+        cobranca = por_pk.get(pk)
+        descricao = cobranca.descricao if cobranca else None
+        if cobranca is None:
+            antiga = Cobranca.objects.filter(pk=pk, cliente=cliente).first()
+            descricao = antiga.descricao if antiga else "Uma das cobranças"
+        valor = _dinheiro(bruto, f"Valor a aplicar inválido em '{descricao}' (ex.: 650,00).")
+        if valor <= ZERO:
+            continue
+        if cobranca is None or cobranca.saldo <= ZERO:
+            raise ValidationError(
+                f"'{descricao}' já não está em aberto (foi quitada ou cancelada). "
+                "A tela foi atualizada — confira e lance de novo."
+            )
+        aplicacoes.append((cobranca, valor))
+    return aplicacoes
+
+
+def _encargos_sugeridos(cobrancas_abertas, hoje):
+    """{pk do aluguel atrasado: encargo sugerido} — para cobrar o atraso junto no Receber."""
+    sugeridos = {}
+    for cobranca in cobrancas_abertas:
+        if cobranca.status != Cobranca.Status.ATRASADO:
+            continue
+        valor = services.sugerir_encargo(
+            cobranca,
+            hoje,
+            ja_aplicado=getattr(cobranca, "encargo_aplicado", None) or ZERO,
+            ativos=getattr(cobranca, "encargos_ativos", None) or 0,
+        )
+        if valor > ZERO:
+            sugeridos[cobranca.pk] = valor
+    return sugeridos
+
+
+def _criar_encargos_do_post(post, cobrancas_abertas, sugeridos, hoje):
+    """Encargos marcados em "incluir" no Receber: cria cada um e devolve as aplicações.
+
+    Roda dentro da mesma transação do recebimento: se o lançamento falhar,
+    o encargo também não fica. Devolve (aplicações, encargos criados).
+    """
+    aplicacoes, criados = [], []
+    por_pk = {c.pk: c for c in cobrancas_abertas}
+    for pk in sugeridos:
+        if post.get(f"incluir_encargo_{pk}") != "1":
+            continue
+        aluguel = por_pk[pk]
+        valor = _dinheiro(
+            post.get(f"encargo_{pk}", ""),
+            f"Valor do encargo inválido em '{aluguel.descricao}' (ex.: 65,00).",
+        )
+        if valor <= ZERO:
+            continue
+        encargo = services.aplicar_encargo(aluguel, valor, hoje)
+        bruto = post.get(f"aplicar_encargo_{pk}", "").strip()
+        aplicar = (
+            _dinheiro(bruto, f"Valor a aplicar inválido no encargo de '{aluguel.descricao}'.")
+            if bruto
+            else ZERO
+        )
+        if aplicar > valor:
+            raise ValidationError(
+                f"Aplicação de {brl(aplicar)} acima do encargo ({brl(valor)}) de "
+                f"'{aluguel.descricao}'."
+            )
+        if aplicar > ZERO:
+            aplicacoes.append((encargo, aplicar))
+        criados.append(encargo)
+    return aplicacoes, criados
 
 
 def receber(request):
@@ -395,11 +572,12 @@ def receber(request):
     precisa de onde ser lançado. No erro, a tela volta com tudo que foi
     digitado e diz qual campo falhou — nada de redigitar a distribuição.
 
-    Atalhos (botões "Recebi"): ?cliente=<pk> já escolhe o cliente e
-    ?cobranca=<pk> já preenche o valor com o que falta daquela cobrança.
+    Atalhos (botões "Recebi"): ?cliente=<pk> já escolhe o cliente,
+    ?cobranca=<pk> já preenche o valor com o que falta daquela cobrança e
+    ?usar_credito=1 já liga o pagamento com o crédito guardado ("Quem deve").
     Depois de lançar, ?recibo=<pk> mostra o resumo, o recibo e o desfazer.
     """
-    clientes = Cliente.objects.order_by("nome")
+    hoje = timezone.localdate()
     cliente = None
     cobrancas_abertas = []
     cliente_id = request.GET.get("cliente") or request.POST.get("cliente")
@@ -423,32 +601,47 @@ def receber(request):
                 raise ValidationError(
                     "Data do recebimento inválida — escolha a data no calendário."
                 ) from None
-            aplicacoes = []
-            for cobranca in cobrancas_abertas:
-                bruto = post.get(f"aplicar_{cobranca.pk}", "").strip()
-                if not bruto:
-                    continue
-                aplicacoes.append(
-                    (
-                        cobranca,
-                        _dinheiro(
-                            bruto,
-                            f"Valor a aplicar inválido em '{cobranca.descricao}' (ex.: 650,00).",
-                        ),
-                    )
+            forma = post.get("forma", "pix")
+            usar_credito = ZERO
+            if post.get("usar_credito_junto") == "1" and forma != Recebimento.Forma.CREDITO:
+                usar_credito = MovimentoCredito.saldo_do_cliente(cliente)
+            # toque duplo: o 2º envio acha a cobrança já paga — o aviso certo é o de repetido
+            repetido = services._recebimento_recente(cliente, data, valor)
+            if repetido:
+                raise services.RecebimentoRepetido(repetido)
+            aplicacoes = _ler_aplicacoes(post, cliente, cobrancas_abertas)
+            with transaction.atomic():
+                nos_encargos, encargos = _criar_encargos_do_post(
+                    post, cobrancas_abertas, _encargos_sugeridos(cobrancas_abertas, hoje), hoje
                 )
-            recebimento = services.registrar_recebimento(
-                cliente=cliente,
-                data=data,
-                valor=valor,
-                forma=post.get("forma", "pix"),
-                aplicacoes=aplicacoes,
-                sobra_destino=post.get("sobra_destino", "credito"),
-                observacoes=post.get("observacoes", ""),
-                bloquear_repetido=True,
-            )
-            messages.success(request, f"Recebimento de {brl(valor)} lançado para {cliente.nome}.")
-            return redirect(f"{request.path}?cliente={cliente.pk}&recibo={recebimento.pk}")
+                aplicacoes += nos_encargos
+                recebimento = services.registrar_recebimento(
+                    cliente=cliente,
+                    data=data,
+                    valor=valor,
+                    forma=forma,
+                    aplicacoes=aplicacoes,
+                    sobra_destino=post.get("sobra_destino", "credito"),
+                    observacoes=post.get("observacoes", ""),
+                    bloquear_repetido=True,
+                    usar_credito=usar_credito,
+                    mes_passado_confirmado=post.get("confirmar_mes_passado") == "1",
+                    hoje=hoje,
+                )
+                # o "desfazer" deste lançamento também cancela o encargo criado aqui
+                Cobranca.objects.filter(pk__in=[e.pk for e in encargos]).update(
+                    observacoes=services.marca_encargo(recebimento)
+                )
+            if recebimento.forma == Recebimento.Forma.CREDITO:
+                messages.success(request, f"Crédito de {brl(valor)} usado para {cliente.nome}.")
+            else:
+                messages.success(
+                    request, f"Recebimento de {brl(valor)} lançado para {cliente.nome}."
+                )
+            destino = f"{request.path}?cliente={cliente.pk}&recibo={recebimento.pk}"
+            if recebimento.recebimento_credito:
+                destino += f"&recibo_credito={recebimento.recebimento_credito.pk}"
+            return redirect(destino)
         except services.RecebimentoRepetido as repetido:
             # toque duplo: mostra o resumo do lançamento que já valeu
             messages.warning(request, repetido.messages[0])
@@ -467,23 +660,39 @@ def receber(request):
             saldo = exibir_dinheiro(escolhida.saldo)
             post = {"valor": saldo, f"aplicar_{escolhida.pk}": saldo}
     credito = MovimentoCredito.saldo_do_cliente(cliente) if cliente else ZERO
-    linhas = [
-        (cobranca, post.get(f"aplicar_{cobranca.pk}", "") if post else "")
-        for cobranca in cobrancas_abertas
-    ]
+    sugeridos = _encargos_sugeridos(cobrancas_abertas, hoje)
+    linhas = []
+    for cobranca in cobrancas_abertas:
+        # encargo por atraso que dá para cobrar junto (aluguel atrasado)
+        cobranca.encargo_sugerido = sugeridos.get(cobranca.pk)
+        cobranca.encargo_digitado = (post.get(f"encargo_{cobranca.pk}", "") if post else "") or (
+            exibir_dinheiro(sugeridos[cobranca.pk]) if cobranca.pk in sugeridos else ""
+        )
+        cobranca.encargo_incluido = bool(post and post.get(f"incluir_encargo_{cobranca.pk}") == "1")
+        cobranca.encargo_para_aplicar = (
+            post.get(f"aplicar_encargo_{cobranca.pk}", "") if post else ""
+        )
+        linhas.append((cobranca, post.get(f"aplicar_{cobranca.pk}", "") if post else ""))
+    vencido, a_vencer = _vencido_e_a_vencer(cobrancas_abertas, hoje)
     return render(
         request,
         "financeiro/receber.html",
         {
-            "clientes": clientes,
+            "grupos_clientes": _opcoes_de_clientes(),
             "cliente": cliente,
             "linhas": linhas,
             "credito": credito,
-            "devido": sum((c.saldo for c in cobrancas_abertas), ZERO),
-            "hoje": date.today(),
+            "devido": vencido + a_vencer,
+            "vencido": vencido,
+            "a_vencer": a_vencer,
+            "hoje": hoje,
+            "inicio_mes_passado": services.inicio_do_mes_passado(hoje),
             "post": post,
             # crédito não é forma de pagamento: tem botão próprio na tela
             "formas": [f for f in Recebimento.Forma.choices if f[0] != Recebimento.Forma.CREDITO],
+            # reforço de caução só para quem tem caução de contrato ativo
+            "tem_caucao": bool(cliente and services._caucao_ativa(cliente) is not None),
+            "abrir_com_credito": request.GET.get("usar_credito") == "1" and not post,
             "resumo": _resumo_do_recibo(request, cliente),
         },
     )
@@ -504,13 +713,29 @@ def desfazer_recebimento(request, recebimento_id):
     if request.method != "POST":
         return redirect(f"{reverse('financeiro:receber')}?cliente={cliente.pk}")
     valor = recebimento.valor
+    # pagamento com dinheiro + crédito: os dois lançamentos se desfazem juntos
+    junto_id = request.POST.get("junto", "")
+    junto = (
+        Recebimento.objects.filter(
+            pk=junto_id, cliente=cliente, forma=Recebimento.Forma.CREDITO
+        ).first()
+        if _id_valido(junto_id)
+        else None
+    )
     try:
-        services.desfazer_recebimento(recebimento)
+        with transaction.atomic():
+            # o crédito sai primeiro: se ele pagou o encargo cobrado junto, o encargo
+            # fica sem pagamento e o desfazer do dinheiro consegue cancelá-lo
+            if junto is not None:
+                services.desfazer_recebimento(junto)
+                valor += junto.valor
+            services.desfazer_recebimento(recebimento)
     except ValidationError as erro:
         messages.error(request, "; ".join(erro.messages))
-        return redirect(
-            f"{reverse('financeiro:receber')}?cliente={cliente.pk}&recibo={recebimento.pk}"
-        )
+        destino = f"{reverse('financeiro:receber')}?cliente={cliente.pk}&recibo={recebimento.pk}"
+        if junto is not None:
+            destino += f"&recibo_credito={junto.pk}"
+        return redirect(destino)
     messages.success(
         request,
         f"Lançamento de {brl(valor)} de {cliente.nome} desfeito — as cobranças voltaram "
@@ -519,15 +744,29 @@ def desfazer_recebimento(request, recebimento_id):
     return redirect(f"{reverse('financeiro:receber')}?cliente={cliente.pk}")
 
 
+#: filtros da lista de NDs: (valor na URL, rótulo, status da cobrança da ND)
+FILTROS_ND = [
+    ("abertas", "Em aberto", Cobranca.STATUS_DEVIDOS),
+    ("pagas", "Pagas", [Cobranca.Status.PAGO]),
+    ("canceladas", "Canceladas", [Cobranca.Status.CANCELADA]),
+    ("todas", "Todas", None),
+]
+
+
 def nds(request):
+    """Lista de NDs — abre nas que ainda estão em aberto (com "✓ Recebi")."""
+    situacao = request.GET.get("situacao", "abertas")
+    filtro = next((f for f in FILTROS_ND if f[0] == situacao), FILTROS_ND[0])
+    situacao = filtro[0]
     # cobrança com o quitado anotado: o botão "Enviar ao motorista" olha o saldo
     # de cada ND sem 2 consultas por linha
-    notas = list(
-        NotaDebito.objects.select_related("cliente").prefetch_related(
-            "itens", Prefetch("cobranca", queryset=Cobranca.com_quitacao_anotada())
-        )
+    qs = NotaDebito.objects.select_related("cliente").prefetch_related(
+        "itens", Prefetch("cobranca", queryset=Cobranca.com_quitacao_anotada())
     )
-    hoje = date.today()
+    if filtro[2] is not None:
+        qs = qs.filter(cobranca__status__in=filtro[2])
+    notas = list(qs)
+    hoje = timezone.localdate()
     for nd in notas:
         nd.link_whatsapp = whatsapp.link_nd(nd, hoje)
         # cobrável mas sem telefone: avisa em vez de sumir com o botão sem explicação
@@ -545,13 +784,28 @@ def nds(request):
             and cobranca.status in Cobranca.STATUS_EM_ABERTO
             and cobranca.total_quitado == ZERO
         )
-    return render(request, "financeiro/nds.html", {"notas": notas, "hoje": hoje})
+        nd.pode_receber = (
+            cobranca is not None
+            and cobranca.status in Cobranca.STATUS_DEVIDOS
+            and cobranca.saldo > ZERO
+        )
+        # o aviso de cancelar só fala de multas quando a ND tem multa
+        nd.tem_multas = any(item.multa_id for item in nd.itens.all())
+    return render(
+        request,
+        "financeiro/nds.html",
+        {
+            "notas": notas,
+            "hoje": hoje,
+            "situacao": situacao,
+            "filtros": [(valor, rotulo) for valor, rotulo, _ in FILTROS_ND],
+        },
+    )
 
 
 def nd_nova(request):
     """Emissão de ND idempotente: token único por formulário barra o clique duplo,
     e o erro devolve a tela com os itens digitados preservados."""
-    clientes = Cliente.objects.order_by("nome")
     post = None
     if request.method == "POST":
         post = request.POST
@@ -570,23 +824,33 @@ def nd_nova(request):
                 descricoes = post.getlist("item_descricao")
                 valores = post.getlist("item_valor")
                 itens = []
-                for descricao, valor in zip(descricoes, valores, strict=False):
-                    descricao = descricao.strip()
-                    if not (descricao and valor.strip()):
-                        continue
+                for numero, (descricao, valor) in enumerate(
+                    zip(descricoes, valores, strict=False), start=1
+                ):
+                    descricao = services.limpar_texto(descricao, maximo=10_000)
+                    if not descricao and not valor.strip():
+                        continue  # linha totalmente vazia: só some
+                    # linha pela metade não pode sumir em silêncio: a tela e a
+                    # confirmação mostravam um total e a ND saía com outro
+                    if not descricao:
+                        valor_lido = _dinheiro(valor, f"Valor inválido no item {numero}.")
+                        raise ValidationError(
+                            f"Item {numero} tem valor ({brl(valor_lido)}) mas não tem "
+                            "descrição: escreva o que é, ou apague o valor."
+                        )
+                    if not valor.strip():
+                        raise ValidationError(f'"{descricao[:40]}" está sem valor.')
                     if len(descricao) > MAX_DESCRICAO_ITEM_ND:
                         raise ValidationError(
                             f'A descrição do item "{descricao[:40]}…" tem {len(descricao)} '
                             f"letras; o máximo é {MAX_DESCRICAO_ITEM_ND} letras. Encurte o texto."
                         )
-                    itens.append(
-                        (
-                            descricao,
-                            _dinheiro(
-                                valor, f'Valor inválido no item "{descricao[:40]}" (ex.: 150,00).'
-                            ),
-                        )
+                    valor_item = _dinheiro(
+                        valor, f'Valor inválido no item "{descricao[:40]}" (ex.: 150,00).'
                     )
+                    if valor_item <= ZERO:
+                        raise ValidationError(f'"{descricao[:40]}" está sem valor.')
+                    itens.append((descricao, valor_item))
                 nd = services.emitir_nota_debito(
                     cliente=cliente,
                     data_emissao=date.fromisoformat(post["data_emissao"]),
@@ -620,12 +884,12 @@ def nd_nova(request):
         request,
         "financeiro/nd_nova.html",
         {
-            "clientes": clientes,
+            "grupos_clientes": _opcoes_de_clientes(),
             # o formulário calcula o vencimento sugerido ao trocar cliente/emissão
             "dias_pagamento": {
                 str(pk): dia for pk, dia in services.dias_pagamento_por_cliente().items()
             },
-            "hoje": date.today(),
+            "hoje": timezone.localdate(),
             "post": post,
             "itens_iniciais": itens_iniciais,
             "token": uuid4().hex,
@@ -649,7 +913,9 @@ def caucao_detalhe(request, caucao_id):
     )
     cliente = caucao.alocacao.cliente
     token = request.POST.get("token", "")
+    post = None
     if request.method == "POST":
+        post = request.POST
         try:
             with _envio_unico(request, "caucao_tokens_usados", token) as repetido:
                 if repetido:
@@ -669,28 +935,33 @@ def caucao_detalhe(request, caucao_id):
                 )
                 if valor <= ZERO:
                     raise ValidationError("O valor deve ser maior que zero.")
-                data = date.fromisoformat(request.POST["data"])
-                if tipo == "desconto":
-                    cobranca = get_object_or_404(
-                        Cobranca, pk=request.POST["cobranca"], cliente=cliente
+                try:
+                    data = date.fromisoformat(request.POST.get("data", ""))
+                except ValueError:
+                    raise ValidationError("Data inválida — escolha a data no calendário.") from None
+                observacoes = request.POST.get("observacoes", "")
+                if tipo == MovimentacaoCaucao.Tipo.DESCONTO:
+                    cobranca_id = request.POST.get("cobranca", "")
+                    cobranca = (
+                        Cobranca.objects.filter(pk=cobranca_id, cliente=cliente).first()
+                        if _id_valido(cobranca_id)
+                        else None
                     )
+                    if cobranca is None:
+                        raise ValidationError("Escolha a cobrança que a caução vai pagar.")
                     services.descontar_da_caucao(
-                        caucao,
-                        cobranca,
-                        valor,
-                        data,
-                        observacoes=request.POST.get("observacoes", ""),
+                        caucao, cobranca, valor, data, observacoes=observacoes
                     )
                 else:
-                    if tipo == "devolucao" and valor > caucao.saldo:
-                        raise ValidationError(f"Devolução acima do saldo ({brl(caucao.saldo)}).")
-                    MovimentacaoCaucao.objects.create(
-                        caucao=caucao,
-                        tipo=tipo,
-                        valor=valor,
-                        data=data,
+                    services.registrar_movimentacao_caucao(
+                        caucao,
+                        tipo,
+                        valor,
+                        data,
                         forma=request.POST.get("forma", ""),
-                        observacoes=request.POST.get("observacoes", ""),
+                        observacoes=observacoes,
+                        acima_do_combinado_confirmado=request.POST.get("confirmar_acima") == "1",
+                        devolver_mesmo_assim=request.POST.get("devolver_mesmo_assim") == "1",
                     )
             messages.success(
                 request, f"Movimentação de {brl(valor)} registrada na caução de {cliente.nome}."
@@ -704,34 +975,140 @@ def caucao_detalhe(request, caucao_id):
                 "Não deu para registrar: confira o valor (ex.: 1.500,00), a data e, "
                 "se for desconto, escolha a cobrança a quitar.",
             )
+    hoje = timezone.localdate()
+    movimentacoes = list(
+        services.anotar_lancamento_caucao(caucao.movimentacoes.select_related("cobranca"))
+    )
+    for movimentacao in movimentacoes:
+        movimentacao.pode_desfazer = services.pode_desfazer_movimentacao(movimentacao, hoje)
+    combinado = caucao.alocacao.caucao_valor or ZERO
+    falta = max(combinado - caucao.saldo, ZERO)
+    deve, ativa = services.pendencias_para_devolver(caucao)
+    pendentes = _cobrancas_devidas(cliente)
     return render(
         request,
         "financeiro/caucao_detalhe.html",
         {
             "caucao": caucao,
-            "movimentacoes": caucao.movimentacoes.select_related("cobranca"),
+            "cliente": cliente,
+            "movimentacoes": movimentacoes,
             # judicial entra: acordo pode ser quitado descontando da caução retida
-            "pendentes": _cobrancas_devidas(cliente),
+            "pendentes": pendentes,
             # crédito (pagamento adiantado / semanas não usadas) é do cliente, como a
             # caução: o dono vê os dois juntos antes de devolver ou descontar
             "credito": MovimentoCredito.saldo_do_cliente(cliente),
-            "hoje": date.today(),
+            "combinado": combinado,
+            "falta": falta,
+            # o campo Valor já vem com o que falta depositar (o caso mais comum)
+            "valor_sugerido": exibir_dinheiro(falta) if falta > ZERO else "",
+            "deve": deve,
+            "alocacao_ativa": ativa,
+            "hoje": hoje,
+            "data_minima": caucao.alocacao.data_inicio,
+            "data_minima_deposito": caucao.alocacao.data_inicio
+            - timedelta(days=services.DIAS_DEPOSITO_ANTES_DO_CONTRATO),
+            "post": post,
             "token": uuid4().hex,
         },
     )
 
 
-def _planilha_das(formato, nome, linhas):
+def desfazer_movimentacao_caucao(request, movimentacao_id):
+    """ "↩ desfazer" de uma movimentação de caução lançada hoje (valor ou tipo errado)."""
+    movimentacao = get_object_or_404(
+        MovimentacaoCaucao.objects.select_related("caucao"), pk=movimentacao_id
+    )
+    caucao_id = movimentacao.caucao_id
+    if request.method == "POST":
+        valor = movimentacao.valor
+        tipo = movimentacao.get_tipo_display().lower()
+        try:
+            services.desfazer_movimentacao_caucao(movimentacao)
+            messages.success(request, f"Lançamento de {tipo} de {brl(valor)} desfeito.")
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+    return redirect("financeiro:caucao_detalhe", caucao_id)
+
+
+COLUNAS_PAGAMENTOS = [
+    "Data",
+    "Cliente",
+    "Placa",
+    "Descrição",
+    "Forma",
+    "Valor (R$)",
+    "Entra no DAS?",
+]
+
+
+def _linhas_pagamentos(pagamentos):
+    """Linhas da aba "Pagamentos do mês" + o total, que bate com a 1ª aba."""
+    linhas = [
+        [
+            p["data"].strftime("%d/%m/%Y"),
+            p["cliente"],
+            p["placa"],
+            p["descricao"],
+            p["forma"],
+            p["valor"],
+            "Sim" if p["entra_no_das"] else "Não",
+        ]
+        for p in pagamentos
+    ]
+    total = sum((p["valor"] for p in pagamentos), ZERO)
+    no_das = sum((p["valor"] for p in pagamentos if p["entra_no_das"]), ZERO)
+    linhas.append(["", "", "", "Total (locação + pagamentos diversos)", "", total, ""])
+    linhas.append(["", "", "", "Dos quais entram na base do DAS", "", no_das, "Sim"])
+    return linhas
+
+
+def _planilha_das(formato, nome, linhas, pagamentos):
     """Planilha do DAS para a contabilidade, pronta para o Excel em português (C11).
 
-    xlsx: números de verdade, via o exportador dos Relatórios. csv: ponto e vírgula
-    entre colunas, vírgula nos centavos e BOM UTF-8 (acentos certos no Excel).
+    xlsx: duas abas — "Base do DAS" (totais) e "Pagamentos do mês" (cada
+    pagamento, com total que bate com a 1ª aba). csv: só os totais, com ponto
+    e vírgula entre colunas, vírgula nos centavos e BOM UTF-8.
     """
     colunas = ["Grupo", "Valor (R$)", "Entra na base do DAS?"]
     if formato == "xlsx":
-        from apps.relatorios.exportar import planilha_xlsx
+        from io import BytesIO
 
-        return planilha_xlsx(nome, "Base do DAS", colunas, linhas)
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        livro = Workbook()
+        for indice, (titulo, cabecalho, dados) in enumerate(
+            [
+                ("Base do DAS", colunas, linhas),
+                ("Pagamentos do mês", COLUNAS_PAGAMENTOS, _linhas_pagamentos(pagamentos)),
+            ]
+        ):
+            aba = livro.active if indice == 0 else livro.create_sheet()
+            aba.title = titulo
+            aba.append(cabecalho)
+            for celula in aba[1]:
+                celula.font = Font(bold=True)
+            for linha in dados:
+                aba.append([float(v) if isinstance(v, Decimal) else v for v in linha])
+                for celula in aba[aba.max_row]:
+                    if isinstance(celula.value, str):
+                        celula.data_type = "s"  # texto digitado nunca vira fórmula
+                    elif isinstance(celula.value, float):
+                        celula.number_format = "#,##0.00"
+            for coluna, titulo_coluna in enumerate(cabecalho, 1):
+                largura = max(
+                    [len(titulo_coluna)] + [len(str(linha[coluna - 1])) for linha in dados]
+                )
+                letra = aba.cell(row=1, column=coluna).column_letter
+                aba.column_dimensions[letra].width = min(largura + 2, 60)
+        buffer = BytesIO()
+        livro.save(buffer)
+        resposta = HttpResponse(
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        resposta["Content-Disposition"] = f'attachment; filename="{nome}.xlsx"'
+        return resposta
     resposta = HttpResponse(content_type="text/csv")
     resposta["Content-Disposition"] = f'attachment; filename="{nome}.csv"'
     resposta.write("\ufeff")
@@ -743,8 +1120,15 @@ def _planilha_das(formato, nome, linhas):
 
 
 def das(request):
-    """Base de cálculo do DAS — só receita de locação é tributável (decisão nº 11)."""
-    ano, mes = ano_mes(request)
+    """Base de cálculo do DAS — só receita de locação é tributável (decisão nº 11).
+
+    Sem ?mes=, abre no mês anterior até o dia 20 (prazo do DAS) e no mês
+    atual depois disso. Setas de mês no lugar do <input type=month> (Safari).
+    """
+    hoje = timezone.localdate()
+    ano, mes = ano_mes(request, padrao=mes_padrao_do_das(hoje))
+    if not ANO_MINIMO <= ano <= hoje.year + 1:
+        ano, mes = mes_padrao_do_das(hoje)
     resumo = services.resumo_fiscal(ano, mes)
     formato = request.GET.get("exportar")
     if formato in ("csv", "xlsx"):
@@ -761,23 +1145,63 @@ def das(request):
             ["Pagos com crédito do cliente (já contados acima)", resumo["pago_com_credito"], "-"]
         )
         linhas.append(["Total que entrou no caixa", resumo["entrou_no_caixa"], "-"])
-        return _planilha_das(formato, f"das-{ano}-{mes:02d}", linhas)
+        return _planilha_das(
+            formato, f"das-{ano}-{mes:02d}", linhas, services.pagamentos_do_mes(ano, mes)
+        )
     return render(
         request,
         "financeiro/das.html",
-        {"resumo": resumo, "ano": ano, "mes": mes, "mes_str": f"{ano}-{mes:02d}"},
+        {
+            "resumo": resumo,
+            "ano": ano,
+            "mes": mes,
+            "mes_str": f"{ano}-{mes:02d}",
+            **navegacao_de_meses(ano, mes, hoje),
+        },
     )
 
 
 def extrato_cliente(request, cliente_id):
     cliente = get_object_or_404(Cliente, pk=cliente_id)
+    hoje = timezone.localdate()
     recebimentos = list(
         services.anotar_lancamento(cliente.recebimentos.all()).prefetch_related(
-            "aplicacoes__cobranca"
+            "aplicacoes__cobranca", "movimentos_credito"
         )[:50]
     )
+    # sobra que virou reforço de caução: achada pela marca no texto (uma consulta)
+    reforcos = {
+        m.observacoes: m.valor
+        for m in MovimentacaoCaucao.objects.filter(
+            tipo=MovimentacaoCaucao.Tipo.REFORCO,
+            observacoes__in=[services._marca_reforco(r) for r in recebimentos],
+        )
+    }
     for recebimento in recebimentos:  # lançado hoje: tem o botão "Desfazer"
         recebimento.pode_desfazer = services.pode_desfazer(recebimento)
+        entrada = sum(
+            (
+                m.valor
+                for m in recebimento.movimentos_credito.all()
+                if m.tipo == MovimentoCredito.Tipo.ENTRADA
+            ),
+            ZERO,
+        )
+        if entrada > ZERO:
+            recebimento.sobra = (entrada, "crédito")
+        elif services._marca_reforco(recebimento) in reforcos:
+            recebimento.sobra = (reforcos[services._marca_reforco(recebimento)], "caução")
+        else:
+            recebimento.sobra = None
+    devidas = _cobrancas_devidas(cliente)
+    vencido, a_vencer = _vencido_e_a_vencer(devidas, hoje)
+    caucao = sum(
+        (
+            c.saldo
+            for c in Caucao.com_saldos_anotados(Caucao.objects.filter(alocacao__cliente=cliente))
+        ),
+        ZERO,
+    )
     return render(
         request,
         "financeiro/extrato_cliente.html",
@@ -789,9 +1213,13 @@ def extrato_cliente(request, cliente_id):
             "recebimentos": recebimentos,
             "status_devidos": Cobranca.STATUS_DEVIDOS,  # quem ganha o botão "Recebi"
             "credito": MovimentoCredito.saldo_do_cliente(cliente),
+            "vencido": vencido,
+            "a_vencer": a_vencer,
+            "devido_total": vencido + a_vencer,
+            "saldo_caucao": caucao,
             # mensagem única com tudo em aberto (judicial fica de fora)
             "link_whatsapp": whatsapp.link_cliente(
-                cliente, _abertas_por_cliente([cliente.pk]).get(cliente.pk, []), date.today()
+                cliente, _abertas_por_cliente([cliente.pk]).get(cliente.pk, []), hoje
             ),
         },
     )

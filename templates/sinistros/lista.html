@@ -50,6 +50,15 @@
       {% if sinistro.boletim_ocorrencia %}<span class="text-xs text-gray-600">· BO {{ sinistro.boletim_ocorrencia }}</span>{% endif %}
     </p>
     <div class="flex flex-wrap items-center gap-3 text-sm">
+      {% if sinistro.franquia_a_cobrar and sinistro.cliente %}
+        <form method="post" action="{% url 'sinistros:cobrar_franquia' sinistro.pk %}" class="flex flex-wrap items-center gap-2"
+              onsubmit="return confirm('Cobrar {{ sinistro.franquia_valor|brl|escapejs }} de {{ sinistro.cliente.nome|escapejs }}?')">
+          {% csrf_token %}
+          <input type="hidden" name="volta" value="{{ aqui }}">
+          <span class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-800">Franquia de {{ sinistro.franquia_valor|brl }} a cobrar de {{ sinistro.cliente.nome }}</span>
+          <button class="rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:px-2 sm:py-0.5 sm:text-xs">Cobrar do cliente</button>
+        </form>
+      {% endif %}
       {% if sinistro.tipo == "colisao" and sinistro.status != "concluido" and not sinistro.manutencoes.all %}
         <a href="{% url 'manutencao:registrar' sinistro.veiculo_id %}?sinistro={{ sinistro.pk }}"
            class="rounded border border-gray-300 px-4 py-2 font-semibold text-marca-preto hover:bg-gray-50 sm:px-3 sm:py-1">🔧 Registrar ida para a oficina</a>
@@ -71,6 +80,9 @@
             <label for="aux-rec-{{ auxilio.pk }}" class="sr-only">Valor recebido</label>
             <input id="aux-rec-{{ auxilio.pk }}" type="text" name="valor" inputmode="decimal" placeholder="valor recebido (R$)"
                    title="Deixe em branco para manter o valor solicitado" class="w-40 rounded border border-gray-300 px-2 py-2 text-sm sm:w-36 sm:px-1 sm:py-0.5 sm:text-xs">
+            <label for="aux-data-{{ auxilio.pk }}" class="text-xs text-gray-600">Data em que o dinheiro entrou</label>
+            <input id="aux-data-{{ auxilio.pk }}" type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required
+                   class="rounded border border-gray-300 px-2 py-2 text-sm sm:px-1 sm:py-0.5 sm:text-xs">
             <button class="rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:px-2 sm:py-0.5 sm:text-xs">Marcar recebido</button>
           </form>
         {% endif %}

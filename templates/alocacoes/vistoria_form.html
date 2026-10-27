@@ -15,6 +15,8 @@
 
 <form method="post" enctype="multipart/form-data" class="max-w-lg space-y-4 rounded-lg bg-white p-6 shadow">
   {% csrf_token %}
+  {# token único: reenviar o formulário não grava a vistoria duas vezes #}
+  <input type="hidden" name="token" value="{{ token }}">
   {% for erro in form.non_field_errors %}<p class="text-sm text-red-600">{{ erro }}</p>{% endfor %}
 
   <div>
@@ -29,10 +31,8 @@
       <p id="status-checklist" class="mt-1 hidden"></p>
     </div>
     {% else %}
-    <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500"
-       title="Técnico: configurar a variável ANTHROPIC_API_KEY no servidor">
-      A leitura automática do checklist ainda não está ativada — guarde a foto aqui e preencha os
-      campos à mão. Para ativar a leitura, fale com quem cuida do sistema.
+    <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600">
+      Guarde aqui a foto do papel preenchido e preencha os campos abaixo.
     </p>
     {% endif %}
   </div>
@@ -48,6 +48,9 @@
     <div>
       <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
       {{ field }}
+      {% if field.name == "km" and km_sugerido %}
+      <p class="mt-1 text-xs text-gray-600">Preenchido com o KM que o sistema já tem — confira no painel.</p>
+      {% endif %}
       {% if field.name == "veiculo" and form.fields.veiculo.queryset.count > 1 %}
       <p class="mt-1 text-xs text-gray-500">Com carro substituto, vistorie o carro que está com o motorista.</p>
       {% endif %}

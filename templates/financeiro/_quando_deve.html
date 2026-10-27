@@ -1,4 +1,7 @@
 {# Desde quando o cliente `d` (devedores.Devedor) deve — Painel e "Quem deve". #}
-{% if d.atrasado %}<span class="font-semibold text-red-700">atrasado há {{ d.dias_atraso }} dia{{ d.dias_atraso|pluralize }}</span> <span class="text-gray-500">(desde {{ d.mais_antigo|date:"d/m" }})</span>{% if d.vence_hoje %} <span class="text-yellow-800">+ {{ d.vence_hoje|brl }} vence hoje</span>{% endif %}
+{# Com atraso e semana vencendo hoje, as duas partes aparecem separadas: o total já soma as duas. #}
+{% if d.atrasado and d.vence_hoje %}<span class="font-semibold text-red-700"><span class="whitespace-nowrap">{{ d.atrasado|brl }}</span> atrasado há {{ d.dias_atraso }} dia{{ d.dias_atraso|pluralize }}</span> <span class="text-gray-500">(desde {{ d.mais_antigo|date:"d/m" }})</span> <span class="text-yellow-800">e <span class="whitespace-nowrap">{{ d.vence_hoje|brl }}</span> vence hoje</span>
+{% elif d.atrasado %}<span class="font-semibold text-red-700">atrasado há {{ d.dias_atraso }} dia{{ d.dias_atraso|pluralize }}</span> <span class="text-gray-500">(desde {{ d.mais_antigo|date:"d/m" }})</span>
 {% else %}<span class="font-semibold text-yellow-800">vence hoje</span>{% endif %}
 {% if d.judicial %} <span class="whitespace-nowrap rounded bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-800">na Justiça</span>{% endif %}
+{% if d.credito %}<span class="block text-xs text-green-800" data-credito-parado>tem <span class="whitespace-nowrap">{{ d.credito|brl }}</span> de crédito — <a href="{% url 'financeiro:receber' %}?cliente={{ d.cliente.pk }}&usar_credito=1" class="font-semibold underline">usar</a></span>{% endif %}
