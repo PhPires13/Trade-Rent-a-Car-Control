@@ -261,7 +261,7 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
    - VeiculoForm.clean_km_atual usar ajustar_km_atual.
    - Vistoria do substituto: data mínima deveria ser a data de retirada.
    - Validar o ano da data de emissão da ND.
-4. Regressão no navegador (computador e celular) depois das correções. Sandbox: copiar db.sqlite3, migrar, criar usuário de teste e subir com DATABASE_URL/MEDIA_ROOT apontando para a cópia (porta 8001).
+4. Regressão no navegador (computador e celular) depois das correções. Atenção: o servidor sandbox da etapa 17 caiu logo após subir, então os testes E2E no navegador podem não ter rodado contra ele — refazer com o servidor confirmado no ar. Sandbox: copiar db.sqlite3, migrar, criar usuário de teste e subir com DATABASE_URL/MEDIA_ROOT apontando para a cópia (porta 8001).
 5. Ainda dos donos: devolver crédito em dinheiro (decisão), conferir em celular de verdade, deploy Railway/Neon e carga de dados reais.
 
 ## 🎉 MVP completo
