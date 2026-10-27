@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import BooleanField, ExpressionWrapper, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils.text import capfirst
 
@@ -231,14 +231,33 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         "cobranca__alocacao__veiculo",
         "valor",
     )
-    # Cobrança quitada por desconto de caução também é receita do carro (docs.md §4.3)
-    descontos_caucao = _somas(
-        MovimentacaoCaucao.objects.filter(
-            tipo=MovimentacaoCaucao.Tipo.DESCONTO, cobranca__alocacao__veiculo_id__in=ids
-        ),
-        "cobranca__alocacao__veiculo",
-        "valor",
-    )
+    # Cobrança quitada por desconto de caução também é receita do carro (docs.md §4.3):
+    # a da locação soma no aluguel; repasse de manutenção e franquia (sem alocação)
+    # somam nos repasses — uma query só, separada pelo tipo de cobrança
+    descontos_aluguel, descontos_repasse = {}, {}
+    for linha in (
+        MovimentacaoCaucao.objects.filter(tipo=MovimentacaoCaucao.Tipo.DESCONTO)
+        .filter(
+            Q(cobranca__alocacao__veiculo_id__in=ids)
+            | Q(cobranca__manutencao_repassada__veiculo_id__in=ids)
+            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids, cobranca__alocacao__isnull=True)
+        )
+        .annotate(
+            veiculo_do_desconto=Coalesce(
+                "cobranca__alocacao__veiculo",
+                "cobranca__manutencao_repassada__veiculo",
+                "cobranca__sinistro_franquia__veiculo",
+            ),
+            de_locacao=ExpressionWrapper(
+                Q(cobranca__alocacao__isnull=False), output_field=BooleanField()
+            ),
+        )
+        .values("veiculo_do_desconto", "de_locacao")
+        .annotate(total=Sum("valor"))
+    ):
+        destino = descontos_aluguel if linha["de_locacao"] else descontos_repasse
+        chave = linha["veiculo_do_desconto"]
+        destino[chave] = destino.get(chave, ZERO) + (linha["total"] or ZERO)
     # repasses de manutenção e a franquia do sinistro cobrada do cliente (D09) —
     # esta sem alocação na cobrança, então entra aqui para anular a franquia que
     # já é despesa do carro; uma query só para as duas origens
@@ -271,10 +290,12 @@ def montar_fichas_em_lote(veiculos, hoje=None):
     for ficha in fichas:
         veiculo = ficha.veiculo
         ficha.investido = (veiculo.valor_compra or ZERO) + (veiculo.custos_entrada or ZERO)
-        ficha.receita_aluguel = aluguel.get(veiculo.pk, ZERO) + descontos_caucao.get(
+        ficha.receita_aluguel = aluguel.get(veiculo.pk, ZERO) + descontos_aluguel.get(
             veiculo.pk, ZERO
         )
-        ficha.receita_repasses = repasses.get(veiculo.pk, ZERO)
+        ficha.receita_repasses = repasses.get(veiculo.pk, ZERO) + descontos_repasse.get(
+            veiculo.pk, ZERO
+        )
         ficha.receita_auxilios = auxilios.get(veiculo.pk, ZERO)
         ficha.despesa_manutencao = manutencoes.get(veiculo.pk, ZERO)
         ficha.despesa_franquias = franquias.get(veiculo.pk, ZERO)

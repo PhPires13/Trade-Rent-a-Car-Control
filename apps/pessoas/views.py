@@ -72,6 +72,13 @@ class ClienteForm(FormularioBR, forms.ModelForm):
         self.fields["status"].choices = choices
         self.fields["status"].help_text = "Inadimplente é controlado pelos atrasos, todo dia."
 
+    def clean_telefone(self):
+        """Telefone sem DDD gera link de WhatsApp inválido — só valida ao salvar."""
+        telefone = self.cleaned_data["telefone"].strip()
+        if telefone and not whatsapp.telefone_whatsapp(telefone):
+            raise forms.ValidationError(whatsapp.MENSAGEM_TELEFONE_SEM_DDD)
+        return telefone
+
     def clean_status(self):
         """Inativar com carro na rua esconderia o cliente da lista e da cobrança.
 
@@ -113,13 +120,8 @@ class CondutorForm(forms.ModelForm):
 
 
 def _telefone_whatsapp(texto):
-    """Número pronto para wa.me — prefixa o DDI 55 só quando ainda não veio digitado."""
-    digitos = "".join(caractere for caractere in texto if caractere.isdigit())
-    if not digitos:
-        return ""
-    if digitos.startswith("55") and len(digitos) >= 12:
-        return digitos
-    return f"55{digitos}"
+    """Número pronto para wa.me (ou '' sem DDD) — mesma regra da cobrança."""
+    return whatsapp.telefone_whatsapp(texto)
 
 
 #: Sinal de cada tipo de movimentação no saldo retido da caução (espelha Caucao.saldo).

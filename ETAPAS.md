@@ -235,9 +235,6 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 
 **Ainda pendente:**
 - Devolver crédito ao cliente em dinheiro (precisa de tipo novo de movimento + decisão dos donos).
-- Telefone sem DDD gera link de WhatsApp inválido (validar DDD no cadastro).
-- Carro na oficina volta a "Disponível" ao encerrar alocação ou devolver troca.
-- Repasse quitado com desconto da caução fica fora da receita do carro na ficha (raro).
 - Conferir em celular de verdade: painel, menu "Mais" das alocações, formulário de manutenção com "Confirmo o KM".
 - Deploy Railway/Neon e carga de dados reais.
 

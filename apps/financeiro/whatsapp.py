@@ -29,14 +29,23 @@ _ROTULOS = {
 }
 
 
+#: Aviso do cadastro quando o telefone não dá para usar no WhatsApp.
+MENSAGEM_TELEFONE_SEM_DDD = "Informe o telefone com DDD, ex.: (31) 98888-7777"
+
+
 def telefone_whatsapp(telefone):
-    """Só dígitos, com DDI 55 — mesmo critério do hub de clientes."""
+    """Só dígitos, com DDI 55 — ou '' se o número não tem DDD.
+
+    Aceita 10/11 dígitos (DDD + fixo/celular) ou 12/13 começando com 55 (já
+    com DDI). Sem DDD o wa.me abriria uma conversa com número inexistente;
+    vazio faz a tela mostrar "telefone incompleto" e levar ao cadastro.
+    """
     digitos = "".join(c for c in (telefone or "") if c.isdigit())
-    if not digitos:
-        return ""
-    if not digitos.startswith("55") or len(digitos) < 12:
-        digitos = "55" + digitos
-    return digitos
+    if len(digitos) in (10, 11):
+        return "55" + digitos
+    if len(digitos) in (12, 13) and digitos.startswith("55"):
+        return digitos
+    return ""
 
 
 def _primeiro_nome(cliente):
