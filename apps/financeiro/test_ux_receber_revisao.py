@@ -5,11 +5,12 @@ URL estranhos, desfazer só a 2ª parte de uma cobrança, crédito usado e
 devolvido no mesmo lançamento, recibo de pagamento com crédito e login.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.contrib.messages import get_messages
+from django.utils import timezone
 
 from apps.financeiro import recibo, services
 from apps.financeiro.models import Cobranca, MovimentoCredito, Recebimento
@@ -32,7 +33,7 @@ def atrasada(cliente):
         origem=Cobranca.Origem.ALUGUEL,
         descricao="Aluguel semanal ABC1D23",
         valor=Decimal("650.00"),
-        vencimento=date.today() - timedelta(days=10),
+        vencimento=timezone.localdate() - timedelta(days=10),
         status=Cobranca.Status.ATRASADO,
     )
     services.atualizar_inadimplencia(cliente)
@@ -51,7 +52,7 @@ def test_toque_duplo_no_desfazer_avisa_em_vez_de_pagina_nao_encontrada(
     usuario_logado, cliente, atrasada
 ):
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
     )
     pk = recebimento.pk
     assert desfazer(usuario_logado, pk).status_code == 302
@@ -69,7 +70,7 @@ def test_desfazer_de_lancamento_que_nunca_existiu_e_404(usuario_logado, db):
 
 def test_servico_recusa_desfazer_duas_vezes(cliente, atrasada):
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
     )
     mesmo = Recebimento.objects.get(pk=recebimento.pk)  # a outra aba já tinha carregado
     services.desfazer_recebimento(recebimento)
@@ -79,7 +80,7 @@ def test_servico_recusa_desfazer_duas_vezes(cliente, atrasada):
 
 def test_desfazer_exige_login(client, cliente, atrasada):
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
     )
     resposta = desfazer(client, recebimento.pk)
     assert resposta.status_code == 302
@@ -107,13 +108,13 @@ def test_desfazer_so_a_segunda_parte_volta_a_parcial_com_o_saldo_certo(cliente):
         origem=Cobranca.Origem.ALUGUEL,
         descricao="Aluguel da semana que vem",
         valor=Decimal("650.00"),
-        vencimento=date.today() + timedelta(days=5),
+        vencimento=timezone.localdate() + timedelta(days=5),
     )
     services.registrar_recebimento(
-        cliente, date.today(), Decimal("300.00"), "pix", [(futura, Decimal("300.00"))]
+        cliente, timezone.localdate(), Decimal("300.00"), "pix", [(futura, Decimal("300.00"))]
     )
     segundo = services.registrar_recebimento(
-        cliente, date.today(), Decimal("350.00"), "dinheiro", [(futura, Decimal("350.00"))]
+        cliente, timezone.localdate(), Decimal("350.00"), "dinheiro", [(futura, Decimal("350.00"))]
     )
     futura.refresh_from_db()
     assert futura.status == Cobranca.Status.PAGO
@@ -129,11 +130,11 @@ def test_desfazer_judicial_abatido_em_parte_continua_judicial(cliente):
         origem=Cobranca.Origem.ALUGUEL,
         descricao="Acordo judicial",
         valor=Decimal("1000.00"),
-        vencimento=date.today() - timedelta(days=60),
+        vencimento=timezone.localdate() - timedelta(days=60),
         status=Cobranca.Status.JUDICIAL,
     )
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("200.00"), "pix", [(judicial, Decimal("200.00"))]
+        cliente, timezone.localdate(), Decimal("200.00"), "pix", [(judicial, Decimal("200.00"))]
     )
     services.desfazer_recebimento(recebimento)
     judicial.refresh_from_db()
@@ -148,13 +149,13 @@ def test_desfaz_uso_de_credito_que_devolveu_sobra_ao_credito(cliente, atrasada):
     então não pode ser recusado com "o crédito já foi usado".
     """
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="entrada", valor=Decimal("700.00"), data=date.today()
+        cliente=cliente, tipo="entrada", valor=Decimal("700.00"), data=timezone.localdate()
     )
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("700.00"), "credito", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("700.00"), "credito", [(atrasada, Decimal("650.00"))]
     )
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="uso", valor=Decimal("50.00"), data=date.today()
+        cliente=cliente, tipo="uso", valor=Decimal("50.00"), data=timezone.localdate()
     )
     assert MovimentoCredito.saldo_do_cliente(cliente) == Decimal("0.00")
     services.desfazer_recebimento(recebimento)
@@ -165,10 +166,10 @@ def test_desfaz_uso_de_credito_que_devolveu_sobra_ao_credito(cliente, atrasada):
 
 def test_recibo_de_pagamento_com_credito_nao_diz_que_recebeu_dinheiro(cliente, atrasada):
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=date.today()
+        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=timezone.localdate()
     )
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "credito", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "credito", [(atrasada, Decimal("650.00"))]
     )
     texto = recibo.mensagem_recibo(services.resumo_recebimento(recebimento))
     assert "Usamos R$ 650,00 do seu crédito" in texto
@@ -177,10 +178,10 @@ def test_recibo_de_pagamento_com_credito_nao_diz_que_recebeu_dinheiro(cliente, a
 
 def test_resumo_de_pagamento_com_credito_diz_credito_usado(usuario_logado, cliente, atrasada):
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=date.today()
+        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=timezone.localdate()
     )
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "credito", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "credito", [(atrasada, Decimal("650.00"))]
     )
     html = usuario_logado.get(URL, {"cliente": cliente.pk, "recibo": recebimento.pk})
     assert "Crédito usado: R$ 650,00" in html.content.decode()
@@ -188,7 +189,7 @@ def test_resumo_de_pagamento_com_credito_diz_credito_usado(usuario_logado, clien
 
 def test_sem_divida_nao_oferece_usar_o_credito(usuario_logado, cliente):
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="entrada", valor=Decimal("80.00"), data=date.today()
+        cliente=cliente, tipo="entrada", valor=Decimal("80.00"), data=timezone.localdate()
     )
     html = usuario_logado.get(URL, {"cliente": cliente.pk}).content.decode()
     assert "Usar o crédito" not in html
@@ -199,7 +200,7 @@ def test_toque_duplo_mostra_o_resumo_do_primeiro_lancamento(usuario_logado, clie
     dados = {
         "cliente": cliente.pk,
         "valor": "650,00",
-        "data": date.today().isoformat(),
+        "data": timezone.localdate().isoformat(),
         "forma": "pix",
         "sobra_destino": "credito",
         f"aplicar_{atrasada.pk}": "650,00",
@@ -214,7 +215,7 @@ def test_toque_duplo_mostra_o_resumo_do_primeiro_lancamento(usuario_logado, clie
 
 def test_botao_desfazer_trava_no_envio(usuario_logado, cliente, atrasada):
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
     )
     html = usuario_logado.get(URL, {"cliente": cliente.pk, "recibo": recebimento.pk})
     assert "this.querySelector('button').disabled = true" in html.content.decode()

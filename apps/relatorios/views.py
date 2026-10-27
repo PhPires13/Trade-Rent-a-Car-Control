@@ -2,7 +2,8 @@ from django.shortcuts import render
 from django.utils import timezone
 
 from apps.financeiro.periodos import ano_mes
-from apps.financeiro.services import resumo_fiscal
+from apps.financeiro.services import pagamentos_do_mes, resumo_fiscal
+from apps.financeiro.views import COLUNAS_PAGAMENTOS, _linhas_pagamentos
 
 from . import exportar, services
 
@@ -118,6 +119,8 @@ def _exportar(tipo, formato, ano, mes, hoje):
             _planilha_das(ano, mes),
             _PLANILHAS["recebiveis"](ano, mes),
             _PLANILHAS["frota"](ano, mes),
+            # cada pagamento que compõe o DAS (a 2ª aba do Financeiro › DAS)
+            _planilha_pagamentos_das(ano, mes),
         ]
         return exportar.planilha_xlsx_abas(f"contabilidade-{ano}-{mes:02d}", abas)
     if tipo not in _PLANILHAS:
@@ -138,6 +141,11 @@ def _planilha_das(ano, mes):
     linhas.append(["Pagos com crédito do cliente (já contados acima)", r["pago_com_credito"], "-"])
     linhas.append(["Total que entrou no caixa", r["entrou_no_caixa"], "-"])
     return "DAS", ["Grupo", "Valor (R$)", "Entra na base do DAS?"], linhas
+
+
+def _planilha_pagamentos_das(ano, mes):
+    """Cada pagamento que compõe o DAS — a mesma 2ª aba de Financeiro › DAS."""
+    return "Pagamentos do DAS", COLUNAS_PAGAMENTOS, _linhas_pagamentos(pagamentos_do_mes(ano, mes))
 
 
 def _planilha_receitas(ano, mes):

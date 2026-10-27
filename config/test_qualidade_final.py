@@ -244,7 +244,7 @@ def test_textos_do_painel_no_template():
     assert "Candidatos à desmobilização" not in texto
     assert "Carros para pensar em vender" in texto
     assert "ver quando vender" in texto
-    assert "vence agora" in texto
+    assert "p.texto_km" in texto  # "vence agora" / "vencida há ..." (retomada 17)
     assert "{% url 'multas:editar' multa.pk %}" in texto
     assert "{% url 'sinistros:editar' sinistro.pk %}" in texto
 

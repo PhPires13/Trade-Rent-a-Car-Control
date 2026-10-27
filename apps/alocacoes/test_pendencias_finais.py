@@ -4,10 +4,11 @@ Encerrar a alocação ou devolver o substituto com manutenção em aberto
 (entrada sem saída) deixa o carro "Em manutenção" — mesma regra da oficina.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.frota.models import Veiculo
@@ -15,7 +16,7 @@ from apps.manutencao.models import Manutencao
 from apps.manutencao.services import pode_voltar_a_disponivel
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

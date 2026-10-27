@@ -1,17 +1,18 @@
 """Pendências da frente multas-sinistros: "Quem pagou" é escolha, não texto livre (D23)."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.frota.models import Veiculo
 from apps.multas.models import Multa
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

@@ -1,9 +1,10 @@
 """Pendências das etapas 14/15 na frente pessoas: Recebi, Em aberto, condutor, dois carros."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services as financeiro
@@ -12,7 +13,7 @@ from apps.frota.models import Veiculo
 from apps.multas.models import Multa
 from apps.pessoas.models import Cliente, CondutorAutorizado
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

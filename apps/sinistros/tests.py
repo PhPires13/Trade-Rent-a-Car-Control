@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.frota.models import Veiculo
@@ -47,7 +48,7 @@ def test_auxilio_disponivel_apos_7_dias_parado(alocacao, veiculo):
         tipo="colisao",
         acionou_protecao=True,  # auxílio só com evento aberto (D26)
     )
-    hoje = date.today()
+    hoje = timezone.localdate()
     Manutencao.objects.create(
         veiculo=veiculo,
         tipo="corretiva",
@@ -66,7 +67,7 @@ def test_roubo_nao_gera_auxilio(alocacao, veiculo):
     sinistro = Sinistro.objects.create(
         veiculo=veiculo, data=date(2026, 7, 1), envolvido="terceiro", tipo="roubo"
     )
-    hoje = date.today()
+    hoje = timezone.localdate()
     Manutencao.objects.create(
         veiculo=veiculo,
         tipo="corretiva",
@@ -115,7 +116,7 @@ def test_telas_de_sinistros_renderizam(usuario_logado, alocacao, veiculo):
     sinistro = Sinistro.objects.create(
         veiculo=veiculo, data=date(2026, 7, 1), envolvido="associado", tipo="colisao"
     )
-    hoje = date.today()
+    hoje = timezone.localdate()
     Manutencao.objects.create(
         veiculo=veiculo,
         tipo="corretiva",

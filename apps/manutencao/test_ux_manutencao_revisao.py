@@ -1,15 +1,16 @@
 """Revisão da frente manutenção: valores negativos, datas futuras, parâmetros inválidos."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.test import Client
+from django.utils import timezone
 
 from apps.frota.models import Veiculo
 from apps.manutencao.models import ItemPreventiva, Manutencao
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

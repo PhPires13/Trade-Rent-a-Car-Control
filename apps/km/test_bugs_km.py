@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import Cobranca
@@ -154,7 +155,7 @@ def test_c15_lista_mostra_o_excedente_do_cliente_anterior(usuario_logado, veicul
 def test_c21_mes_absurdo_no_endereco_volta_para_o_mes_atual(usuario_logado, veiculo):
     resposta = usuario_logado.get("/km/?mes=9999-12")
     assert resposta.status_code == 200
-    assert resposta.context["mes"].year == date.today().year
+    assert resposta.context["mes"].year == timezone.localdate().year
     assert _mes_do_valor("9999-12") is None
     assert _mes_do_valor("0001-01") is None
     assert _mes_do_valor("2026-07") == date(2026, 7, 1)
@@ -164,7 +165,7 @@ def test_c21_mes_absurdo_no_endereco_volta_para_o_mes_atual(usuario_logado, veic
 
 
 def test_d19_mes_fechado_nao_sugere_data_e_pede_o_km_anotado(usuario_logado, veiculo):
-    passado = (date.today().replace(day=1) - timedelta(days=40)).replace(day=1)
+    passado = (timezone.localdate().replace(day=1) - timedelta(days=40)).replace(day=1)
     conteudo = usuario_logado.get(f"/km/?mes={passado:%Y-%m}").content.decode()
     ultimo_dia = (passado + timedelta(days=32)).replace(day=1) - timedelta(days=1)
     assert f'value="{ultimo_dia:%Y-%m-%d}"' not in conteudo
@@ -223,7 +224,7 @@ def test_d21_carro_sem_leitura_cobra_so_o_mes_atual(veiculo):
 
 
 def test_d21_chip_do_painel_mostra_o_mes_esquecido(usuario_logado, veiculo):
-    hoje = date.today()
+    hoje = timezone.localdate()
     dois_meses_atras = (hoje.replace(day=1) - timedelta(days=40)).replace(day=15)
     registrar(veiculo, dois_meses_atras, 15_000)
     esquecido = (hoje.replace(day=1) - timedelta(days=1)).replace(day=1)
@@ -317,7 +318,7 @@ def test_d22_mes_faltando_continua_rateado(veiculo, contrato_desde_janeiro):
 
 
 def _contrato_ilimitado(veiculo):
-    hoje = date.today()
+    hoje = timezone.localdate()
     alocacao = alocar(
         veiculo,
         cliente("Arlen", "111.222.333-44"),
@@ -340,7 +341,7 @@ def _passar_para_limitado(alocacao):
 
 def test_d30_mudanca_de_contrato_nao_cobra_leitura_feita_antes(veiculo):
     alocacao = _contrato_ilimitado(veiculo)
-    hoje = date.today()
+    hoje = timezone.localdate()
     registrar(veiculo, hoje, 16_200)  # 4.200 km com contrato ilimitado
 
     _passar_para_limitado(alocacao)
@@ -351,7 +352,7 @@ def test_d30_mudanca_de_contrato_nao_cobra_leitura_feita_antes(veiculo):
 def test_d30_leitura_feita_depois_da_mudanca_usa_os_termos_novos(veiculo):
     alocacao = _contrato_ilimitado(veiculo)
     _passar_para_limitado(alocacao)
-    hoje = date.today()
+    hoje = timezone.localdate()
     registrar(veiculo, hoje, 16_200)
 
     [cobranca] = gerar_excedentes_pendentes(hoje=hoje)

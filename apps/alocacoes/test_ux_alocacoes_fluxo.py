@@ -1,11 +1,12 @@
 """Entrega e devolução guiadas + sugestões do cadastro na nova alocação (propostas #7 e #15)."""
 
 import json
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, Vistoria
 from apps.financeiro import services as financeiro
@@ -33,7 +34,7 @@ def _alocar(veiculo, cliente, **extra):
     dados = {
         "veiculo": veiculo,
         "cliente": cliente,
-        "data_inicio": date.today(),
+        "data_inicio": timezone.localdate(),
         "valor_semanal": Decimal("650.00"),
         "km_entrega": veiculo.km_atual,
     }
@@ -77,7 +78,7 @@ def test_sugestao_continua_editavel(usuario_logado, veiculo, cliente):
         {
             "veiculo": veiculo.pk,
             "cliente": cliente.pk,
-            "data_inicio": date.today().isoformat(),
+            "data_inicio": timezone.localdate().isoformat(),
             "valor_semanal": "650,00",
             "dia_vencimento": str(Cliente.DiaSemana.SEXTA),
             "caucao_valor": "",
@@ -99,7 +100,7 @@ def test_alocar_leva_para_a_ficha_com_os_proximos_passos(usuario_logado, veiculo
         {
             "veiculo": veiculo.pk,
             "cliente": cliente.pk,
-            "data_inicio": date.today().isoformat(),
+            "data_inicio": timezone.localdate().isoformat(),
             "valor_semanal": "650,00",
             "dia_vencimento": "",
             "caucao_valor": "1.000,00",
@@ -127,7 +128,9 @@ def test_passos_se_marcam_sozinhos_e_cartao_some(usuario_logado, veiculo, client
     ficha = f"/clientes/{cliente.pk}/"
 
     usuario_logado.get(f"/alocacoes/{alocacao.pk}/contrato/")  # abriu para imprimir
-    Vistoria.objects.create(alocacao=alocacao, tipo=Vistoria.Tipo.ENTRADA, data=date.today())
+    Vistoria.objects.create(
+        alocacao=alocacao, tipo=Vistoria.Tipo.ENTRADA, data=timezone.localdate()
+    )
     html = usuario_logado.get(ficha).content.decode()
     assert "faltam 2 de 4" in html
     assert html.count('aria-label="Feito"') == 2
@@ -136,7 +139,7 @@ def test_passos_se_marcam_sozinhos_e_cartao_some(usuario_logado, veiculo, client
     primeira = alocacao.cobrancas.get()
     financeiro.registrar_recebimento(
         cliente=cliente,
-        data=date.today(),
+        data=timezone.localdate(),
         valor=primeira.valor,
         forma="pix",
         aplicacoes=[(primeira, primeira.valor)],
@@ -189,14 +192,14 @@ def test_encerrar_destaca_vistoria_de_devolucao_que_falta(usuario_logado, veicul
 def test_encerrar_preenche_km_e_data_da_vistoria_e_compara_avarias(
     usuario_logado, veiculo, cliente
 ):
-    alocacao = _alocar(veiculo, cliente, data_inicio=date.today() - timedelta(days=30))
+    alocacao = _alocar(veiculo, cliente, data_inicio=timezone.localdate() - timedelta(days=30))
     Vistoria.objects.create(
         alocacao=alocacao,
         tipo=Vistoria.Tipo.ENTRADA,
         data=alocacao.data_inicio,
         avarias="Risco na porta traseira",
     )
-    ontem = date.today() - timedelta(days=1)
+    ontem = timezone.localdate() - timedelta(days=1)
     Vistoria.objects.create(
         alocacao=alocacao,
         tipo=Vistoria.Tipo.SAIDA,
@@ -214,14 +217,14 @@ def test_encerrar_preenche_km_e_data_da_vistoria_e_compara_avarias(
 
 
 def test_encerrar_mostra_o_que_o_cliente_deve(usuario_logado, veiculo, cliente):
-    alocacao = _alocar(veiculo, cliente, data_inicio=date.today() - timedelta(days=10))
+    alocacao = _alocar(veiculo, cliente, data_inicio=timezone.localdate() - timedelta(days=10))
     Cobranca.objects.create(
         cliente=cliente,
         alocacao=alocacao,
         origem=Cobranca.Origem.OUTRO,
         descricao="Lavagem",
         valor=Decimal("80.00"),
-        vencimento=date.today() - timedelta(days=2),
+        vencimento=timezone.localdate() - timedelta(days=2),
     )
     html = usuario_logado.get(f"/alocacoes/{alocacao.pk}/encerrar/").content.decode()
     assert "Bruna deve R$ 80,00 hoje" in html
@@ -257,7 +260,7 @@ def test_primeira_semana_paga_em_parte_mostra_o_que_falta(usuario_logado, veicul
     primeira = alocacao.cobrancas.get()
     financeiro.registrar_recebimento(
         cliente=cliente,
-        data=date.today(),
+        data=timezone.localdate(),
         valor=Decimal("200.00"),
         forma="pix",
         aplicacoes=[(primeira, Decimal("200.00"))],
@@ -270,7 +273,7 @@ def test_primeira_semana_paga_em_parte_mostra_o_que_falta(usuario_logado, veicul
 def test_vistoria_volta_para_a_tela_de_onde_veio(usuario_logado, veiculo, cliente):
     alocacao = _alocar(veiculo, cliente)
     ficha = f"/clientes/{cliente.pk}/"
-    dados = {"tipo": "entrada", "data": date.today().isoformat(), "combustivel": "cheio"}
+    dados = {"tipo": "entrada", "data": timezone.localdate().isoformat(), "combustivel": "cheio"}
     resposta = usuario_logado.post(
         f"/alocacoes/{alocacao.pk}/vistoria/nova/?tipo=entrada&voltar={ficha}", dados
     )

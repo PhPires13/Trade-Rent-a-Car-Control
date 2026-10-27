@@ -1,10 +1,11 @@
 """Qualidade final — alocações: datas, KM, troca, vistoria, encerramento e telas."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.alocacoes.entrega import situacao_da_devolucao
 from apps.alocacoes.models import Alocacao, TrocaTemporaria, Vistoria
@@ -14,7 +15,7 @@ from apps.frota.models import Categoria, Veiculo
 from apps.manutencao.models import Manutencao
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

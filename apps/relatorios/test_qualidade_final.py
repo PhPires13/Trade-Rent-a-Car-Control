@@ -8,6 +8,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from apps.financeiro.models import Cobranca
@@ -172,7 +173,7 @@ def test_card_de_receitas_explica_a_diferenca_com_o_caixa_do_das(usuario_logado,
 
 
 def test_recebiveis_e_frota_dizem_que_sao_de_hoje(usuario_logado, db):
-    hoje = date.today()
+    hoje = timezone.localdate()
     html = usuario_logado.get("/relatorios/?mes=2026-03").content.decode()
     assert f"(hoje, {hoje:%d/%m/%Y})" in html
     assert "Resumo da frota" in html and "(hoje)" in html
@@ -181,7 +182,7 @@ def test_recebiveis_e_frota_dizem_que_sao_de_hoje(usuario_logado, db):
 @pytest.mark.parametrize("tipo", ["recebiveis", "frota"])
 def test_arquivo_de_hoje_leva_a_data_de_hoje(usuario_logado, db, tipo):
     resposta = usuario_logado.get("/relatorios/", {"mes": "2026-03", "exportar": tipo})
-    assert f"{tipo}-{date.today().isoformat()}.xlsx" in resposta["Content-Disposition"]
+    assert f"{tipo}-{timezone.localdate().isoformat()}.xlsx" in resposta["Content-Disposition"]
 
 
 def test_arquivo_do_mes_leva_o_mes(usuario_logado, db):
@@ -222,14 +223,14 @@ def test_caixinha_de_mes_vai_direto_ao_mes_escolhido(usuario_logado, db):
     html = usuario_logado.get("/relatorios/?mes=2025-04").content.decode()
     assert "data-escolher-mes" in html
     assert '<option value="2025-04" selected>Abril de 2025</option>' in html
-    hoje = date.today()
+    hoje = timezone.localdate()
     assert f'value="{hoje.year}-{hoje.month:02d}"' in html
 
 
 @pytest.mark.parametrize("mes", ["2026-13", "banana", "0001-01"])
 def test_mes_invalido_avisa(usuario_logado, db, mes):
     resposta = usuario_logado.get(f"/relatorios/?mes={mes}")
-    hoje = date.today()
+    hoje = timezone.localdate()
     assert (resposta.context["ano"], resposta.context["mes"]) == (hoje.year, hoje.month)
     assert "Mês inválido — mostrando o mês atual" in resposta.content.decode()
 

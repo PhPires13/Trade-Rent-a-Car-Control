@@ -3,11 +3,12 @@ franquia exige a data do evento, data do roubo corrigida, lembrete/botão da
 franquia na lista, datas do auxílio e da recuperação, ?volta= sem barra,
 cadastro sem "Situação" e admin sem N+1."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import Cobranca
@@ -17,7 +18,7 @@ from apps.sinistros import services
 from apps.sinistros.models import AuxilioMotorista, Sinistro
 from apps.sinistros.views import SinistroForm
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

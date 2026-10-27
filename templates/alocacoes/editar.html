@@ -20,8 +20,8 @@
     <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
     {% if field.name == "limite_km" %}
       <select name="limite_km" id="{{ field.id_for_label }}" x-model="limite">
-        <option value="ilimitado">Ilimitado</option>
-        <option value="limitado">Limitado</option>
+        <option value="ilimitado"{% if field.value != "limitado" %} selected{% endif %}>Ilimitado</option>
+        <option value="limitado"{% if field.value == "limitado" %} selected{% endif %}>Limitado</option>
       </select>
     {% else %}
       {{ field }}

@@ -72,7 +72,8 @@
     </div>
     {% endif %}
   </a>
-  <a href="{% url 'financeiro:cobrancas' %}?status=atrasado" class="rounded-lg {% if atrasado_total %}bg-red-50 ring-1 ring-red-200{% else %}bg-white{% endif %} p-4 shadow hover:ring-2 hover:ring-red-300">
+  {# o total soma atraso, judicial e vencidas que a rotina ainda não marcou: "Quem deve" mostra todas #}
+  <a href="{% url 'financeiro:quem_deve' %}" class="rounded-lg {% if atrasado_total %}bg-red-50 ring-1 ring-red-200{% else %}bg-white{% endif %} p-4 shadow hover:ring-2 hover:ring-red-300">
     <div class="text-sm text-gray-500">Em atraso</div>
     <div class="text-2xl font-black {% if atrasado_total %}text-red-700{% else %}text-green-700{% endif %}">{{ atrasado_total|brl }}</div>
     <div class="text-xs text-gray-500">{% if atrasado_total %}saldo vencido a cobrar →{% else %}ninguém em atraso{% endif %}</div>
@@ -113,8 +114,10 @@
   <ul class="gap-8 space-y-1 text-sm sm:columns-2">
     {% for alerta in vigencias %}
     <li class="break-inside-avoid">
+      {% if alerta.url %}<a href="{{ alerta.url }}" class="-mx-2 block rounded px-2 py-1 hover:bg-gray-50">{% endif %}
       <span class="{% if alerta.vencido %}font-semibold text-red-700{% else %}text-yellow-800{% endif %}">{{ alerta.data|date:"d/m/Y" }}</span>
-      — {{ alerta.descricao }}{% if alerta.vencido %} <span class="text-xs font-semibold text-red-700">(vencido)</span>{% endif %}
+      — <span{% if alerta.url %} class="underline"{% endif %}>{{ alerta.descricao }}</span>{% if alerta.vencido %} <span class="text-xs font-semibold text-red-700">(vencido)</span>{% endif %}
+      {% if alerta.url %}</a>{% endif %}
     </li>
     {% endfor %}
   </ul>
@@ -203,9 +206,8 @@
         <a href="{% url 'manutencao:preventivas' %}#veiculo-{{ veiculo.pk }}" class="font-semibold underline">{{ veiculo.placa }}</a> ({{ veiculo.km_atual|milhar }} km):
         {% for p in itens %}
           {{ p.item.nome }}
-          {% if p.faltam_km == 0 %}<span class="font-semibold text-red-700">vence agora</span>
-          {% elif p.faltam_km < 0 %}<span class="font-semibold text-red-700">vencida há {{ p.faltam_km|milhar|cut:"-" }} km</span>
-          {% else %}<span class="text-yellow-800">faltam {{ p.faltam_km|milhar }} km{% if p.dias_restantes == 0 %} (no ritmo do carro, deve vencer hoje){% elif p.dias_restantes is not None %} (≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }} no ritmo do carro){% endif %}</span>{% endif %}
+          {% if p.faltam_km <= 0 %}<span class="font-semibold text-red-700">{{ p.texto_km }}</span>
+          {% else %}<span class="text-yellow-800">{{ p.texto_km }}{% if p.dias_restantes == 0 %} (no ritmo do carro, deve vencer hoje){% elif p.dias_restantes is not None %} (≈ {{ p.dias_restantes }} dia{{ p.dias_restantes|pluralize }} no ritmo do carro){% endif %}</span>{% endif %}
           {% if not forloop.last %} · {% endif %}
         {% endfor %}
       </li>

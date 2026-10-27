@@ -1,4 +1,5 @@
-from datetime import date, timedelta
+import json
+from datetime import timedelta
 from uuid import uuid4
 
 from django import forms
@@ -10,9 +11,10 @@ from django.db.models import Max
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
-from apps.campos import FormularioBR, exibir_dinheiro
+from apps.campos import FormularioBR, exibir_dinheiro, ler_data
 from apps.financeiro.models import Caucao
 from apps.financeiro.services import gerar_cobrancas_semanais
 from apps.financeiro.views import _envio_unico
@@ -40,7 +42,7 @@ def dividas_por_cliente(clientes_ids=None):
     cobrancas = Cobranca.objects.filter(status__in=Cobranca.STATUS_DEVIDOS)
     if clientes_ids is not None:
         cobrancas = cobrancas.filter(cliente_id__in=clientes_ids)
-    hoje = date.today()
+    hoje = timezone.localdate()
     dividas = {}
     for cobranca in Cobranca.com_quitacao_anotada(cobrancas):
         if cobranca.saldo <= 0:
@@ -78,10 +80,14 @@ def texto_da_divida(cliente, divida):
 
 
 def _data_do_post(dados, campo):
-    """Data digitada no formulário ainda não validado (ou None)."""
+    """Data digitada no formulário ainda não validado (ou None).
+
+    Mesmos formatos do formulário (ler_data): "01/07/26" também conta, senão a
+    confirmação de semanas atrasadas (D01) era pulada.
+    """
     try:
-        return date.fromisoformat(str(dados.get(campo, "")).strip())
-    except ValueError:
+        return ler_data(dados.get(campo, ""))
+    except ValidationError:
         return None
 
 
@@ -92,7 +98,7 @@ def _int_do_post(dados, campo):
 
 def semanas_a_lancar(inicio, hoje=None):
     """Quantas semanas de aluguel nascem de uma vez para um contrato que começou em `inicio`."""
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     if inicio is None or inicio > hoje:
         return 0
     return (hoje - inicio).days // 7 + 1
@@ -155,7 +161,7 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        hoje = date.today()
+        hoje = timezone.localdate()
         self.fields["data_inicio"].widget.attrs["max"] = hoje.isoformat()
         self.fields["veiculo"].queryset = Veiculo.objects.filter(
             status=Veiculo.Status.DISPONIVEL, uso=Veiculo.Uso.LOCACAO
@@ -252,7 +258,7 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
 
     def _data_nao_antiga_demais(self, campo):
         valor = self.cleaned_data.get(campo)
-        if valor and valor < date.today() - timedelta(days=self.DIAS_PASSADO_MAXIMO):
+        if valor and valor < timezone.localdate() - timedelta(days=self.DIAS_PASSADO_MAXIMO):
             raise ValidationError(f"Confira o ano — {valor:%d/%m/%Y} está longe demais.")
         return valor
 
@@ -261,7 +267,7 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
         "Cobrar aluguel a partir de" está preenchido com data recente: aí só o
         histórico usa o início e nenhuma semana antiga é lançada."""
         valor = self.cleaned_data.get("data_inicio")
-        limite = date.today() - timedelta(days=self.DIAS_PASSADO_MAXIMO)
+        limite = timezone.localdate() - timedelta(days=self.DIAS_PASSADO_MAXIMO)
         cobrar = _data_do_post(self.data, "cobrar_a_partir_de")
         if valor and valor < limite and not (cobrar and cobrar >= limite):
             raise ValidationError(
@@ -285,7 +291,7 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
         semanas desde março, todas atrasadas, e o motorista vira inadimplente.
         """
         dados = super().clean()
-        hoje = date.today()
+        hoje = timezone.localdate()
         inicio = dados.get("data_inicio")
         antigo = inicio and inicio < hoje - timedelta(days=self.DIAS_INICIO_ANTIGO)
         if (
@@ -409,7 +415,7 @@ class TrocaForm(FormularioBR, forms.ModelForm):
             # as regras da troca (data, alocação ativa) já valem ao validar o formulário
             self.instance.alocacao = alocacao
         self.fields["km_retirada"].label = "KM do substituto ao sair"
-        self.fields["data_retirada"].widget.attrs["max"] = date.today().isoformat()
+        self.fields["data_retirada"].widget.attrs["max"] = timezone.localdate().isoformat()
         if alocacao is not None:
             self.fields["data_retirada"].widget.attrs["min"] = alocacao.data_inicio.isoformat()
         # KM menor que o já conhecido do substituto (D27): pede confirmação
@@ -502,8 +508,16 @@ class VistoriaForm(FormularioBR, forms.ModelForm):
         self.initial.setdefault(
             "veiculo", troca.veiculo_substituto_id if troca else alocacao.veiculo_id
         )
-        self.fields["data"].widget.attrs["min"] = alocacao.data_inicio.isoformat()
-        self.fields["data"].widget.attrs["max"] = date.today().isoformat()
+        # data mínima = desde quando o motorista está com o carro escolhido (no
+        # substituto, a retirada); o script da tela troca o min ao mudar o carro
+        inicios = {str(v.pk): self._inicio_do_carro(v)[0].isoformat() for v in campo.queryset}
+        campo.widget.attrs["data-inicios"] = json.dumps(inicios)
+        escolhido = self.data.get("veiculo") if self.is_bound else None
+        escolhido = escolhido or self.initial.get("veiculo")
+        self.fields["data"].widget.attrs["min"] = inicios.get(
+            str(escolhido), alocacao.data_inicio.isoformat()
+        )
+        self.fields["data"].widget.attrs["max"] = timezone.localdate().isoformat()
 
     def clean_veiculo(self):
         veiculo = self.cleaned_data.get("veiculo")
@@ -522,14 +536,14 @@ class VistoriaForm(FormularioBR, forms.ModelForm):
                 .first()
             )
             if retirada:
-                return retirada, "a retirada do substituto"
-        return self.alocacao.data_inicio, "o início da locação"
+                return retirada, "da retirada do substituto"
+        return self.alocacao.data_inicio, "do início da locação"
 
     def clean(self):
         dados = super().clean()
         veiculo, km, data = dados.get("veiculo"), dados.get("km"), dados.get("data")
         if veiculo and data:
-            if data > date.today():
+            if data > timezone.localdate():
                 self.add_error("data", "A data da vistoria não pode ser no futuro.")
                 data = None
             else:
@@ -537,7 +551,7 @@ class VistoriaForm(FormularioBR, forms.ModelForm):
                 if data < inicio:
                     self.add_error(
                         "data",
-                        f"A vistoria não pode ser antes de {rotulo_inicio} ({inicio:%d/%m/%Y}).",
+                        f"A vistoria não pode ser antes {rotulo_inicio} ({inicio:%d/%m/%Y}).",
                     )
                     data = None
         if veiculo and km and data:
@@ -569,7 +583,7 @@ def _avisar_erro_de_devolucao(request, erro):
 
 def _data_e_km_da_devolucao(post, campo_data):
     """Lê data e KM do POST; KM grande demais vira mensagem, não erro 500 (D27)."""
-    data = date.fromisoformat(post[campo_data])
+    data = ler_data(post.get(campo_data))
     km = int(post["km_devolucao"])
     if km > KM_MAXIMO:
         raise ValidationError("KM grande demais — confira os dígitos.")
@@ -670,7 +684,7 @@ class _FormularioComErro(Exception):
 
 
 def nova(request):
-    inicial = {"data_inicio": date.today()}
+    inicial = {"data_inicio": timezone.localdate()}
     veiculo_id = request.GET.get("veiculo", "")
     if veiculo_id.isdigit():
         inicial["veiculo"] = veiculo_id
@@ -775,7 +789,7 @@ def _depois_de_alocar(request, alocacao):
             f"{oficina.data_entrada:%d/%m/%Y}. Se já voltou, marque "
             "“Carro voltou da oficina” no histórico de manutenção.",
         )
-    if cliente.cnh_validade and cliente.cnh_validade < date.today():
+    if cliente.cnh_validade and cliente.cnh_validade < timezone.localdate():
         messages.warning(
             request,
             f"Atenção: a CNH de {cliente.nome} está vencida desde {cliente.cnh_validade:%d/%m/%Y}.",
@@ -901,7 +915,7 @@ def encerrar(request, alocacao_id):
         "alocacoes/encerrar.html",
         {
             "alocacao": alocacao,
-            "hoje": date.today(),
+            "hoje": timezone.localdate(),
             "caucao": _caucao_com_saldo(alocacao),
             "troca_ativa": alocacao.troca_ativa,
             "km_sugerido": km_sugerido,
@@ -943,7 +957,7 @@ def troca_nova(request, alocacao_id):
         Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
     )
     form = TrocaForm(
-        request.POST or None, initial={"data_retirada": date.today()}, alocacao=alocacao
+        request.POST or None, initial={"data_retirada": timezone.localdate()}, alocacao=alocacao
     )
     if request.method == "POST" and form.is_valid():
         troca = form.save(commit=False)
@@ -1034,7 +1048,7 @@ def troca_devolver(request, troca_id):
         "alocacoes/troca_devolver.html",
         {
             "troca": troca,
-            "hoje": date.today(),
+            "hoje": timezone.localdate(),
             "aviso_km": aviso_km,
             "oficina_principal": oficina_principal,
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
@@ -1063,7 +1077,7 @@ def contrato(request, alocacao_id):
     )
     if alocacao.contrato_aberto_em is None:
         # marca o passo "Imprimir o contrato" do cartão de próximos passos da entrega
-        alocacao.contrato_aberto_em = date.today()
+        alocacao.contrato_aberto_em = timezone.localdate()
         alocacao.save(update_fields=["contrato_aberto_em"])
     return render(
         request,
@@ -1078,7 +1092,7 @@ def contrato(request, alocacao_id):
                 "endereco": settings.EMPRESA_ENDERECO,
                 "cidade_uf": settings.EMPRESA_CIDADE_UF,
             },
-            "hoje": date.today(),
+            "hoje": timezone.localdate(),
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
             "empresa_incompleta": not (settings.EMPRESA_CNPJ and settings.EMPRESA_ENDERECO),
         },
@@ -1105,7 +1119,7 @@ def vistoria_imprimir(request, alocacao_id):
             "veiculo": veiculo,
             "itens": checklist.ITENS_CHECKLIST,
             "checklist_leitura": checklist.disponivel(),
-            "hoje": date.today(),
+            "hoje": timezone.localdate(),
             "combustiveis": Vistoria.Combustivel.choices,
         },
     )
@@ -1116,7 +1130,7 @@ def vistoria_nova(request, alocacao_id):
     alocacao = get_object_or_404(
         Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
     )
-    inicial = {"data": date.today()}
+    inicial = {"data": timezone.localdate()}
     troca = alocacao.troca_ativa
     vigente = troca.veiculo_substituto if troca else alocacao.veiculo
     if request.GET.get("tipo") in Vistoria.Tipo.values:

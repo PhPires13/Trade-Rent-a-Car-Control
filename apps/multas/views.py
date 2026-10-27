@@ -7,11 +7,12 @@ from django.core.paginator import Paginator
 from django.http import Http404, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import urlencode
 from django.views.decorators.cache import never_cache
 
 from apps.alocacoes.services import cliente_vigente
-from apps.campos import CampoDinheiro
+from apps.campos import CampoDinheiro, ler_data
 from apps.financeiro import services as financeiro_services
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
@@ -52,7 +53,7 @@ def _voltar_para_lista(request, ancora=""):
 
 
 def lista(request):
-    hoje = date.today()
+    hoje = timezone.localdate()
     multas = Multa.objects.select_related("veiculo", "cliente", "orgao").prefetch_related(
         Multa.PREFETCH_REPASSE
     )
@@ -124,7 +125,7 @@ def nova(request):
     reenviar o mesmo formulário (internet lenta, Voltar, duas abas) não grava
     a multa duas vezes — senão o cliente acabava cobrado em dobro."""
     token = request.POST.get("token", "") if request.method == "POST" else ""
-    form = MultaForm(request.POST or None, initial={"data_infracao": date.today()})
+    form = MultaForm(request.POST or None, initial={"data_infracao": timezone.localdate()})
     if request.method == "POST" and form.is_valid():
         # mesma trava da ND: a linha da sessão fica travada até gravar, então o 2º
         # envio de um clique duplo com internet lenta espera e vê o código já usado
@@ -221,7 +222,7 @@ def indicar_fici(request, multa_id):
         )
     elif request.method == "POST":
         multa.fici_status = Multa.Fici.INDICADO
-        multa.fici_data_indicacao = date.today()
+        multa.fici_data_indicacao = timezone.localdate()
         multa.save(update_fields=["fici_status", "fici_data_indicacao"])
         messages.success(request, f"FICI indicado para {multa}.")
     return _voltar_para_lista(request)
@@ -249,7 +250,7 @@ def registrar_nic(request, multa_id):
                 f"“{multa.get_fici_status_display()}” — não há NIC a registrar.",
             )
             return _voltar_para_lista(request)
-        if multa.fici_prazo and multa.fici_prazo >= date.today():
+        if multa.fici_prazo and multa.fici_prazo >= timezone.localdate():
             # dentro do prazo ainda dá para indicar — a NIC criaria multa à toa (UX #13)
             messages.error(
                 request,
@@ -312,7 +313,7 @@ def gerar_nd(request):
             if vencimento["data"] is None:
                 raise ValidationError("Vencimento inválido — use uma data a partir de hoje.")
             nd = services.gerar_nd_de_multas(
-                cliente, selecionadas, date.today(), vencimento=vencimento["data"]
+                cliente, selecionadas, timezone.localdate(), vencimento=vencimento["data"]
             )
             messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")
             return redirect("financeiro:nds")
@@ -332,7 +333,7 @@ def _vencimento_nd(cliente, request):
     ele vira inadimplente sozinho. A pessoa pode trocar a data no formulário;
     data inválida ou antes de hoje fica em "data" = None (o POST mostra o erro).
     """
-    hoje = date.today()
+    hoje = timezone.localdate()
     dia = financeiro_services.dia_pagamento(cliente)
     sugerido = financeiro_services.proximo_dia_pagamento(cliente, hoje, dia=dia)
     if dia is None:
@@ -343,8 +344,8 @@ def _vencimento_nd(cliente, request):
     digitado = request.POST.get("vencimento", "") if request.method == "POST" else ""
     if digitado:
         try:
-            data = date.fromisoformat(digitado)
-        except ValueError:
+            data = ler_data(digitado)
+        except ValidationError:
             data = None
         if data is not None and data < hoje:
             data = None

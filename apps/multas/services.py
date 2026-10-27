@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Q
+from django.utils import timezone
 
 from apps.financeiro.models import Cobranca, ItemNotaDebito, NotaDebito
 from apps.financeiro.services import proximo_dia_pagamento
@@ -36,7 +37,7 @@ def registrar_nic(multa, data_infracao=None, valor=None):
         cliente=multa.cliente,
         # a NIC é uma multa nova: entra na data em que foi registrada, não na da
         # infração original — o mês dela pode já ter ido para a contabilidade
-        data_infracao=data_infracao or date.today(),
+        data_infracao=data_infracao or timezone.localdate(),
         orgao=multa.orgao,
         descricao="Multa por não indicação de condutor (NIC)",
         valor=valor,
@@ -96,7 +97,7 @@ def alertas_fici(hoje=None):
     prazo real pode passar sem ninguém ver e virar NIC. O painel mostra
     "prazo não informado" nessas.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     limite = hoje + timedelta(days=DIAS_ALERTA_FICI)
     return (
         Multa.objects.fici_pendente()
@@ -167,7 +168,7 @@ def filtrar_tarefa(multas, tarefa):
 
 def contar_tarefas(multas, hoje=None):
     """Contadores dos botões-atalho numa consulta só, mais as de prazo já vencido."""
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     filtros = _filtros_tarefa()
     contas = {nome: Count("pk", filter=filtro) for nome, filtro in filtros.items()}
     contas["indicar_vencidas"] = Count("pk", filter=filtros["indicar"] & Q(fici_prazo__lt=hoje))

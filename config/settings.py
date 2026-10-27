@@ -142,6 +142,8 @@ AXES_COOLOFF_MESSAGE = (
     "bloqueado por 15 minutos — tente de novo mais tarde."
 )
 
+# fetch() com a página velha (token CSRF trocado) recebe JSON com o motivo
+CSRF_FAILURE_VIEW = "config.middleware.falha_csrf"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "painel"
 LOGOUT_REDIRECT_URL = "login"

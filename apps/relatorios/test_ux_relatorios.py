@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services as financeiro
@@ -109,7 +110,7 @@ def test_titulo_com_nome_do_mes_e_setas(usuario_logado, cenario):
 
 
 def test_mes_atual_nao_tem_seta_pra_frente(usuario_logado, db):
-    hoje = date.today()
+    hoje = timezone.localdate()
     html = usuario_logado.get(f"/relatorios/?mes={hoje:%Y-%m}").content.decode()
     assert "próximo mês" not in html
     assert "mês anterior" in html
@@ -195,7 +196,7 @@ def test_mes_positivo_nao_tem_faltou(cenario):
 
 @pytest.mark.parametrize("mes", ["0001-01", "0001-03", "1999-12", "9999-12"])
 def test_ano_absurdo_na_url_cai_no_mes_atual(usuario_logado, db, mes):
-    hoje = date.today()
+    hoje = timezone.localdate()
     resposta = usuario_logado.get(f"/relatorios/?mes={mes}")
     assert resposta.status_code == 200
     assert (resposta.context["ano"], resposta.context["mes"]) == (hoje.year, hoje.month)
@@ -208,7 +209,7 @@ def test_exportar_com_ano_absurdo_nao_quebra(usuario_logado, db):
 
 def test_mes_futuro_cai_no_mes_atual_com_aviso(usuario_logado, db):
     # qualidade final: mês que ainda não começou mostra o mês atual e avisa
-    hoje = date.today()
+    hoje = timezone.localdate()
     resposta = usuario_logado.get(f"/relatorios/?mes={hoje.year + 1}-01")
     html = resposta.content.decode()
     assert (resposta.context["ano"], resposta.context["mes"]) == (hoje.year, hoje.month)

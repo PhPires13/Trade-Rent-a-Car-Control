@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
+from apps.campos import ler_data
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 
@@ -255,7 +256,7 @@ def registrar(request, veiculo_id):
         "observacoes": request.POST.get("observacoes", ""),
     }
     try:
-        data_leitura = ano_razoavel(date.fromisoformat(request.POST["data_leitura"]))
+        data_leitura = ano_razoavel(ler_data(request.POST["data_leitura"], "Data da leitura"))
         mes_da_tela = mes_da_tela or primeiro_dia_do_mes(data_leitura)
         registro = RegistroKm(
             veiculo=veiculo,

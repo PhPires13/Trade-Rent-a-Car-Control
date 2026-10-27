@@ -1,9 +1,8 @@
-from datetime import date
-
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MaxValueValidator
 from django.db import models, transaction
 from django.db.models import Max
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.campos import validar_tamanho_arquivo
@@ -23,7 +22,7 @@ EXTENSOES_VISTORIA = ["jpg", "jpeg", "png", "webp", "pdf"]
 
 def _validar_data_nao_futura(data, rotulo="devolução"):
     """C02: término/devolução no futuro deixava o ex-cliente sendo cobrado até lá."""
-    if data > date.today():
+    if data > timezone.localdate():
         raise ValidationError(f"A data de {rotulo} não pode ser no futuro.")
 
 
@@ -162,7 +161,7 @@ class Alocacao(models.Model):
         if self._state.adding:
             # data no futuro deixava o carro preso: o encerramento e a cobrança
             # recusavam tudo até lá (vale também no Admin)
-            if self.data_inicio and self.data_inicio > date.today():
+            if self.data_inicio and self.data_inicio > timezone.localdate():
                 erros["data_inicio"] = (
                     "A data de início não pode ser no futuro — cadastre a alocação "
                     "no dia em que o carro sair."
@@ -272,7 +271,7 @@ class Alocacao(models.Model):
             MovimentoCredito,
         )
 
-        inicio_do_mes = date.today().replace(day=1)
+        inicio_do_mes = timezone.localdate().replace(day=1)
         acerto = {"credito": 0, "caucao": 0, "mes_anterior": 0}
         canceladas = []
         nao_usadas = Cobranca.com_quitacao_anotada(
@@ -466,7 +465,7 @@ class TrocaTemporaria(models.Model):
                         f"O substituto {self.veiculo_substituto.placa} só voltou do motorista "
                         f"anterior em {liberado:%d/%m/%Y}. A retirada não pode ser antes disso."
                     )
-        if self._state.adding and self.data_retirada and self.data_retirada > date.today():
+        if self._state.adding and self.data_retirada and self.data_retirada > timezone.localdate():
             # retirada no futuro travava a devolução e o encerramento
             erros["data_retirada"] = "A data de retirada não pode ser no futuro."
         if self._state.adding and self.alocacao_id and self.data_retirada:

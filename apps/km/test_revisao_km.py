@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import Cobranca
@@ -120,7 +121,7 @@ def test_corrigir_aceita_ponto_de_milhar(usuario_logado, veiculo):
 
 
 def test_data_no_futuro_e_recusada(usuario_logado, veiculo):
-    amanha = date.today() + timedelta(days=1)
+    amanha = timezone.localdate() + timedelta(days=1)
     resposta = postar(usuario_logado, veiculo, "11000", data=amanha.isoformat())
     assert "ainda não chegou" in resposta.content.decode()
     assert not veiculo.registros_km.exists()
@@ -219,7 +220,7 @@ def test_km_atual_preso_por_outro_lancamento_e_explicado(usuario_logado, veiculo
 
 
 def test_corrigir_data_no_futuro_e_recusada(usuario_logado, veiculo):
-    hoje = date.today()
+    hoje = timezone.localdate()
     leitura = registrar(veiculo, hoje.replace(day=1), 11_000)
     if hoje.day == 31 or (hoje + timedelta(days=1)).month != hoje.month:
         pytest.skip("último dia do mês: não há amanhã dentro do mesmo mês")

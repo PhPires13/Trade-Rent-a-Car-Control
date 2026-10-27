@@ -4,10 +4,11 @@ Um valor como "99999999" passava pelo dinheiro_br, era gravado e a partir daí
 a própria lista de sinistros dava erro ao ler o auxílio de volta do banco.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.frota.models import Veiculo
 from apps.manutencao.models import Manutencao
@@ -20,7 +21,7 @@ def veiculo(db):
 
 
 def _sinistros(veiculo, quantidade):
-    hoje = date.today()
+    hoje = timezone.localdate()
     criados = []
     for i in range(quantidade):
         sinistro = Sinistro.objects.create(

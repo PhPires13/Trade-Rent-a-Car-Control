@@ -13,6 +13,7 @@ from urllib.parse import unquote
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services, whatsapp
@@ -123,7 +124,7 @@ def test_tela_nd_nova_leva_dias_de_pagamento_e_emite_com_vencimento_sugerido(
     assert 'id="nd-dias-pagamento"' in html
     assert f'"{cliente.pk}": {QUARTA}' in html
     assert "próximo dia de pagamento" in html
-    hoje = date.today()
+    hoje = timezone.localdate()
     usuario_logado.post(
         "/financeiro/nd/nova/",
         {
@@ -147,7 +148,7 @@ def test_nd_de_multas_vence_no_proximo_dia_de_pagamento(usuario_logado, alocacao
         descricao="Avançar sinal",
         valor=Decimal("234.78"),
     )
-    sugerido = services.proximo_dia_pagamento(cliente, date.today())
+    sugerido = services.proximo_dia_pagamento(cliente, timezone.localdate())
     html = usuario_logado.get(f"/multas/gerar-nd/?cliente={cliente.pk}").content.decode()
     assert f'value="{sugerido:%Y-%m-%d}"' in html
     assert "próximo dia de pagamento do cliente" in html
@@ -167,7 +168,7 @@ def test_nd_de_multas_com_vencimento_no_passado_nao_emite(
         descricao="Avançar sinal",
         valor=Decimal("234.78"),
     )
-    ontem = date.today() - timedelta(days=1)
+    ontem = timezone.localdate() - timedelta(days=1)
     resposta = usuario_logado.post(
         "/multas/gerar-nd/",
         {"cliente": cliente.pk, "multa": [multa.pk], "vencimento": ontem.isoformat()},
@@ -318,7 +319,7 @@ def test_cliente_com_um_item_recebe_a_mensagem_simples(cliente):
 
 
 def test_tela_de_cobrancas_oferece_cobrar_tudo_uma_vez_por_cliente(usuario_logado, cliente):
-    hoje = date.today()
+    hoje = timezone.localdate()
     cobranca(cliente, Cobranca.Origem.OUTRO, "Lavagem", "50.00", hoje + timedelta(days=2))
     cobranca(cliente, Cobranca.Origem.OUTRO, "Combustível", "80.00", hoje + timedelta(days=3))
     html = usuario_logado.get("/financeiro/").content.decode()
@@ -327,7 +328,7 @@ def test_tela_de_cobrancas_oferece_cobrar_tudo_uma_vez_por_cliente(usuario_logad
 
 
 def test_extrato_do_cliente_tem_cobrar_no_whatsapp(usuario_logado, cliente):
-    cobranca(cliente, Cobranca.Origem.OUTRO, "Lavagem", "50.00", date.today())
+    cobranca(cliente, Cobranca.Origem.OUTRO, "Lavagem", "50.00", timezone.localdate())
     html = usuario_logado.get(f"/financeiro/cliente/{cliente.pk}/").content.decode()
     assert "Cobrar no WhatsApp" in html
     assert "wa.me/5531988887777" in html
@@ -337,7 +338,7 @@ def test_extrato_do_cliente_tem_cobrar_no_whatsapp(usuario_logado, cliente):
 
 
 def test_lista_de_nds_tem_enviar_ao_motorista_com_itens_e_pix(usuario_logado, alocacao, cliente):
-    hoje = date.today()
+    hoje = timezone.localdate()
     services.emitir_nota_debito(
         cliente,
         hoje,
@@ -353,7 +354,7 @@ def test_lista_de_nds_tem_enviar_ao_motorista_com_itens_e_pix(usuario_logado, al
 
 
 def test_nd_paga_ou_judicial_nao_tem_enviar(usuario_logado, cliente):
-    hoje = date.today()
+    hoje = timezone.localdate()
     paga = services.emitir_nota_debito(cliente, hoje, [("Avaria", Decimal("10.00"))])
     judicial = services.emitir_nota_debito(cliente, hoje, [("Franquia", Decimal("20.00"))])
     Cobranca.objects.filter(pk=paga.cobranca.pk).update(status=Cobranca.Status.PAGO)
@@ -378,7 +379,7 @@ def test_mensagem_da_nd_parcial_mostra_o_que_falta(cliente):
 
 def test_linha_judicial_nao_ganha_cobrar_tudo(usuario_logado, cliente):
     """Na linha judicial o aviso é 'sem WhatsApp' — o 'cobrar tudo' não pode aparecer ao lado."""
-    hoje = date.today()
+    hoje = timezone.localdate()
     cobranca(
         cliente,
         Cobranca.Origem.OUTRO,
@@ -418,7 +419,7 @@ def test_nome_em_branco_nao_derruba_a_mensagem(cliente):
 
 def test_nd_de_cliente_sem_telefone_explica_por_que_nao_tem_botao(usuario_logado, cliente):
     Cliente.objects.filter(pk=cliente.pk).update(telefone="")
-    services.emitir_nota_debito(cliente, date.today(), [("Avaria", Decimal("10.00"))])
+    services.emitir_nota_debito(cliente, timezone.localdate(), [("Avaria", Decimal("10.00"))])
     html = usuario_logado.get("/financeiro/nd/").content.decode()
     assert "Enviar ao motorista" not in html
     assert "Sem telefone no cadastro" in html
@@ -427,7 +428,7 @@ def test_nd_de_cliente_sem_telefone_explica_por_que_nao_tem_botao(usuario_logado
 def test_lista_de_nds_sem_consulta_por_linha(
     usuario_logado, cliente, django_assert_max_num_queries
 ):
-    hoje = date.today()
+    hoje = timezone.localdate()
     for i in range(6):
         services.emitir_nota_debito(cliente, hoje, [(f"Item {i}", Decimal("10.00"))])
     with django_assert_max_num_queries(12):
@@ -438,7 +439,7 @@ def test_lista_de_nds_sem_consulta_por_linha(
 def test_tela_de_cobrancas_sem_consulta_por_linha(
     usuario_logado, alocacao, cliente, django_assert_max_num_queries
 ):
-    hoje = date.today()
+    hoje = timezone.localdate()
     for i in range(8):
         cobranca(
             cliente,

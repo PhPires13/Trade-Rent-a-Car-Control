@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro import services
@@ -264,7 +265,7 @@ def test_trava_total_acima_do_recebido(alocacao, cliente):
 def test_pagamento_parcial(alocacao, cliente):
     from datetime import timedelta
 
-    hoje = date.today()
+    hoje = timezone.localdate()
     # vencimento no futuro → pagar parte deixa "Parcial"; se já vencida, ficaria "Atrasado"
     cobranca = Cobranca.objects.create(
         cliente=cliente,

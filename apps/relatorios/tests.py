@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services as financeiro
@@ -193,7 +194,7 @@ def test_exportacoes_xlsx_e_csv(usuario_logado, veiculo, db):
 
 
 def test_painel_consolidado_renderiza(usuario_logado, veiculo, cliente):
-    veiculo.rastreador_vigencia_fim = date.today() + timedelta(days=10)
+    veiculo.rastreador_vigencia_fim = timezone.localdate() + timedelta(days=10)
     veiculo.save()
     resposta = usuario_logado.get("/")
     assert resposta.status_code == 200

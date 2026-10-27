@@ -1,6 +1,6 @@
 """Bugs da frente alocações: C02, C13, C17, C27, C30, D03, D10, D15, D17, D27, D28."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.alocacoes.entrega import situacao_da_devolucao
 from apps.alocacoes.models import Alocacao, TrocaTemporaria, Vistoria
@@ -19,7 +20,7 @@ from apps.financeiro.models import Caucao, Cobranca, MovimentacaoCaucao, Movimen
 from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

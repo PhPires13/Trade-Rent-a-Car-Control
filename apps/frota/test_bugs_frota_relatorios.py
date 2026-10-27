@@ -8,6 +8,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.utils import timezone
 from PIL import Image
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
@@ -450,7 +451,7 @@ def test_d06_linha_em_branco_nao_cria_ipva_vazio(usuario_logado, veiculo):
         {
             "pagamentos_ipva-TOTAL_FORMS": "1",
             "pagamentos_ipva-INITIAL_FORMS": "0",
-            "pagamentos_ipva-0-ano": str(date.today().year),
+            "pagamentos_ipva-0-ano": str(timezone.localdate().year),
             "pagamentos_ipva-0-parcela": "1",
         },
     )

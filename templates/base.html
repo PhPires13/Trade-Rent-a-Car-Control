@@ -170,6 +170,17 @@
   </nav>
   {% endwith %}
   {% endif %}
+  {# clique HTMX que falha (sem sinal, erro do sistema, página aberta muito tempo): avisa em vez de não acontecer nada #}
+  <script>
+    document.addEventListener("htmx:sendError", function () {
+      alert("Sem internet no momento — não foi salvo. Confira o sinal e tente de novo.");
+    });
+    document.addEventListener("htmx:responseError", function (e) {
+      alert(e.detail.xhr.status === 403
+        ? "A página ficou aberta muito tempo — não foi salvo. Recarregue a página e repita."
+        : "Algo deu errado — não foi salvo. Recarregue a página e tente de novo.");
+    });
+  </script>
   {# ajustes de uso de todas as telas: "(opcional)", dicas "?", "Salvando…", rótulos e arquivo #}
   <script src="{% static 'js/ux.js' %}"></script>
 </body>

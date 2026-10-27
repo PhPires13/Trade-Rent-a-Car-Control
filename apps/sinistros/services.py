@@ -2,10 +2,10 @@
 e roubo do carro (docs.md §4.6)."""
 
 from dataclasses import dataclass
-from datetime import date
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import Cobranca
@@ -23,7 +23,7 @@ def cobrar_franquia(sinistro, hoje=None):
     cliente — nunca hoje, senão amanhã ele já vira inadimplente. O registro é
     travado no banco: clique duplo não cria duas cobranças.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     sinistro = (
         Sinistro.objects.select_for_update()
         .select_related("veiculo", "cliente")
@@ -176,7 +176,7 @@ def deixou_de_ser_roubo(sinistro, veiculo_id=None):
 @transaction.atomic
 def carro_recuperado(sinistro, data=None):
     """Carro roubado voltou: sai de Inativo (_status_sem_roubo) e a data fica registrada."""
-    data = data or date.today()
+    data = data or timezone.localdate()
     sinistro = Sinistro.objects.select_for_update().get(pk=sinistro.pk)
     if sinistro.tipo != Sinistro.Tipo.ROUBO:
         raise ValidationError("Só sinistro de roubo/furto tem carro recuperado.")

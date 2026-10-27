@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 from django.test import Client, RequestFactory, override_settings
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import Cobranca
@@ -58,7 +59,7 @@ def _aluguel(cliente, vencimento, alocacao=None, **extra):
 
 def test_c08_painel_avisa_e_conta_atraso_quando_a_rotina_nao_rodou(usuario_logado, cliente):
     # venceu há 5 dias e continua "pendente": a rotina não marcou o atraso
-    _aluguel(cliente, date.today() - timedelta(days=5))
+    _aluguel(cliente, timezone.localdate() - timedelta(days=5))
     resposta = usuario_logado.get("/")
     assert resposta.context["rotina_atrasada"] is True
     assert resposta.context["atrasado_total"] == Decimal("650.00")
@@ -66,13 +67,15 @@ def test_c08_painel_avisa_e_conta_atraso_quando_a_rotina_nao_rodou(usuario_logad
 
 
 def test_c08_semana_de_aluguel_nao_lancada_tambem_avisa(usuario_logado, cliente):
-    _alocacao(cliente, date.today() - timedelta(days=20), (date.today().weekday() + 3) % 7)
+    _alocacao(
+        cliente, timezone.localdate() - timedelta(days=20), (timezone.localdate().weekday() + 3) % 7
+    )
     assert usuario_logado.get("/").context["rotina_atrasada"] is True
 
 
 def test_c08_sem_aviso_quando_a_rotina_esta_em_dia(usuario_logado, cliente):
-    _aluguel(cliente, date.today() - timedelta(days=5), status=Cobranca.Status.ATRASADO)
-    _aluguel(cliente, date.today())  # vence hoje: ainda não é atraso
+    _aluguel(cliente, timezone.localdate() - timedelta(days=5), status=Cobranca.Status.ATRASADO)
+    _aluguel(cliente, timezone.localdate())  # vence hoje: ainda não é atraso
     resposta = usuario_logado.get("/")
     assert resposta.context["rotina_atrasada"] is False
     assert "parece parada" not in resposta.content.decode()

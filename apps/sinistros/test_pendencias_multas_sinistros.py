@@ -2,17 +2,18 @@
 com troca em aberto, botão para aplicar o roubo de novo e sinistro que deixa de
 ser roubo."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente
 from apps.sinistros.models import Sinistro
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

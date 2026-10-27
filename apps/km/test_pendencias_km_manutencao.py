@@ -4,11 +4,12 @@ from datetime import date
 
 import pytest
 from django.contrib import admin
+from django.utils import timezone
 
 from apps.frota.models import Veiculo
 from apps.km.models import AcertoExcedenteKm, pendencias_de_leitura, veiculos_com_leitura_pendente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 MES = HOJE.replace(day=1)
 
 

@@ -64,6 +64,9 @@
   <div class="rounded-lg bg-white p-5 shadow"
        data-saldo="{{ caucao.saldo|stringformat:'.2f' }}" data-combinado="{{ combinado|stringformat:'.2f' }}"
        x-data='{ tipo: "{{ post.tipo|default:'recebimento'|escapejs }}", enviando: false, valorTexto: "",
+                 dataMov: "{% if post.data %}{{ post.data|escapejs }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}",
+                 inicioMesPassado: "{{ inicio_mes_passado|date:'Y-m-d' }}",
+                 get mesPassado() { return this.tipo === "desconto" && this.dataMov && this.dataMov < this.inicioMesPassado; },
                  saldo: 0, combinado: 0,
                  br(texto) {
                    let t = String(texto || "").replace(/R\$|\s/g, "");
@@ -122,7 +125,7 @@
         </div>
         <div>
           <label for="caucao-data" class="mb-1 block font-medium">Data</label>
-          <input type="date" name="data" id="caucao-data" required max="{{ hoje|date:'Y-m-d' }}"
+          <input type="date" name="data" id="caucao-data" required max="{{ hoje|date:'Y-m-d' }}" x-model="dataMov"
                  x-bind:min="entrada ? '{{ data_minima_deposito|date:'Y-m-d' }}' : '{{ data_minima|date:'Y-m-d' }}'"
                  value="{% if post.data %}{{ post.data }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}">
         </div>
@@ -151,6 +154,11 @@
           {% endfor %}
         </select>
       </div>
+      {# desconto antes do mês passado: o DAS daquele mês já foi para a contabilidade #}
+      <label x-show="mesPassado" x-cloak class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+        <input type="checkbox" name="confirmar_mes_passado" value="1" class="mt-1 h-4 w-4" style="width:auto" {% if post.confirmar_mes_passado == "1" %}checked{% endif %}>
+        <span><strong>Confirmo: pagamento de mês passado</strong> — o DAS daquele mês muda. Confira a data antes de lançar.</span>
+      </label>
       {% if deve > 0 or alocacao_ativa %}
       <label x-show="tipo === 'devolucao'" x-cloak class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
         <input type="checkbox" name="devolver_mesmo_assim" value="1" class="mt-1 h-4 w-4" style="width:auto" {% if post.devolver_mesmo_assim == "1" %}checked{% endif %}>

@@ -1,8 +1,9 @@
 """D01: contrato antigo cadastrado na tela de nova alocação (carga inicial)."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import Cobranca
@@ -34,7 +35,7 @@ def _dados(veiculo, cliente, inicio, **extra):
 
 
 def test_contrato_antigo_sem_cobrar_a_partir_de_e_recusado(usuario_logado, veiculo, cliente):
-    inicio = date.today() - timedelta(days=60)
+    inicio = timezone.localdate() - timedelta(days=60)
     resposta = usuario_logado.post("/alocacoes/nova/", _dados(veiculo, cliente, inicio))
     assert resposta.status_code == 200
     assert "há mais de uma semana" in resposta.content.decode()
@@ -43,7 +44,7 @@ def test_contrato_antigo_sem_cobrar_a_partir_de_e_recusado(usuario_logado, veicu
 
 
 def test_contrato_antigo_so_gera_a_partir_da_data_informada(usuario_logado, veiculo, cliente):
-    hoje = date.today()
+    hoje = timezone.localdate()
     inicio = hoje - timedelta(days=63)  # mesmo dia da semana de hoje
     resposta = usuario_logado.post(
         "/alocacoes/nova/",
@@ -59,7 +60,7 @@ def test_contrato_antigo_so_gera_a_partir_da_data_informada(usuario_logado, veic
 
 
 def test_contrato_antigo_pode_cobrar_desde_o_inicio(usuario_logado, veiculo, cliente):
-    inicio = date.today() - timedelta(days=14)
+    inicio = timezone.localdate() - timedelta(days=14)
     usuario_logado.post(
         "/alocacoes/nova/",
         _dados(veiculo, cliente, inicio, cobrar_a_partir_de=inicio.isoformat()),
@@ -68,7 +69,7 @@ def test_contrato_antigo_pode_cobrar_desde_o_inicio(usuario_logado, veiculo, cli
 
 
 def test_contrato_novo_nao_pede_a_data(usuario_logado, veiculo, cliente):
-    inicio = date.today() - timedelta(days=2)
+    inicio = timezone.localdate() - timedelta(days=2)
     resposta = usuario_logado.post("/alocacoes/nova/", _dados(veiculo, cliente, inicio))
     assert resposta.status_code == 302
     assert Alocacao.objects.get().cobrar_a_partir_de is None
@@ -82,14 +83,14 @@ def test_tela_mostra_o_campo(usuario_logado, veiculo, cliente):
 
 def test_cobrar_a_partir_de_longe_demais_e_recusado(usuario_logado, veiculo, cliente):
     # ano digitado errado: o carro rodaria um ano sem cobrança
-    inicio = date.today() - timedelta(days=60)
+    inicio = timezone.localdate() - timedelta(days=60)
     resposta = usuario_logado.post(
         "/alocacoes/nova/",
         _dados(
             veiculo,
             cliente,
             inicio,
-            cobrar_a_partir_de=(date.today() + timedelta(days=365)).isoformat(),
+            cobrar_a_partir_de=(timezone.localdate() + timedelta(days=365)).isoformat(),
         ),
     )
     assert resposta.status_code == 200

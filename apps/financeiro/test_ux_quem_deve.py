@@ -1,16 +1,17 @@
 """Proposta #8 (opção C) — bloco "Hoje" do Painel e tela "Quem deve"."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.financeiro import devedores
 from apps.financeiro.models import AplicacaoRecebimento, Cobranca, Recebimento
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 def _cliente(nome, cpf, telefone="(31) 98888-7777"):

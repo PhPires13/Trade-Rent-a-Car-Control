@@ -6,13 +6,14 @@ Em vez de nota opaca, indicadores objetivos + recomendação com os motivos.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import BooleanField, ExpressionWrapper, Q, Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from django.utils.text import capfirst
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
@@ -175,7 +176,7 @@ def _somas_da_frota(ids, campo, **filtros):
 
 def _janela_de_manutencoes(ids, inicio_janela):
     """(custo, dias parado, esporádicas) dos últimos 6 meses por veículo, numa query."""
-    hoje = date.today()  # dias_parado de manutenção em aberto conta até hoje
+    hoje = timezone.localdate()  # dias_parado de manutenção em aberto conta até hoje
     janela = {}
     linhas = Veiculo.objects.filter(pk__in=ids, manutencoes__data__gte=inicio_janela).values(
         "pk",
@@ -224,7 +225,7 @@ def montar_fichas_em_lote(veiculos, hoje=None):
     Mesmos números de montar_ficha: o painel e o ranking liam a frota inteira a
     ~10 queries por carro, o que crescia linear com a frota (revisão de performance).
     """
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     inicio_janela = hoje - timedelta(days=JANELA_INDICADORES_DIAS)
     veiculos = list(veiculos)
     fichas = [FichaFinanceira(veiculo=veiculo) for veiculo in veiculos]
@@ -367,7 +368,7 @@ def media_custo_km_frota(hoje=None):
     Mesmo número que ranking_da_frota devolve — a ficha de um veículo só precisa
     dele para comparar, e montar a frota inteira custava ~200 queries.
     """
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     inicio_janela = hoje - timedelta(days=JANELA_INDICADORES_DIAS)
     ids = frota_de_locacao().values_list("pk", flat=True)
     km_rodado = _km_rodado_na_janela(ids, inicio_janela)
@@ -433,7 +434,7 @@ def texto_oficina_impede_venda(manutencao):
 
 def _validar_data_e_km_da_venda(veiculo, data, km, hoje=None):
     """Data entre a compra e hoje; KM da venda nunca abaixo do KM atual do carro."""
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     erros = []
     if data > hoje:
         erros.append("A data da venda não pode ser depois de hoje.")

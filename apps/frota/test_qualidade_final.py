@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.financeiro.models import ItemNotaDebito, NotaDebito
 from apps.frota import desmobilizacao
@@ -14,7 +15,7 @@ from apps.manutencao.models import Manutencao
 from apps.multas.models import Multa
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

@@ -304,7 +304,7 @@ class VoltouDaOficinaForm(FormularioBR, forms.ModelForm):
         return saida
 
 
-class ItemPreventivaForm(forms.ModelForm):
+class ItemPreventivaForm(FormularioBR, forms.ModelForm):
     """Item do plano — com intervalo vira preventiva por km, sem intervalo é esporádica."""
 
     class Meta:
@@ -327,7 +327,7 @@ class ItemPreventivaForm(forms.ModelForm):
         return intervalo
 
 
-class IntervaloPersonalizadoForm(forms.ModelForm):
+class IntervaloPersonalizadoForm(FormularioBR, forms.ModelForm):
     """Intervalo de km de um item para um veículo específico (docs.md §4.5)."""
 
     class Meta:

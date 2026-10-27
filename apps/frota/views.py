@@ -1,4 +1,3 @@
-from datetime import date
 from decimal import InvalidOperation
 
 from django import forms
@@ -9,9 +8,10 @@ from django.db.models import Count, Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
-from apps.campos import FormularioBR, dinheiro_br
+from apps.campos import FormularioBR, dinheiro_br, ler_data
 from apps.formatos import milhar, numero_br
 from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
@@ -94,10 +94,7 @@ def hub(request):
     }
     # mesmo filtro da faixa de pendências (alertas.py): multa anulada não pede FICI
     fici_pendentes = dict(
-        Multa.objects.filter(fici_status=Multa.Fici.PENDENTE)
-        .exclude(resultado__in=Multa.RESULTADOS_ANULADORES)
-        .values_list("veiculo_id")
-        .annotate(total=Count("id"))
+        Multa.objects.fici_pendente().values_list("veiculo_id").annotate(total=Count("id"))
     )
     preventivas = contagem_alertas_por_veiculo(veiculos)
 
@@ -287,10 +284,11 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
         return normalizar_placa(self.cleaned_data["placa"])
 
     def clean_km_atual(self):
-        """O odômetro nunca anda para trás — todos os fluxos só aumentam o KM.
+        """O odômetro nunca anda para trás pela edição (ETAPAS, etapa 8).
 
-        Reduzir aqui esconderia preventivas vencidas; leitura digitada errada se
-        corrige em "Corrigir", no histórico de KM do carro (refaz KM e excedente).
+        Reduzir aqui esconderia preventivas vencidas. Número digitado errado se
+        corrige no lançamento de onde ele veio: a leitura de KM e a manutenção já
+        baixam o KM atual sozinhas ao serem corrigidas (km.correcao.ajustar_km_atual).
         """
         km = self.cleaned_data["km_atual"]
         if km is None:  # só no carro novo (campo opcional): o clean usa o KM da compra
@@ -298,9 +296,8 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
         if self.instance.pk and km < self.instance.km_atual:
             raise ValidationError(
                 f"KM atual ({milhar(km)}) menor que o registrado "
-                f"({milhar(self.instance.km_atual)}). O KM do carro não diminui. Se uma "
-                "leitura foi digitada errada, abra “Registros de KM” na ficha deste carro e use "
-                "“Corrigir” nela."
+                f"({milhar(self.instance.km_atual)}). O KM do carro não diminui por aqui. "
+                + _onde_corrigir_km(self.instance)
             )
         return km
 
@@ -348,6 +345,38 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
     @property
     def secoes(self):
         return [(titulo, [self[nome] for nome in nomes]) for titulo, nomes in SECOES_VEICULO]
+
+
+def _onde_corrigir_km(veiculo):
+    """Diz onde está o lançamento com o KM atual do carro, para a pessoa corrigir lá.
+
+    Corrigir a leitura de KM ou a manutenção baixa o KM atual sozinho
+    (km.correcao.ajustar_km_atual).
+    """
+    from apps.km.models import RegistroKm
+    from apps.manutencao.models import Manutencao
+
+    km = veiculo.km_atual
+    leitura = RegistroKm.objects.filter(veiculo=veiculo, km=km).order_by("-mes_referencia").first()
+    if leitura:
+        return (
+            f"Ele veio da leitura de KM de {leitura.mes_referencia:%m/%Y}: se estiver errada, "
+            "abra “Registros de KM” na ficha deste carro e use “Corrigir” nela — o KM atual "
+            "se ajusta sozinho."
+        )
+    manutencao = Manutencao.objects.filter(veiculo=veiculo, km=km).order_by("-data").first()
+    if manutencao:
+        return (
+            f"Ele veio da manutenção de {manutencao.data:%d/%m/%Y}: se o KM dela estiver errado, "
+            "abra “Manutenções” na ficha deste carro e use “Editar” nela — o KM atual "
+            "se ajusta sozinho."
+        )
+    # sem leitura/manutenção com esse número (entrega, devolução, vistoria ou o
+    # próprio cadastro): a orientação geral de sempre
+    return (
+        "Se uma leitura foi digitada errada, abra “Registros de KM” na ficha deste carro "
+        "e use “Corrigir” nela."
+    )
 
 
 def tem_lancamentos(veiculo):
@@ -417,7 +446,7 @@ class PagamentoIpvaForm(FormularioBR, forms.ModelForm):
         texto_ano = "Use o ano com 4 dígitos (ex.: 2026)"
         self.fields["ano"].validators += [
             MinValueValidator(2000, texto_ano),
-            MaxValueValidator(date.today().year + 1, texto_ano),
+            MaxValueValidator(timezone.localdate().year + 1, texto_ano),
         ]
         self.fields["ano"].error_messages["invalid"] = texto_ano
         self.fields["parcela"].validators.append(
@@ -466,7 +495,7 @@ def ipva(request, veiculo_id):
     apaga os anteriores, então os relatórios já enviados continuam iguais.
     """
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
-    ano_atual = date.today().year
+    ano_atual = timezone.localdate().year
     parcelas_do_ano = veiculo.pagamentos_ipva.filter(ano=ano_atual).values_list(
         "parcela", flat=True
     )
@@ -494,7 +523,7 @@ class CategoriaForm(FormularioBR, forms.ModelForm):
         widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
 
 
-class FornecedorForm(forms.ModelForm):
+class FornecedorForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = Fornecedor
         fields = ["nome", "cnpj", "contato", "tipo_servico", "observacoes"]
@@ -584,7 +613,7 @@ def vender(request, veiculo_id):
         try:
             desmobilizacao.registrar_venda(
                 veiculo,
-                data=date.fromisoformat(request.POST["data"]),
+                data=ler_data(request.POST.get("data"), "Data da venda"),
                 # aceita "45.000,00", "45000,00" ou "R$ 45.000" (apps/campos.py)
                 valor=dinheiro_br(request.POST["valor"]),
                 comprador=request.POST.get("comprador", ""),
@@ -631,7 +660,7 @@ def vender(request, veiculo_id):
         "frota/vender.html",
         {
             "veiculo": veiculo,
-            "hoje": date.today(),
+            "hoje": timezone.localdate(),
             "dados": dados,
             "ficha": desmobilizacao.montar_ficha(veiculo),
             "impedimento_venda": impedimento,

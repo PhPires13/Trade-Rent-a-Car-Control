@@ -1,12 +1,13 @@
 """Pendências das etapas 14/15 na frente alocações: voltar à ficha, troca, oficina, Recebi."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.contrib.admin.sites import site
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.test import RequestFactory
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria, Vistoria
 from apps.financeiro import services as financeiro
@@ -15,7 +16,7 @@ from apps.frota.models import Veiculo
 from apps.manutencao.models import Manutencao
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

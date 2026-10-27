@@ -1,10 +1,11 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from django import forms
 from django.contrib import messages
 from django.db.models import Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.busca import nome_casa, numero_casa, parece_numero, sem_acento, so_digitos
@@ -293,7 +294,7 @@ def lista(request):
             if nome_casa(texto, c.nome)
             or (digitos and (numero_casa(digitos, c.cpf_cnpj) or numero_casa(digitos, c.telefone)))
         ]
-    hoje = date.today()
+    hoje = timezone.localdate()
     return render(
         request,
         "pessoas/lista.html",
@@ -309,7 +310,7 @@ def lista(request):
 def detalhe(request, cliente_id):
     """Ficha completa do cliente — cadastro, financeiro, carros, multas e condutores."""
     cliente = get_object_or_404(Cliente, pk=cliente_id)
-    hoje = date.today()
+    hoje = timezone.localdate()
     historico = (
         cliente.alocacoes.exclude(status=Alocacao.Status.ATIVA)
         .select_related("veiculo")

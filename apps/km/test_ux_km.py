@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import AplicacaoRecebimento, Cobranca, Recebimento
@@ -175,7 +176,7 @@ def test_htmx_erro_fica_na_linha_sem_virar_mensagem_solta(usuario_logado, veicul
 
 def test_lista_tem_pendentes_com_htmx_e_cartoes_no_celular(usuario_logado, veiculo):
     # mês corrente: "outra data?" só aparece quando há data sugerida (D19)
-    conteudo = usuario_logado.get(f"/km/?mes={date.today():%Y-%m}").content.decode()
+    conteudo = usuario_logado.get(f"/km/?mes={timezone.localdate():%Y-%m}").content.decode()
     assert f'hx-post="/km/registrar/{veiculo.pk}/"' in conteudo
     assert "faltam 1" in conteudo
     assert "outra data?" in conteudo
@@ -340,7 +341,7 @@ def test_apagar_leitura_do_meio_reencadeia(usuario_logado, veiculo):
 
 
 def test_tela_de_corrigir_e_botoes_nas_listas(usuario_logado, veiculo):
-    registro = registrar(veiculo, date.today() - timedelta(days=1), 12_000)
+    registro = registrar(veiculo, timezone.localdate() - timedelta(days=1), 12_000)
     assert usuario_logado.get(f"/km/corrigir/{registro.pk}/").status_code == 200
     historico = usuario_logado.get(f"/km/historico/{veiculo.pk}/").content.decode()
     assert f"/km/corrigir/{registro.pk}/" in historico

@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services
@@ -106,16 +107,18 @@ def test_complemento_de_5_para_10_por_cento_depois_de_4_dias(alocacao):
 
 def test_tela_de_cobrancas_nao_sugere_encargo_em_nd(usuario_logado, cliente):
     nd = _cobranca(
-        cliente, origem=Cobranca.Origem.NOTA_DEBITO, vencimento=date.today() - timedelta(days=3)
+        cliente,
+        origem=Cobranca.Origem.NOTA_DEBITO,
+        vencimento=timezone.localdate() - timedelta(days=3),
     )
-    aluguel = _cobranca(cliente, vencimento=date.today() - timedelta(days=3))
+    aluguel = _cobranca(cliente, vencimento=timezone.localdate() - timedelta(days=3))
     html = usuario_logado.get("/financeiro/").content.decode()
     assert f"cobranca/{aluguel.pk}/encargo/" in html
     assert f"cobranca/{nd.pk}/encargo/" not in html
 
 
 def test_tela_sugere_complemento_depois_de_5_por_cento(usuario_logado, cliente):
-    hoje = date.today()
+    hoje = timezone.localdate()
     aluguel = _cobranca(cliente, vencimento=hoje - timedelta(days=10))
     services.aplicar_encargo(aluguel, Decimal("32.50"), hoje=hoje - timedelta(days=8))
     html = usuario_logado.get("/financeiro/").content.decode()
@@ -128,7 +131,7 @@ def test_tela_sugere_complemento_depois_de_5_por_cento(usuario_logado, cliente):
 
 def test_pagamento_com_data_antiga_nao_reativa_quem_ainda_deve(alocacao):
     cliente = alocacao.cliente
-    hoje = date.today()
+    hoje = timezone.localdate()
     velha = _cobranca(cliente, alocacao=alocacao, vencimento=hoje - timedelta(days=10))
     _cobranca(cliente, alocacao=alocacao, vencimento=hoje - timedelta(days=3))
     services.marcar_atrasos(hoje=hoje)
@@ -144,7 +147,7 @@ def test_pagamento_com_data_antiga_nao_reativa_quem_ainda_deve(alocacao):
 
 def test_desconto_de_caucao_com_data_antiga_nao_reativa_quem_ainda_deve(alocacao):
     cliente = alocacao.cliente
-    hoje = date.today()
+    hoje = timezone.localdate()
     caucao = services.abrir_caucao(alocacao, Decimal("1000.00"), data=hoje - timedelta(days=20))
     velha = _cobranca(cliente, alocacao=alocacao, vencimento=hoje - timedelta(days=10))
     _cobranca(cliente, alocacao=alocacao, vencimento=hoje - timedelta(days=3))
@@ -217,7 +220,7 @@ def test_encargo_de_10_por_cento_ja_aplicado_nao_aceita_complemento(alocacao):
 
 
 def test_tela_nao_sugere_terceiro_encargo(usuario_logado, cliente):
-    hoje = date.today()
+    hoje = timezone.localdate()
     aluguel = _cobranca(cliente, vencimento=hoje - timedelta(days=10))
     # dois encargos baixos (o dono ajustou para menos): não sugere um terceiro
     services.aplicar_encargo(aluguel, Decimal("10.00"), hoje=hoje - timedelta(days=8))

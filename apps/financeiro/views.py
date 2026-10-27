@@ -1,6 +1,6 @@
 import csv
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -17,7 +17,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import urlencode
 
-from apps.campos import CampoDinheiro, exibir_dinheiro
+from apps.campos import CampoDinheiro, exibir_dinheiro, ler_data
 from apps.formatos import brl
 from apps.pessoas.models import Cliente
 
@@ -595,16 +595,11 @@ def receber(request):
                 "Valor recebido inválido — digite só números, com vírgula "
                 "para os centavos (ex.: 1250,00).",
             )
-            try:
-                data = date.fromisoformat(post.get("data", ""))
-            except ValueError:
-                raise ValidationError(
-                    "Data do recebimento inválida — escolha a data no calendário."
-                ) from None
+            data = ler_data(post.get("data", ""), "Data do recebimento")
             forma = post.get("forma", "pix")
             usar_credito = ZERO
             if post.get("usar_credito_junto") == "1" and forma != Recebimento.Forma.CREDITO:
-                usar_credito = MovimentoCredito.saldo_do_cliente(cliente)
+                usar_credito = max(MovimentoCredito.saldo_do_cliente(cliente), ZERO)
             # toque duplo: o 2º envio acha a cobrança já paga — o aviso certo é o de repetido
             repetido = services._recebimento_recente(cliente, data, valor)
             if repetido:
@@ -851,12 +846,19 @@ def nd_nova(request):
                     if valor_item <= ZERO:
                         raise ValidationError(f'"{descricao[:40]}" está sem valor.')
                     itens.append((descricao, valor_item))
+                try:
+                    data_emissao = ler_data(post.get("data_emissao"), "Data de emissão")
+                    vencimento = (
+                        ler_data(post["vencimento"], "Data de vencimento")
+                        if post.get("vencimento", "").strip()
+                        else None
+                    )
+                except ValidationError as erro:
+                    raise ValidationError("Não deu para emitir: " + erro.messages[0]) from None
                 nd = services.emitir_nota_debito(
                     cliente=cliente,
-                    data_emissao=date.fromisoformat(post["data_emissao"]),
-                    vencimento=(
-                        date.fromisoformat(post["vencimento"]) if post.get("vencimento") else None
-                    ),
+                    data_emissao=data_emissao,
+                    vencimento=vencimento,
                     itens=itens,
                     observacoes=post.get("observacoes", ""),
                 )
@@ -935,10 +937,7 @@ def caucao_detalhe(request, caucao_id):
                 )
                 if valor <= ZERO:
                     raise ValidationError("O valor deve ser maior que zero.")
-                try:
-                    data = date.fromisoformat(request.POST.get("data", ""))
-                except ValueError:
-                    raise ValidationError("Data inválida — escolha a data no calendário.") from None
+                data = ler_data(request.POST.get("data", ""))
                 observacoes = request.POST.get("observacoes", "")
                 if tipo == MovimentacaoCaucao.Tipo.DESCONTO:
                     cobranca_id = request.POST.get("cobranca", "")
@@ -950,7 +949,12 @@ def caucao_detalhe(request, caucao_id):
                     if cobranca is None:
                         raise ValidationError("Escolha a cobrança que a caução vai pagar.")
                     services.descontar_da_caucao(
-                        caucao, cobranca, valor, data, observacoes=observacoes
+                        caucao,
+                        cobranca,
+                        valor,
+                        data,
+                        observacoes=observacoes,
+                        mes_passado_confirmado=request.POST.get("confirmar_mes_passado") == "1",
                     )
                 else:
                     services.registrar_movimentacao_caucao(
@@ -1005,6 +1009,8 @@ def caucao_detalhe(request, caucao_id):
             "alocacao_ativa": ativa,
             "hoje": hoje,
             "data_minima": caucao.alocacao.data_inicio,
+            # desconto antes do mês passado muda o DAS daquele mês: pede confirmação
+            "inicio_mes_passado": services.inicio_do_mes_passado(hoje),
             "data_minima_deposito": caucao.alocacao.data_inicio
             - timedelta(days=services.DIAS_DEPOSITO_ANTES_DO_CONTRATO),
             "post": post,
@@ -1015,9 +1021,19 @@ def caucao_detalhe(request, caucao_id):
 
 def desfazer_movimentacao_caucao(request, movimentacao_id):
     """ "↩ desfazer" de uma movimentação de caução lançada hoje (valor ou tipo errado)."""
-    movimentacao = get_object_or_404(
-        MovimentacaoCaucao.objects.select_related("caucao"), pk=movimentacao_id
+    movimentacao = (
+        MovimentacaoCaucao.objects.select_related("caucao").filter(pk=movimentacao_id).first()
     )
+    if movimentacao is None:
+        # desfazer em duas abas: o 1º já apagou — avisa em vez de "página não
+        # encontrada"; o histórico ainda sabe de qual caução era
+        apagada = (
+            MovimentacaoCaucao.history.filter(id=movimentacao_id).order_by("-history_date").first()
+        )
+        if apagada is None:
+            raise Http404("Movimentação não encontrada.")
+        messages.info(request, "Esta movimentação já foi desfeita.")
+        return redirect("financeiro:caucao_detalhe", apagada.caucao_id)
     caucao_id = movimentacao.caucao_id
     if request.method == "POST":
         valor = movimentacao.valor

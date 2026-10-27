@@ -153,13 +153,15 @@ def _proximo_vencimento(alocacao, hoje=None, ultima=...):
     return vencimento, periodo_da_cobranca(ultima)[1] + timedelta(days=1)
 
 
-def proximo_vencimento(alocacao, hoje=None):
+def proximo_vencimento(alocacao, hoje=None, ultima=...):
     """(vencimento, 1º dia ainda não cobrado) do próximo aluguel da alocação.
 
     Pública para o Painel prever os aluguéis da semana com a mesma conta da
     rotina que os gera (inclusive a troca do dia de vencimento, D04).
+    `ultima`: a última cobrança de aluguel já buscada (None = nenhuma), para o
+    Painel não consultar uma vez por carro.
     """
-    return _proximo_vencimento(alocacao, hoje)
+    return _proximo_vencimento(alocacao, hoje, ultima)
 
 
 def _valor_do_periodo(alocacao, inicio, fim, valor_base=None):
@@ -929,6 +931,11 @@ def emitir_nota_debito(cliente, data_emissao, itens, vencimento=None, observacoe
     itens = [(descricao, Decimal(valor)) for descricao, valor in itens if Decimal(valor) > ZERO]
     if not itens:
         raise ValidationError("A nota de débito precisa de pelo menos um item com valor.")
+    # ano digitado pela metade no celular ("26" → 0026) ou com dígito a mais
+    hoje = timezone.localdate()
+    for rotulo, dia in (("da data de emissão", data_emissao), ("do vencimento", vencimento)):
+        if dia is not None and not ANO_MINIMO_PAGAMENTO <= dia.year <= hoje.year + 1:
+            raise ValidationError(f"Confira o ano {rotulo} ({dia:%d/%m/%Y}).")
     if vencimento is None:
         vencimento = proximo_dia_pagamento(cliente, data_emissao)
     elif vencimento < data_emissao:
@@ -1010,11 +1017,14 @@ def _caucao_travada(caucao):
 
 
 @transaction.atomic
-def descontar_da_caucao(caucao, cobranca, valor, data, observacoes="", hoje=None):
+def descontar_da_caucao(
+    caucao, cobranca, valor, data, observacoes="", hoje=None, mes_passado_confirmado=True
+):
     """Desconto na caução quitando (total ou parcialmente) uma cobrança.
 
     Trava cliente, caução e cobrança e relê os saldos: a tela pode estar velha
-    (semana cancelada ao encerrar, ou paga noutra aba).
+    (semana cancelada ao encerrar, ou paga noutra aba). O desconto entra no DAS
+    do mês da data: antes do mês passado, só com a mesma confirmação do Receber.
     """
     valor = Decimal(valor)
     if valor <= ZERO:
@@ -1022,6 +1032,7 @@ def descontar_da_caucao(caucao, cobranca, valor, data, observacoes="", hoje=None
     Cliente.objects.select_for_update().filter(pk=cobranca.cliente_id).first()
     caucao = _caucao_travada(caucao)
     validar_data_caucao(caucao, MovimentacaoCaucao.Tipo.DESCONTO, data, hoje)
+    validar_data_pagamento(data, hoje, mes_passado_confirmado)
     cobranca = Cobranca.objects.select_for_update().get(pk=cobranca.pk)
     if cobranca.cliente_id != caucao.alocacao.cliente_id:
         raise ValidationError("Esta cobrança não é do cliente desta caução.")
@@ -1178,7 +1189,13 @@ def desfazer_movimentacao_caucao(movimentacao, hoje=None):
             "desfaça primeiro o desconto ou a devolução."
         )
     cliente = caucao.alocacao.cliente
+    # cobrança judicial quitada pela caução volta a ser judicial (como no desfazer
+    # do recebimento) — lido do histórico antes de apagar
+    cobranca = movimentacao.cobranca if movimentacao.cobranca_id else None
+    judicial = cobranca is not None and _era_judicial(cobranca)
     movimentacao.delete()  # signal: o desconto desfeito devolve o saldo à cobrança
+    if cobranca is not None:
+        _devolver_saldo(cobranca, judicial=judicial)
     atualizar_inadimplencia(cliente)
     return movimentacao
 

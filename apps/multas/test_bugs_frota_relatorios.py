@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.frota.models import Veiculo
 from apps.multas import services
@@ -46,7 +47,7 @@ def test_d25_multa_sem_cliente_na_data_pede_para_definir_o_responsavel(veiculo):
 
 
 def test_d25_nic_entra_na_data_em_que_foi_registrada(veiculo):
-    hoje = date.today()
+    hoje = timezone.localdate()
     original = Multa.objects.create(
         veiculo=veiculo,
         data_infracao=hoje - timedelta(days=70),
@@ -68,7 +69,7 @@ def test_d25_nic_nao_herda_o_cliente_que_esta_com_o_carro_hoje(veiculo):
     from apps.alocacoes.models import Alocacao
     from apps.pessoas.models import Cliente
 
-    hoje = date.today()
+    hoje = timezone.localdate()
     original = Multa.objects.create(  # carro parado no pátio na data da infração
         veiculo=veiculo,
         data_infracao=hoje - timedelta(days=70),

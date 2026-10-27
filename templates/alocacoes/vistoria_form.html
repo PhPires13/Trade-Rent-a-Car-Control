@@ -91,6 +91,19 @@
 </div>
 {% endif %}
 
+<script>
+  // data mínima da vistoria acompanha o carro escolhido (substituto: desde a retirada)
+  (function () {
+    const carro = document.getElementById("id_veiculo");
+    const data = document.getElementById("id_data");
+    if (!carro || !data || !carro.dataset.inicios) return;
+    const inicios = JSON.parse(carro.dataset.inicios);
+    carro.addEventListener("change", function () {
+      if (inicios[carro.value]) data.min = inicios[carro.value];
+    });
+  })();
+</script>
+
 {% if checklist_leitura %}
 <script>
   (function () {

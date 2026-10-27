@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.frota.models import Veiculo
@@ -251,7 +252,7 @@ def test_data_no_futuro_e_recusada(usuario_logado, veiculo):
         {
             "veiculo": veiculo.pk,
             # ano plausível: um ano absurdo cai antes no "Confira o ano"
-            "data": (date.today() + timedelta(days=30)).isoformat(),
+            "data": (timezone.localdate() + timedelta(days=30)).isoformat(),
             "tipo": "colisao",
             "envolvido": "associado",
             "responsabilidade": "indefinida",

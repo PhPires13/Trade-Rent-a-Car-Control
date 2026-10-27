@@ -9,12 +9,13 @@ from django.core.validators import MinValueValidator
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
 from apps.alocacoes.models import Alocacao
 from apps.alocacoes.services import cliente_vigente
 from apps.alocacoes.views import _avisar_acerto_das_semanas
-from apps.campos import CampoDinheiro, FormularioBR
+from apps.campos import OPCAO_VAZIA, CampoDinheiro, FormularioBR, ler_data
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
 from apps.frota.models import Veiculo, normalizar_placa
@@ -126,7 +127,7 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         )
         campos["veiculo"].queryset = Veiculo.objects.order_by("placa")
         campos["envolvido"].choices = [
-            ("", "---------"),
+            ("", OPCAO_VAZIA),
             (Sinistro.Envolvido.ASSOCIADO, "Só o nosso carro (associado)"),
             (Sinistro.Envolvido.TERCEIRO, "Outro carro ou pessoa (terceiro)"),
         ]
@@ -153,7 +154,7 @@ class SinistroForm(FormularioBR, forms.ModelForm):
 
     def clean_data(self):
         dia = self.cleaned_data["data"]
-        if dia and dia > date.today():
+        if dia and dia > timezone.localdate():
             raise ValidationError("A data do ocorrido não pode ser no futuro.")
         return dia
 
@@ -267,14 +268,11 @@ def _data_digitada(request, minimo=None, rotulo_minimo=""):
 
     Recusa data futura e, com `minimo`, data antes dele (ValidationError).
     """
-    hoje = date.today()
+    hoje = timezone.localdate()
     texto = request.POST.get("data", "").strip()
     if not texto:
         return hoje
-    try:
-        dia = date.fromisoformat(texto)
-    except ValueError:
-        raise ValidationError("Data inválida — escolha no calendário.") from None
+    dia = ler_data(texto)
     if dia > hoje:
         raise ValidationError("A data não pode ser no futuro.")
     if minimo and dia < minimo:
@@ -323,7 +321,7 @@ def lista(request):
             "statuses": Sinistro.Status.choices,
             "filtro": status or "",
             "aqui": request.get_full_path(),
-            "hoje": date.today(),
+            "hoje": timezone.localdate(),
         },
     )
 
@@ -426,7 +424,7 @@ SESSAO_TOKENS_SINISTRO = "sinistro_tokens_usados"
 def novo(request):
     # código único por formulário (como na ND): reenviar não grava em dobro
     token = request.POST.get("token", "") if request.method == "POST" else ""
-    form = SinistroForm(request.POST or None, initial={"data": date.today()})
+    form = SinistroForm(request.POST or None, initial={"data": timezone.localdate()})
     if request.method == "POST" and form.is_valid():
         # linha da sessão travada até gravar: o 2º envio de um clique duplo espera
         with _envio_unico(request, SESSAO_TOKENS_SINISTRO, token) as repetido:
@@ -492,7 +490,12 @@ def editar(request, sinistro_id):
     return render(
         request,
         "sinistros/editar.html",
-        {"form": form, "sinistro": sinistro, "volta": _volta(request), "hoje": date.today()},
+        {
+            "form": form,
+            "sinistro": sinistro,
+            "volta": _volta(request),
+            "hoje": timezone.localdate(),
+        },
     )
 
 
@@ -547,7 +550,7 @@ def _solicitar_auxilio(request, sinistro):
         sinistro=sinistro,
         valor=valor,
         status=AuxilioMotorista.Status.SOLICITADO,
-        data_solicitacao=date.today(),
+        data_solicitacao=timezone.localdate(),
     )
     messages.success(request, "Auxílio motorista registrado como solicitado.")
     return redirect(_volta(request))

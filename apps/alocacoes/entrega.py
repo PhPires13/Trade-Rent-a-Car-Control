@@ -6,11 +6,12 @@ Entrega: depois de alocar, a ficha do cliente mostra um cartão com os passos
 mostra os passos (vistoria de devolução → KM final → caução → confirmar).
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.db.models import Max, Q
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.formatos import brl, milhar
 
@@ -180,7 +181,7 @@ def situacao_da_devolucao(alocacao):
     vistorias = list(_vistorias_do_carro_da_locacao(alocacao).order_by("-data", "-pk"))
     entrega = next((v for v in vistorias if v.tipo == Vistoria.Tipo.ENTRADA), None)
     devolucao = vistoria_de_devolucao(alocacao, vistorias)
-    hoje = date.today()
+    hoje = timezone.localdate()
     # Vistoria de devolução antiga (o carro foi conferido e o motorista seguiu com
     # ele) não serve de data: sugere hoje e a pessoa confere.
     data_da_vistoria = bool(

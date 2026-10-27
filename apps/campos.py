@@ -5,6 +5,7 @@ os campos mostram o valor no mesmo formato ("58.000,00"), nunca "58000.00".
 """
 
 import re
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from django import forms
@@ -47,10 +48,36 @@ def data_plausivel(data):
     return ANO_MINIMO_DATA <= data.year <= timezone.localdate().year + ANOS_A_FRENTE
 
 
+#: Formatos de data aceitos em todo formulário: o do calendário do navegador
+#: (AAAA-MM-DD) e o digitado à mão (10/05/2026 ou 10/05/26 → 2026).
+FORMATOS_DE_DATA = ["%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"]
+
+MENSAGEM_ANO = "Confira o ano (ex.: 2026)."
+
+
 def validar_ano_plausivel(data):
     """Recusa data com ano fora de 2000..hoje+10 — "0026" é "26" digitado pela metade."""
     if data is not None and not data_plausivel(data):
-        raise ValidationError("Confira o ano (ex.: 2026).", code="ano_invalido")
+        raise ValidationError(MENSAGEM_ANO, code="ano_invalido")
+
+
+def ler_data(texto, rotulo="Data"):
+    """Data do POST cru (fora de formulário Django) com as mesmas regras dos formulários.
+
+    Aceita AAAA-MM-DD, DD/MM/AAAA e DD/MM/AA; recusa ano fora de 2000..hoje+10.
+    Erro vira ValidationError com mensagem para a pessoa (nunca erro 500).
+    """
+    texto = str(texto or "").strip()
+    for formato in FORMATOS_DE_DATA:
+        try:
+            dia = datetime.strptime(texto, formato).date()
+            break
+        except ValueError:
+            continue
+    else:
+        raise ValidationError(f"{rotulo} inválida — escolha a data no calendário.", code="invalid")
+    validar_ano_plausivel(dia)
+    return dia
 
 
 def dinheiro_br(texto):
@@ -168,6 +195,8 @@ class FormularioBR:
         if isinstance(widget, forms.DateInput):
             widget.input_type = "date"
             widget.format = "%Y-%m-%d"
+        # não depende do idioma: pt-BR do Django não traz o AAAA-MM-DD do calendário
+        campo.input_formats = FORMATOS_DE_DATA
         if validar_ano_plausivel not in campo.validators:
             campo.validators.append(validar_ano_plausivel)
 

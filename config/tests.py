@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import Client, override_settings
+from django.utils import timezone
 
 
 @pytest.mark.django_db
@@ -87,7 +88,7 @@ def test_painel_nao_cresce_com_a_frota(django_user_model, django_assert_max_num_
     from apps.manutencao.models import ItemPreventiva, Manutencao
     from apps.sinistros.models import Sinistro
 
-    hoje = date.today()
+    hoje = timezone.localdate()
     oleo = ItemPreventiva.objects.get(nome="Troca de óleo e filtro")
     for indice in range(12):
         veiculo = Veiculo.objects.create(
@@ -151,7 +152,7 @@ def _cobrancas_no_painel(quantidade):
     from apps.financeiro.models import AplicacaoRecebimento, Cobranca, Recebimento
     from apps.pessoas.models import Cliente
 
-    hoje = date.today()
+    hoje = timezone.localdate()
     cliente = Cliente.objects.create(nome="Arlen", cpf_cnpj="111.222.333-44")
     recebimento = Recebimento.objects.create(cliente=cliente, data=hoje, valor=Decimal("9999"))
     for _ in range(quantidade):

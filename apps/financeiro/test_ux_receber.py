@@ -40,7 +40,7 @@ def atrasada(cliente):
         origem=Cobranca.Origem.ALUGUEL,
         descricao="Aluguel semanal QXQ6C10 — venc. 01/07/2026",
         valor=Decimal("650.00"),
-        vencimento=date.today() - timedelta(days=10),
+        vencimento=timezone.localdate() - timedelta(days=10),
         status=Cobranca.Status.ATRASADO,
     )
     services.atualizar_inadimplencia(cliente)
@@ -64,7 +64,7 @@ def pagar(client, cliente, cobranca=None, valor="700,00", aplicar="650,00", **ex
     dados = {
         "cliente": cliente.pk,
         "valor": valor,
-        "data": date.today().isoformat(),
+        "data": timezone.localdate().isoformat(),
         "forma": "pix",
         "sobra_destino": "credito",
         **extra,
@@ -92,7 +92,7 @@ def test_botao_usar_credito_so_com_credito(usuario_logado, cliente, atrasada):
     html = usuario_logado.get(f"{URL}?cliente={cliente.pk}").content.decode()
     assert "Usar o crédito" not in html
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="entrada", valor=Decimal("50.00"), data=date.today()
+        cliente=cliente, tipo="entrada", valor=Decimal("50.00"), data=timezone.localdate()
     )
     html = usuario_logado.get(f"{URL}?cliente={cliente.pk}").content.decode()
     assert "Usar o crédito de R$ 50,00" in html
@@ -100,7 +100,7 @@ def test_botao_usar_credito_so_com_credito(usuario_logado, cliente, atrasada):
 
 def test_pagar_com_credito_pela_tela(usuario_logado, cliente, atrasada):
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=date.today()
+        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=timezone.localdate()
     )
     pagar(usuario_logado, cliente, atrasada, valor="650,00", forma="credito")
     recebimento = Recebimento.objects.get()
@@ -120,7 +120,7 @@ def test_campos_de_dinheiro_abrem_teclado_numerico(usuario_logado, cliente, atra
 
 def test_forma_invalida_e_recusada(cliente, atrasada):
     with pytest.raises(services.ValidationError):
-        services.registrar_recebimento(cliente, date.today(), Decimal("10"), "cheque", [])
+        services.registrar_recebimento(cliente, timezone.localdate(), Decimal("10"), "cheque", [])
 
 
 def test_atalho_cobranca_preenche_valor_e_aplicacao(usuario_logado, cliente, atrasada):
@@ -192,7 +192,7 @@ def test_mensagem_do_recibo(cliente, atrasada):
     from apps.financeiro import recibo
 
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("700.00"), "pix", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("700.00"), "pix", [(atrasada, Decimal("650.00"))]
     )
     texto = recibo.mensagem_recibo(services.resumo_recebimento(recebimento))
     assert texto.startswith("Olá, João! Recebemos seu pagamento de R$ 700,00 (Pix)")
@@ -243,10 +243,10 @@ def test_desfazer_devolve_saldo_credito_e_inadimplencia(usuario_logado, cliente,
 
 def test_desfazer_uso_de_credito_devolve_o_credito(cliente, atrasada):
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=date.today()
+        cliente=cliente, tipo="entrada", valor=Decimal("650.00"), data=timezone.localdate()
     )
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "credito", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "credito", [(atrasada, Decimal("650.00"))]
     )
     assert MovimentoCredito.saldo_do_cliente(cliente) == Decimal("0.00")
     services.desfazer_recebimento(recebimento)
@@ -254,10 +254,10 @@ def test_desfazer_uso_de_credito_devolve_o_credito(cliente, atrasada):
 
 
 def test_desfazer_remove_reforco_de_caucao(cliente, atrasada, alocacao):
-    caucao = services.abrir_caucao(alocacao, Decimal("1000.00"), date.today())
+    caucao = services.abrir_caucao(alocacao, Decimal("1000.00"), timezone.localdate())
     recebimento = services.registrar_recebimento(
         cliente,
-        date.today(),
+        timezone.localdate(),
         Decimal("700.00"),
         "pix",
         [(atrasada, Decimal("650.00"))],
@@ -284,10 +284,10 @@ def test_desfazer_so_no_mesmo_dia(usuario_logado, cliente, atrasada):
 
 def test_nao_desfaz_se_o_credito_gerado_ja_foi_usado(cliente, atrasada):
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("700.00"), "pix", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("700.00"), "pix", [(atrasada, Decimal("650.00"))]
     )
     MovimentoCredito.objects.create(
-        cliente=cliente, tipo="uso", valor=Decimal("50.00"), data=date.today()
+        cliente=cliente, tipo="uso", valor=Decimal("50.00"), data=timezone.localdate()
     )
     with pytest.raises(services.ValidationError, match="já foi usado"):
         services.desfazer_recebimento(recebimento)
@@ -300,11 +300,11 @@ def test_desfazer_cobranca_judicial_volta_a_ser_judicial(cliente):
         origem=Cobranca.Origem.ALUGUEL,
         descricao="Aluguel semanal (acordo)",
         valor=Decimal("650.00"),
-        vencimento=date.today() - timedelta(days=30),
+        vencimento=timezone.localdate() - timedelta(days=30),
         status=Cobranca.Status.JUDICIAL,
     )
     recebimento = services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "pix", [(judicial, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "pix", [(judicial, Decimal("650.00"))]
     )
     judicial.refresh_from_db()
     assert judicial.status == Cobranca.Status.PAGO
@@ -343,7 +343,7 @@ def test_recebi_no_extrato_so_para_o_que_falta(usuario_logado, cliente, atrasada
     url = f"/financeiro/cliente/{cliente.pk}/"
     assert f"cobranca={atrasada.pk}" in usuario_logado.get(url).content.decode()
     services.registrar_recebimento(
-        cliente, date.today(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
+        cliente, timezone.localdate(), Decimal("650.00"), "pix", [(atrasada, Decimal("650.00"))]
     )
     assert f"cobranca={atrasada.pk}" not in usuario_logado.get(url).content.decode()
 

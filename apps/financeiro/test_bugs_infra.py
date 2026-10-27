@@ -1,11 +1,12 @@
 """Bugs da frente infra: rotina diária (C08)."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
 
 import pytest
 from django.core.management import CommandError, call_command
+from django.utils import timezone
 
 from apps.financeiro.models import Cobranca
 from apps.pessoas.models import Cliente
@@ -21,7 +22,7 @@ def test_c08_erro_num_passo_nao_impede_os_outros_e_o_cron_acusa():
         origem=Cobranca.Origem.ALUGUEL,
         descricao="Aluguel",
         valor=Decimal("650.00"),
-        vencimento=date.today() - timedelta(days=3),
+        vencimento=timezone.localdate() - timedelta(days=3),
     )
     with (
         mock.patch(f"{ROTINA}.gerar_cobrancas_semanais", side_effect=RuntimeError("banco caiu")),

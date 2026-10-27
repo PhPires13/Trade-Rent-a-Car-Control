@@ -1,10 +1,11 @@
 """Carro na oficina, edição de manutenção e preventivas focadas (propostas #9 e #14)."""
 
 import json
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import Cobranca
@@ -12,7 +13,7 @@ from apps.frota.models import Veiculo
 from apps.manutencao.models import ItemPreventiva, Manutencao
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

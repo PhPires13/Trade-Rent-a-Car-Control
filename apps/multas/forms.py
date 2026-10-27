@@ -248,7 +248,7 @@ class MultaEdicaoForm(MultaForm):
         return dados
 
 
-class OrgaoForm(forms.ModelForm):
+class OrgaoForm(FormularioBR, forms.ModelForm):
     """Cadastro do órgão com portal, credenciais e procedimento (docs.md §4.1).
 
     A senha nunca volta no HTML da edição (ficaria em claro no fonte e no

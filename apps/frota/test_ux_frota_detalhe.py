@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.frota.alertas import pendencias_do_veiculo
@@ -130,7 +131,7 @@ def test_detalhe_mostra_a_faixa_com_botao_para_resolver(usuario_logado, veiculo)
 
 
 def test_detalhe_em_dia_mostra_tudo_certo(usuario_logado, veiculo):
-    _km_do_mes(veiculo, date.today())
+    _km_do_mes(veiculo, timezone.localdate())
     conteudo = usuario_logado.get(f"/frota/veiculo/{veiculo.pk}/").content.decode()
     assert "Tudo em dia com este carro" in conteudo
     assert "Pendências deste carro" not in conteudo

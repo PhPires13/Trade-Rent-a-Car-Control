@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import Cobranca
@@ -22,7 +23,7 @@ from apps.manutencao.services import (
 from apps.pessoas.models import Cliente
 from apps.sinistros.models import Sinistro
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

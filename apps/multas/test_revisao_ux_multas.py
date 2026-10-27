@@ -1,10 +1,11 @@
 """Revisão adversarial da UX de multas: valores negativos, ND congelada,
 cliques repetidos/abas antigas, parâmetros adulterados e consultas da lista."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.frota.models import Veiculo
@@ -12,7 +13,7 @@ from apps.multas import services
 from apps.multas.models import Multa
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services
@@ -51,7 +52,7 @@ def cobranca_de(
 
 def test_marcar_judicial_pede_confirmacao(usuario_logado, cliente):
     # atrasada de hoje: sem encargo sugerido, o botão "judicial" aparece
-    cobranca_de(cliente, status=Cobranca.Status.ATRASADO, vencimento=date.today())
+    cobranca_de(cliente, status=Cobranca.Status.ATRASADO, vencimento=timezone.localdate())
     html = usuario_logado.get("/financeiro/").content.decode()
     assert "Marcar como cobrança judicial?" in html  # confirm() no form
 
@@ -139,7 +140,13 @@ def test_judicial_pode_ser_descontada_da_caucao(usuario_logado, cliente, db):
     assert "Dívida em acordo" in html  # judicial listada para desconto
     resposta = usuario_logado.post(
         f"/financeiro/caucoes/{caucao.pk}/",
-        {"tipo": "desconto", "valor": "650,00", "data": "2026-07-20", "cobranca": cobranca.pk},
+        {
+            "tipo": "desconto",
+            "valor": "650,00",
+            "data": "2026-07-20",
+            "cobranca": cobranca.pk,
+            "confirmar_mes_passado": "1",  # julho já é mês fechado no DAS
+        },
     )
     assert resposta.status_code == 302
     cobranca.refresh_from_db()

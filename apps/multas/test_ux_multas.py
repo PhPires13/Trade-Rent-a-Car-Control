@@ -2,10 +2,11 @@
 de tarefa na lista, NIC só depois do prazo e cartões no celular (auditoria UX
 #10, #11 e #13)."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.frota.models import Veiculo
@@ -13,7 +14,7 @@ from apps.multas import services
 from apps.multas.models import Multa
 from apps.pessoas.models import Cliente, CondutorAutorizado
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

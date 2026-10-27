@@ -1,6 +1,7 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from django.db import models
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.frota.models import Veiculo
@@ -113,7 +114,7 @@ class Sinistro(models.Model):
         manutenção (saída − entrada; em aberto, até hoje) e um dia que caia em
         duas passagens ao mesmo tempo só conta uma vez.
         """
-        hoje = date.today()
+        hoje = timezone.localdate()
         dias = set()
         for manutencao in self.manutencoes.all():
             if manutencao.data_entrada:

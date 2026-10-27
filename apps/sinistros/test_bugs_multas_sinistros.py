@@ -1,9 +1,10 @@
 """Correções da frente multas-sinistros: D09, D16, D26, D33 (sinistro), C25."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro.models import Cobranca
@@ -13,7 +14,7 @@ from apps.manutencao.models import Manutencao
 from apps.pessoas.models import Cliente
 from apps.sinistros.models import AuxilioMotorista, Sinistro
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

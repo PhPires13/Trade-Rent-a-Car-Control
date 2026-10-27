@@ -1,15 +1,16 @@
 """Pendências da etapa 15 — frente km-manutenção: trava de envio duplicado e D27."""
 
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
+from django.utils import timezone
 
 from apps.frota.models import Veiculo
 from apps.km.models import RegistroKm
 from apps.manutencao.models import Manutencao
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from django.conf import settings
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_not_required
-from django.db.models import Count, Max, OuterRef, Q, Subquery
+from django.db.models import Count, OuterRef, Q, Subquery
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -24,7 +24,7 @@ from apps.busca import (
 )
 from apps.financeiro.devedores import resumo_do_dia
 from apps.financeiro.models import ZERO, Cobranca
-from apps.financeiro.services import _proximo_dia
+from apps.financeiro.services import _proximo_dia, proximo_vencimento
 from apps.frota.alertas import vigencias_a_vencer
 from apps.frota.desmobilizacao import ranking_da_frota
 from apps.frota.models import Veiculo, normalizar_placa
@@ -178,40 +178,32 @@ def _alugueis_da_semana(semana, hoje):
     O aluguel só nasce no dia do vencimento de cada cliente; sem isto o
     "previstos" do painel começava a semana pequeno e crescia dia a dia.
     Devolve (valor, alocações com semana vencida e não lançada há mais de 1 dia
-    — sinal de rotina parada). Uma query só; usa o valor semanal da alocação
-    (troca temporária com valor ajustado entra quando a cobrança for lançada).
+    — sinal de rotina parada). Usa o valor semanal da alocação (troca
+    temporária com valor ajustado entra quando a cobrança for lançada).
 
-    Mesma conta de financeiro.services._proximo_vencimento e
-    gerar_cobrancas_semanais: a âncora é a última cobrança de aluguel e o
-    período que ela já pagou. Depois de mudar o dia de vencimento, o 1º dia
-    novo pode ser uma data que já passou (ou cair dentro do período já pago):
-    só conta como "não lançada" a semana cujos dias a cobrar já começaram há
-    mais de 1 dia — senão o painel acusava "rotina parada" à toa.
+    O próximo vencimento sai de financeiro.services.proximo_vencimento — a
+    mesma conta da rotina que gera o aluguel, inclusive depois de mudar o dia
+    de vencimento (D04: o 1º dia novo conta a partir do dia da mudança). Antes
+    o painel fazia a conta por conta própria e, com o dia mudado, acusava
+    "rotina parada" à toa. As últimas cobranças vêm numa query só para a frota
+    toda; o histórico só é lido para alocação com o dia mudado.
     """
     inicio, fim = semana
-    aluguel = Q(cobrancas__origem=Cobranca.Origem.ALUGUEL)
     ultima_cobranca = Cobranca.objects.filter(
         alocacao=OuterRef("pk"), origem=Cobranca.Origem.ALUGUEL
     ).order_by("-vencimento")
-    alocacoes = Alocacao.objects.filter(
-        status=Alocacao.Status.ATIVA, data_inicio__lte=fim
-    ).annotate(
-        ultima=Max("cobrancas__vencimento", filter=aluguel),
-        ultima_fim=Subquery(ultima_cobranca.values("periodo_fim")[:1]),
+    alocacoes = list(
+        Alocacao.objects.filter(status=Alocacao.Status.ATIVA, data_inicio__lte=fim).annotate(
+            ultima_pk=Subquery(ultima_cobranca.values("pk")[:1])
+        )
     )
+    ultimas = Cobranca.objects.in_bulk([a.ultima_pk for a in alocacoes if a.ultima_pk])
     previsto, atrasadas = ZERO, 0
     for alocacao in alocacoes:
         dia = alocacao.dia_vencimento
-        if alocacao.ultima:
-            data = _proximo_dia(alocacao.ultima + timedelta(days=1), dia)
-            # primeiro dia ainda não pago (antigas, sem período: a semana do vencimento)
-            nao_pago = (alocacao.ultima_fim or alocacao.ultima + timedelta(days=6)) + timedelta(
-                days=1
-            )
-        else:
-            # 1ª cobrança: no "cobrar a partir de" (contrato antigo, D01) ou na
-            # entrega, proporcional até o 1º dia de pagar (D12)
-            data = nao_pago = alocacao.cobrar_a_partir_de or alocacao.data_inicio
+        # sem cobrança ainda: no "cobrar a partir de" (contrato antigo, D01) ou na
+        # entrega, proporcional até o 1º dia de pagar (D12)
+        data, nao_pago = proximo_vencimento(alocacao, hoje, ultima=ultimas.get(alocacao.ultima_pk))
         # pré-paga: semana que começa no dia do término (ou depois) não é devida
         termino = alocacao.data_termino and alocacao.data_termino - timedelta(days=1)
         primeira_devida = True
@@ -380,10 +372,12 @@ def painel(request):
 
 
 class Entrar(auth_views.LoginView):
-    """Login: quem já está logado vai direto ao Painel; "next" para /sair/ é ignorado.
+    """Login: quem já está logado vai direto ao Painel; "next" para /sair/ ou
+    para o próprio /entrar/ é ignorado.
 
     Sem o 2º ajuste, entrar depois de abrir /sair/ deslogado caía de novo na
-    pergunta "Deseja sair?" logo após digitar a senha.
+    pergunta "Deseja sair?" logo após digitar a senha; e /entrar/?next=/entrar/
+    já logado dava erro 500 (o Django acusa "redirecionamento em loop").
     """
 
     template_name = "login.html"
@@ -391,7 +385,9 @@ class Entrar(auth_views.LoginView):
 
     def get_redirect_url(self):
         destino = super().get_redirect_url()
-        if destino and urlsplit(destino).path == reverse("logout"):
+        # rstrip: "/sair" sem a barra também cai aqui (o Django completa a barra)
+        ignorar = (reverse("logout").rstrip("/"), reverse("login").rstrip("/"))
+        if destino and urlsplit(destino).path.rstrip("/") in ignorar:
             return ""
         return destino
 

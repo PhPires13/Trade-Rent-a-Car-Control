@@ -7,12 +7,13 @@ tela da caução, aviso de cliente sem telefone e crédito que voltaria ao créd
 
 import csv
 import io
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from urllib.parse import unquote
 
 import pytest
 from django.contrib.messages import get_messages
+from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services, whatsapp
@@ -20,7 +21,7 @@ from apps.financeiro.models import Cobranca, MovimentacaoCaucao, MovimentoCredit
 from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente
 
-HOJE = date.today()
+HOJE = timezone.localdate()
 
 
 @pytest.fixture

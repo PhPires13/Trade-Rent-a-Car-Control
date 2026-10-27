@@ -1,10 +1,11 @@
 """Vigências e documentos a vencer — IPVA, licenciamento, rastreador, bateria e CNH (§5)."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from urllib.parse import quote
 
 from django.db.models import Count, Min
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.formats import date_format
 
 from apps.formatos import brl, milhar
@@ -18,13 +19,14 @@ DIAS_ALERTA_VIGENCIA = 30
 _BUSCAR = object()
 
 
-def _alerta(data, hoje, descricao):
-    return {"data": data, "vencido": data < hoje, "descricao": descricao}
+def _alerta(data, hoje, descricao, url=None):
+    """`url`: a tela onde se resolve o alerta (o painel mostra a linha como link)."""
+    return {"data": data, "vencido": data < hoje, "descricao": descricao, "url": url}
 
 
 def vigencias_a_vencer(hoje=None):
     """Alertas vencidos ou vencendo nos próximos 30 dias, do mais antigo ao mais novo."""
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     limite = hoje + timedelta(days=DIAS_ALERTA_VIGENCIA)
     alertas = []
     frota = Veiculo.objects.exclude(status=Veiculo.Status.VENDIDO)
@@ -36,16 +38,27 @@ def vigencias_a_vencer(hoje=None):
                 hoje,
                 f"{parcela.rotulo} do {parcela.veiculo.placa}"
                 + (f" — {brl(parcela.valor)}" if parcela.valor else ""),
+                reverse("frota:ipva", args=[parcela.veiculo_id]),
             )
         )
     # virada do ano: o carro tinha IPVA lançado em anos anteriores e o deste ano não
     for veiculo in sem_ipva_do_ano(hoje.year):
         alertas.append(
-            _alerta(hoje, hoje, f"IPVA {hoje.year} do {veiculo.placa} ainda não cadastrado")
+            _alerta(
+                hoje,
+                hoje,
+                f"IPVA {hoje.year} do {veiculo.placa} ainda não cadastrado",
+                reverse("frota:ipva", args=[veiculo.pk]),
+            )
         )
     for veiculo in frota.filter(licenciamento_vencimento__lte=limite):
         alertas.append(
-            _alerta(veiculo.licenciamento_vencimento, hoje, f"Licenciamento do {veiculo.placa}")
+            _alerta(
+                veiculo.licenciamento_vencimento,
+                hoje,
+                f"Licenciamento do {veiculo.placa}",
+                reverse("frota:veiculo_editar", args=[veiculo.pk]),
+            )
         )
     for veiculo in frota.filter(rastreador_vigencia_fim__lte=limite):
         alertas.append(
@@ -54,17 +67,30 @@ def vigencias_a_vencer(hoje=None):
                 hoje,
                 f"Rastreador do {veiculo.placa}"
                 + (f" ({veiculo.rastreador_fornecedor})" if veiculo.rastreador_fornecedor else ""),
+                reverse("frota:veiculo_editar", args=[veiculo.pk]),
             )
         )
     for veiculo in frota.filter(bateria_garantia_fim__lte=limite):
         alertas.append(
-            _alerta(veiculo.bateria_garantia_fim, hoje, f"Garantia da bateria do {veiculo.placa}")
+            _alerta(
+                veiculo.bateria_garantia_fim,
+                hoje,
+                f"Garantia da bateria do {veiculo.placa}",
+                reverse("frota:veiculo_editar", args=[veiculo.pk]),
+            )
         )
     for cliente in Cliente.objects.filter(
         status__in=[Cliente.Status.ATIVO, Cliente.Status.INADIMPLENTE],
         cnh_validade__lte=limite,
     ):
-        alertas.append(_alerta(cliente.cnh_validade, hoje, f"CNH de {cliente.nome}"))
+        alertas.append(
+            _alerta(
+                cliente.cnh_validade,
+                hoje,
+                f"CNH de {cliente.nome}",
+                reverse("pessoas:editar", args=[cliente.pk]),
+            )
+        )
     return sorted(alertas, key=lambda a: a["data"])
 
 
@@ -118,7 +144,7 @@ def pendencias_do_veiculo(veiculo, hoje=None, na_oficina=_BUSCAR):
     from apps.multas.models import Multa
     from apps.sinistros.models import Sinistro
 
-    hoje = hoje or date.today()
+    hoje = hoje or timezone.localdate()
     if veiculo.status == Veiculo.Status.VENDIDO:
         return []
     limite = hoje + timedelta(days=DIAS_ALERTA_VIGENCIA)
@@ -268,8 +294,8 @@ def pendencias_do_veiculo(veiculo, hoje=None, na_oficina=_BUSCAR):
     # mesma regra do atalho "Indicar condutor" da lista de multas: multa anulada
     # (cancelada/recurso deferido) não precisa mais de FICI
     multas_sem_motorista = (
-        Multa.objects.filter(veiculo=veiculo, fici_status=Multa.Fici.PENDENTE)
-        .exclude(resultado__in=Multa.RESULTADOS_ANULADORES)
+        Multa.objects.fici_pendente()
+        .filter(veiculo=veiculo)
         .aggregate(total=Count("id"), prazo=Min("fici_prazo"))
     )
     total_multas, prazo = multas_sem_motorista["total"], multas_sem_motorista["prazo"]
