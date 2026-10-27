@@ -45,7 +45,7 @@
       <tbody class="block divide-y divide-gray-100 sm:table-row-group">
         {% for cobranca in cobrancas %}
         <tr class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 sm:table-row sm:py-0">
-          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell text-gray-600 sm:text-gray-900">{{ cobranca.vencimento|date:"d/m/y" }}</td>
+          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell text-gray-600 sm:text-gray-900">{{ cobranca.vencimento|date:"d/m/Y" }}</td>
           <td class="order-first basis-full font-medium sm:px-2 sm:py-1.5 sm:table-cell sm:font-normal">{{ cobranca.descricao }}</td>
           <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell sm:text-right">{{ cobranca.valor|brl }}</td>
           <td class="sm:px-2 sm:py-1.5 sm:table-cell">
@@ -77,7 +77,7 @@
       <tbody class="block divide-y divide-gray-100 sm:table-row-group">
         {% for recebimento in recebimentos %}
         <tr class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 sm:table-row sm:py-0">
-          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.data|date:"d/m/y" }}</td>
+          <td class="whitespace-nowrap sm:px-2 sm:py-1.5 sm:table-cell">{{ recebimento.data|date:"d/m/Y" }}</td>
           {% if recebimento.forma == "credito" %}
           <td class="sm:px-2 sm:py-1.5 sm:table-cell text-gray-600">Abatimento com crédito do cliente
             <div class="text-xs text-gray-500">não é dinheiro novo — usa a sobra de um pagamento anterior</div></td>
@@ -93,8 +93,10 @@
             <form method="post" action="{% url 'financeiro:desfazer_recebimento' recebimento.pk %}" class="mt-1"
                   onsubmit="if (!confirm('Desfazer este lançamento de {{ recebimento.valor|brl }}? As cobranças voltam a ficar em aberto e o crédito ou reforço de caução gerado por ele é removido.')) return false; this.querySelector('button').disabled = true; return true;">
               {% csrf_token %}
+              {# volta para este extrato (sem o cartão verde "Pagamento lançado" do Receber) #}
+              <input type="hidden" name="voltar" value="extrato">
               <button class="py-1 text-xs text-gray-500 underline hover:text-red-700"
-                      title="Só no mesmo dia do lançamento">↩ desfazer (lançado hoje)</button>
+                      title="Só no mesmo dia do lançamento">↩ desfazer (lançado hoje{% if recebimento.lancado_em %} às {{ recebimento.lancado_em|date:"H:i" }}{% endif %})</button>
             </form>
             {% endif %}
           </td>

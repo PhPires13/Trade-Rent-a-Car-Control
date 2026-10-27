@@ -19,7 +19,7 @@ def foto_cnh(nome="cnh.png"):
 
 DADOS_LIDOS = {
     "nome": "Arlen Souza",
-    "cpf": "111.222.333-44",
+    "cpf": "111.222.333-96",
     "cnh_numero": "01234567890",
     "cnh_categoria": "B",
     "cnh_validade": "2030-05-10",
@@ -33,7 +33,7 @@ def test_cadastro_com_foto_e_cnh(usuario_logado, settings, tmp_path):
         "/clientes/novo/",
         {
             "nome": "Arlen Souza",
-            "cpf_cnpj": "111.222.333-44",
+            "cpf_cnpj": "111.222.333-96",
             "status": Cliente.Status.ATIVO,
             "foto": foto_cnh("rosto.png"),
             "cnh_frente": foto_cnh("frente.png"),
@@ -41,7 +41,7 @@ def test_cadastro_com_foto_e_cnh(usuario_logado, settings, tmp_path):
         },
     )
     assert resposta.status_code == 302
-    cliente = Cliente.objects.get(cpf_cnpj="111.222.333-44")
+    cliente = Cliente.objects.get(cpf_cnpj="111.222.333-96")
     assert cliente.foto.name.startswith("clientes/")
     assert cliente.cnh_frente.name.startswith("cnh/")
     assert cliente.cnh_verso.name.startswith("cnh/")
@@ -105,7 +105,7 @@ def test_form_do_cliente_aceita_cnh_em_pdf(db, settings, tmp_path):
 
     pdf = SimpleUploadedFile("cnh.pdf", b"%PDF-1.4 x", content_type="application/pdf")
     form = ClienteForm(
-        {"nome": "Arlen", "cpf_cnpj": "111.222.333-44", "status": Cliente.Status.ATIVO},
+        {"nome": "Arlen", "cpf_cnpj": "111.222.333-96", "status": Cliente.Status.ATIVO},
         {"cnh_frente": pdf},
     )
     assert form.is_valid(), form.errors
@@ -143,7 +143,7 @@ def test_extrair_dados_recusa_vira_none(settings):
 
 def test_foto_do_cliente_aparece_no_hub(usuario_logado, settings, tmp_path):
     settings.MEDIA_ROOT = tmp_path
-    cliente = Cliente.objects.create(nome="Arlen", cpf_cnpj="111.222.333-44")
+    cliente = Cliente.objects.create(nome="Arlen", cpf_cnpj="111.222.333-96")
     cliente.foto = foto_cnh("rosto.png")
     cliente.save()
     html = usuario_logado.get("/clientes/").content.decode()
@@ -152,7 +152,7 @@ def test_foto_do_cliente_aparece_no_hub(usuario_logado, settings, tmp_path):
 
 def test_cnh_do_cliente_nao_e_publica(client, settings, tmp_path, db):
     settings.MEDIA_ROOT = tmp_path
-    cliente = Cliente.objects.create(nome="Arlen", cpf_cnpj="111.222.333-44")
+    cliente = Cliente.objects.create(nome="Arlen", cpf_cnpj="111.222.333-96")
     cliente.cnh_frente = foto_cnh("frente.png")
     cliente.save()
     resposta = client.get(cliente.cnh_frente.url)

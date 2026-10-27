@@ -9,20 +9,12 @@ pessoa marca "Confirmo o KM". O teto absoluto (KM_MAXIMO) é recusado sempre.
 from apps.formatos import milhar
 
 
-def _ha_quanto_tempo(dias):
-    if dias <= 0:
-        return "no mesmo dia"
-    if dias == 1:
-        return "há 1 dia"
-    return f"há {dias} dias"
-
-
 def suspeita_de_km(km, data, km_base, data_base, rotulo_base):
     """Aviso quando `km` foge do normal em relação à última leitura; None se ok.
 
     rotulo_base: como a leitura anterior é chamada ("na entrega", "na retirada").
     """
-    from apps.km.correcao import LIMITE_KM_POR_DIA  # import local evita ciclo
+    from apps.km.correcao import LIMITE_KM_POR_DIA, _ha_quanto_tempo  # import local evita ciclo
 
     if km is None or km_base is None or data is None or data_base is None:
         return None

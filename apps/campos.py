@@ -16,6 +16,18 @@ from django.utils import timezone
 from apps.formatos import numero_br
 
 _MILHAR = re.compile(r"^[1-9]\d{0,2}(\.\d{3})+$")
+# "12,000" (vírgula + exatamente 3 dígitos): doze reais ou doze mil? Não dá para saber.
+_VIRGULA_AMBIGUA = re.compile(r"^-?\d{1,3},\d{3}$")
+
+
+def id_valido(texto):
+    """pk vinda da URL ou do POST: só algarismos ASCII e de tamanho sensato.
+
+    str.isdigit() aceita "²" e "١٢" (int() recusa) e números gigantes estouram o
+    inteiro do banco — os dois virariam erro 500 em vez de serem ignorados.
+    """
+    return bool(texto) and texto.isascii() and texto.isdigit() and len(texto) <= 9
+
 
 #: Limite de todo upload (foto, CNH, CRLV, checklist) — um vídeo escolhido por
 #: engano no celular não pode ir parar no disco do servidor (C17).
@@ -50,7 +62,12 @@ def data_plausivel(data):
 
 #: Formatos de data aceitos em todo formulário: o do calendário do navegador
 #: (AAAA-MM-DD) e o digitado à mão (10/05/2026 ou 10/05/26 → 2026).
-FORMATOS_DE_DATA = ["%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"]
+#: o calendário manda AAAA-MM-DD; quando o navegador mostra campo de texto, a
+#: pessoa digita "27/10/2026", "27-10-2026" ou "27.10.2026"
+FORMATOS_DE_DATA = ["%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d.%m.%Y"]
+
+#: "27/10" sem ano: completa com o ano corrente
+_DIA_E_MES = re.compile(r"^(\d{1,2})[/.-](\d{1,2})$")
 
 MENSAGEM_ANO = "Confira o ano (ex.: 2026)."
 
@@ -64,10 +81,14 @@ def validar_ano_plausivel(data):
 def ler_data(texto, rotulo="Data"):
     """Data do POST cru (fora de formulário Django) com as mesmas regras dos formulários.
 
-    Aceita AAAA-MM-DD, DD/MM/AAAA e DD/MM/AA; recusa ano fora de 2000..hoje+10.
+    Aceita AAAA-MM-DD, DD/MM/AAAA (também com "-" ou "."), DD/MM/AA e DD/MM
+    (ano corrente); recusa ano fora de 2000..hoje+10.
     Erro vira ValidationError com mensagem para a pessoa (nunca erro 500).
     """
     texto = str(texto or "").strip()
+    sem_ano = _DIA_E_MES.match(texto)
+    if sem_ano:
+        texto = f"{sem_ano[1]}/{sem_ano[2]}/{timezone.localdate().year}"
     for formato in FORMATOS_DE_DATA:
         try:
             dia = datetime.strptime(texto, formato).date()
@@ -75,7 +96,10 @@ def ler_data(texto, rotulo="Data"):
         except ValueError:
             continue
     else:
-        raise ValidationError(f"{rotulo} inválida — escolha a data no calendário.", code="invalid")
+        raise ValidationError(
+            f"{rotulo} inválida — escolha a data no calendário (ex.: 27/10/2026).",
+            code="invalid",
+        )
     validar_ano_plausivel(dia)
     return dia
 
@@ -85,10 +109,18 @@ def dinheiro_br(texto):
 
     - com vírgula: pontos são milhar e a vírgula é o decimal ("1.250,50");
     - só com ponto(s) em grupos de 3 ("1.850", "12.000"): é milhar;
-    - senão o ponto é decimal ("650.00", "0.50").
+    - senão o ponto é decimal ("650.00", "0.50");
+    - "12,000" e "1,250.00" são ambíguos: ValidationError com a explicação.
     """
     # espaço comum e o não separável (U+00A0) que vem ao copiar "R$ 1.250" de PDFs/sites
     texto = (texto or "").strip().replace("R$", "").replace(" ", "").replace("\u00a0", "")
+    if _VIRGULA_AMBIGUA.match(texto) or ("," in texto and "." in texto.split(",", 1)[1]):
+        # "12,000" virava R$ 12,00 e "1,250.00" (formato americano) virava R$ 1,25
+        raise ValidationError(
+            f"Confira o valor: {texto} é ambíguo. Use vírgula só nos centavos "
+            "(ex.: 12.000,00 para doze mil ou 12,00 para doze reais).",
+            code="valor_ambiguo",
+        )
     if "," in texto:
         texto = texto.replace(".", "").replace(",", ".")
     elif _MILHAR.match(texto):
@@ -154,6 +186,11 @@ class CampoDinheiro(forms.DecimalField):
         return value
 
 
+def rotulo_veiculo(veiculo):
+    """Como o carro aparece nos seletores: placa primeiro ("ABC1D23 — Gol")."""
+    return f"{veiculo.placa} — {veiculo.marca_modelo}"
+
+
 class FormularioBR:
     """Mixin: troca todo DecimalField do formulário por CampoDinheiro.
 
@@ -205,6 +242,10 @@ class FormularioBR:
         if isinstance(campo, forms.ModelChoiceField):
             if campo.empty_label == _OPCAO_VAZIA_DJANGO:
                 campo.empty_label = OPCAO_VAZIA
+            # carro sempre com a placa primeiro, igual em todo seletor ("ABC1D23 — Gol");
+            # o formulário que monta o próprio rótulo (ex.: troca) continua com o dele
+            if campo.queryset.model._meta.label == "frota.Veiculo":
+                campo.label_from_instance = rotulo_veiculo
             return
         if isinstance(campo, forms.ChoiceField):
             vazia = ("", _OPCAO_VAZIA_DJANGO)

@@ -109,6 +109,8 @@
   {% empty %}
     {% if sinistro.tipo == "colisao" and not sinistro.acionou_protecao %}
     <p class="text-sm text-gray-500">Só vale com a proteção acionada (evento aberto na Auto Truck).</p>
+    {% elif sinistro.tipo == "colisao" and sinistro.dias_parado <= 7 %}
+    <p class="text-sm text-gray-500">O pedido fica disponível quando o carro passar de 7 dias parado na oficina por este sinistro.</p>
     {% elif sinistro.tipo == "colisao" %}
     <form method="post" action="{% url 'sinistros:solicitar_auxilio' sinistro.pk %}" class="flex flex-col gap-2 sm:flex-row sm:items-center">
       {% csrf_token %}

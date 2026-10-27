@@ -106,6 +106,17 @@ class Sinistro(models.Model):
         super().save(*args, **kwargs)
 
     @property
+    def boletim_numero(self):
+        """Nº do BO sem um "BO" digitado no começo — a tela já mostra "BO" antes.
+
+        Os registros antigos foram gravados antes da limpeza no formulário e
+        apareciam como "BO BO 2026-123456".
+        """
+        from .views import _PREFIXO_BO
+
+        return _PREFIXO_BO.sub("", self.boletim_ocorrencia or "").strip()
+
+    @property
     def dias_parado(self):
         """Dias na oficina somando todas as manutenções do sinistro (docs.md §4.6).
 

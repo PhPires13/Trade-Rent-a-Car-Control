@@ -15,6 +15,10 @@
     <a href="{% url 'frota:ranking' %}" class="py-1 underline">← quando vender</a>
   </div>
 </div>
+{% if veiculo.status == "vendido" %}
+{# carro vendido: recomendação "continue alugando" não faz sentido #}
+<p class="mb-6 text-sm font-semibold">Vendido{% if veiculo.data_venda %} em {{ veiculo.data_venda|date:"d/m/Y" }}{% endif %}{% if veiculo.valor_venda is not None %} por {{ veiculo.valor_venda|brl }}{% endif %}{% if f.resultado_final is not None %} — resultado final {{ f.resultado_final|brl }}{% endif %}.</p>
+{% else %}
 <div class="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
   <span class="text-gray-500">Recomendação:</span> {% include "frota/_nivel.html" %}
   <span class="text-gray-500">
@@ -23,8 +27,11 @@
     {% elif f.nivel == "observar" %}continue alugando, mas acompanhe de perto.
     {% else %}continue alugando.{% endif %}
   </span>
+  {# decisão 19: a recomendação vem sempre com o motivo, ao lado do selo #}
+  {% if f.motivos %}<span class="w-full text-gray-700">Por quê: {{ f.motivos|join:"; " }}.</span>{% endif %}
   {% if veiculo.valor_venda_estimado %}<span class="text-gray-500">· valor de mercado estimado: <strong>{{ veiculo.valor_venda_estimado|brl }}</strong></span>{% endif %}
 </div>
+{% endif %}
 
 <div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
   <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black">{{ f.investido|brl }}</div><div class="text-sm text-gray-500">Investido (compra + entrada)</div></div>
@@ -32,7 +39,8 @@
   <div class="rounded-lg bg-white p-4 shadow"><div class="text-2xl font-black text-red-700">{{ f.despesa_total|brl }}</div><div class="text-sm text-gray-500">Despesas acumuladas</div></div>
   <div class="rounded-lg bg-marca-preto p-4 text-white shadow">
     <div class="text-2xl font-black text-marca-amarelo">
-      {% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}
+      {# fundo preto: vermelho claro para dar leitura #}
+      {% include "frota/_recuperado.html" with cor_prejuizo="text-red-300" %}
     </div>
     <div class="text-sm text-gray-300">do que o carro custou já voltou para o caixa (meta para vender: ~75%)</div>
   </div>
@@ -78,12 +86,8 @@
         <tr><td class="py-1.5">Sinistros no histórico</td><td class="py-1.5 text-right">{{ veiculo.sinistros.count }}</td></tr>
       </tbody>
     </table>
-    {% if f.motivos %}
-    <h3 class="mb-1 mt-4 text-sm font-semibold text-red-700">Sinais de alerta encontrados:</h3>
-    <ul class="space-y-0.5 text-sm text-gray-600">
-      {% for motivo in f.motivos %}<li>• {{ motivo }}</li>{% endfor %}
-    </ul>
-    {% else %}
+    {# com sinais de alerta, os motivos já aparecem no "Por quê" ao lado do selo #}
+    {% if veiculo.status != "vendido" and not f.motivos %}
     <p class="mt-4 text-sm text-green-700">✓ Nenhum sinal de alerta — o carro está saudável para continuar alugando.</p>
     {% endif %}
   </div>

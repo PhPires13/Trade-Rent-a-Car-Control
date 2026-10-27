@@ -28,6 +28,7 @@
       onsubmit="return confirm('Emitir a ND para {{ cliente.nome|escapejs }} com as multas marcadas? A cobrança entra no Financeiro e a numeração não pode ser reaproveitada.')">
   {% csrf_token %}
   <input type="hidden" name="cliente" value="{{ cliente.pk }}">
+  <input type="hidden" name="token" value="{{ token }}">
   <div class="mb-4 overflow-x-auto">
   <table class="w-full text-sm">
     <thead class="bg-gray-50 text-left">

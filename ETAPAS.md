@@ -264,6 +264,17 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 4. Regressão no navegador (computador e celular) depois das correções. Atenção: o servidor sandbox da etapa 17 caiu logo após subir, então os testes E2E no navegador podem não ter rodado contra ele — refazer com o servidor confirmado no ar. Sandbox: copiar db.sqlite3, migrar, criar usuário de teste e subir com DATABASE_URL/MEDIA_ROOT apontando para a cópia (porta 8001).
 5. Ainda dos donos: devolver crédito em dinheiro (decisão), conferir em celular de verdade, deploy Railway/Neon e carga de dados reais.
 
+### Etapa 17c — Achados do navegador e extras (PARCIAL — interrompida a pedido)
+- Rodada com testadores no navegador (sandbox) e lentes de código: 67 + 75 achados; correções por área estavam em andamento quando a rodada foi interrompida. O que já estava aplicado e passando nos testes entrou neste commit.
+- Ajustes na parada: "Recebi" só aparece na ficha do cliente com dívida (teste atualizado); o texto "km desde a entrega" saiu da lista de KM (gerava consultas por linha) e ficou só na mensagem de registro.
+
+**Para retomar:**
+1. Conferir quais itens de plano_nav.json (67) e achados_extra.json (75) ainda faltam — os relatórios dos agentes interrompidos estão nos journals de subagents/workflows (wf_cf166b7f-ba3, wf_36819dd4-20c). Destaques: caução já devolvida mostrando "falta R$ X" e depósito pré-preenchido; acerto da caução sem caminho para cobrar avaria nova; links pequenos demais para toque em várias telas.
+2. Revisão adversarial do diff completo desde 46ebf80 (nenhum revisor rodou sobre esta rodada).
+3. Achados das descobertas somente leitura interrompidas (wf_965fd98a-719 e wf_333e92d0-25b — refatoração para velocidade/confiabilidade).
+4. Regressão no navegador (computador e celular) com o servidor sandbox reiniciado.
+5. "km desde a entrega" na lista de KM, calculado em lote.
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:

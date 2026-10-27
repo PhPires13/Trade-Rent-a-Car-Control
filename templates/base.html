@@ -37,7 +37,21 @@
       button:not([data-alvo-livre]),a.rounded[class*="px-"]:not([data-alvo-livre]){min-height:44px}
       a.rounded[class*="px-"]:not([data-alvo-livre]):not(.block):not(.flex):not(.grid):not(.hidden):not(.inline-flex){display:inline-flex;align-items:center}
       input[type=checkbox],input[type=radio]{width:1.25rem;height:1.25rem}
+      /* link de ação no meio do texto (placa, "registrar devolução"): área de toque de 44px */
+      .alvo-toque{display:inline-flex;align-items:center;min-height:44px}
+      /* todo outro link do conteúdo ("Editar", "← Voltar", abas, placas): área de toque
+         de 44px de altura por uma camada invisível — o layout não muda */
+      main a:not([data-alvo-livre]):not(.dica-botao):not(.alvo-toque):not(.absolute):not(.fixed):not(.sticky){position:relative}
+      main a:not([data-alvo-livre]):not(.dica-botao):not(.alvo-toque):not(.absolute):not(.fixed):not(.sticky)::after{
+        content:"";position:absolute;left:0;right:0;top:50%;height:max(44px,100%);transform:translateY(-50%)}
     }
+    /* foco do teclado bem visível (o padrão do navegador, 1px, some no botão amarelo);
+       no fundo escuro (cabeçalho, barra de baixo) o contorno é amarelo */
+    :focus-visible{outline:3px solid #1d4ed8;outline-offset:2px}
+    .bg-marca-preto :focus-visible,.bg-gray-800 :focus-visible,.bg-gray-900 :focus-visible{outline-color:#F0C948}
+    .pular-conteudo{position:absolute;left:.5rem;top:-4rem;z-index:70;border-radius:.375rem;background:#F0C948;color:#1A1A1A;
+      padding:.75rem 1rem;font-weight:700}
+    .pular-conteudo:focus{top:.5rem}
     @media print{.dica-botao,.dica-balao,body>header{display:none!important}}</style>
   <script>
     tailwind.config = {
@@ -53,6 +67,8 @@
 </head>
 <body class="min-h-screen bg-gray-100 text-gray-900" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   {% if user.is_authenticated %}
+  {# teclado: o primeiro Tab já oferece pular o cabeçalho e o menu #}
+  <a href="#conteudo" class="pular-conteudo print:hidden" data-alvo-livre>Pular para o conteúdo</a>
   {% with ns=request.resolver_match.namespace nome=request.resolver_match.url_name %}
   <header class="bg-marca-preto text-white print:hidden" x-data="{ menu: false, conta: false }">
     <div class="flex w-full items-center justify-between gap-4 px-4 py-3">
@@ -94,7 +110,10 @@
             </form>
           </div>
         </div>
-        <button type="button" @click="menu = !menu" class="rounded px-2 py-1 text-xl leading-none hover:bg-gray-800 xl:hidden"
+        {# celular: a busca fica à vista (antes só aparecia dentro do ☰) #}
+        <a href="{% url 'buscar' %}" data-alvo-livre aria-label="Buscar placa, nome, CPF, telefone ou nº da multa"
+           class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 sm:hidden"><span aria-hidden="true">🔍</span></a>
+        <button type="button" @click="menu = !menu" class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 xl:hidden"
                 :aria-expanded="menu" aria-controls="menu-movel" aria-label="Abrir menu">☰</button>
       </div>
     </div>
@@ -115,11 +134,13 @@
   {% endif %}
 
   {# no celular sobra espaço embaixo para a barra de atalhos fixa não cobrir o fim da página #}
-  <main class="mx-auto max-w-6xl px-4 py-6{% if user.is_authenticated %} pb-28 xl:pb-6 print:pb-0{% endif %}">
+  <main id="conteudo" tabindex="-1" class="mx-auto max-w-6xl px-4 py-6 focus:outline-none{% if user.is_authenticated %} pb-28 xl:pb-6 print:pb-0{% endif %}">
     {% if messages %}
       <div class="mb-4 space-y-2">
       {% for message in messages %}
         {% with tag=message.tags %}
+        {# Receber depois de lançar: o cartão do recibo já diz o mesmo que o aviso verde #}
+        {% if sucesso_no_cartao and 'success' in tag %}{% else %}
         <div x-data="{ aberto: true }" x-show="aberto"
              class="flex items-start gap-3 rounded border-l-4 px-4 py-3 text-sm
                     {% if 'error' in tag %}border-red-500 bg-red-50 text-red-900
@@ -131,12 +152,15 @@
           <div class="flex-1">{{ message }}</div>
           <button type="button" @click="aberto = false" class="-my-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded text-2xl leading-none opacity-60 hover:opacity-100" aria-label="Fechar aviso">×</button>
         </div>
+        {% endif %}
         {% endwith %}
       {% endfor %}
       </div>
     {% endif %}
     {% block conteudo %}{% endblock %}
   </main>
+  {# documentos (contrato, checklist) apagam este bloco: a barra cobria o texto mostrado ao cliente #}
+  {% block barra_inferior %}
   {% if user.is_authenticated %}
   {% with ns=request.resolver_match.namespace nome=request.resolver_match.url_name %}
   {# celular/tablet: barra fixa embaixo com o que mais se faz no dia a dia (no computador, o menu do topo) #}
@@ -165,11 +189,13 @@
         <a href="{% url 'multas:nova' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🚦</span>Multa</a>
         <a href="{% url 'sinistros:novo' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">💥</span>Sinistro (batida, roubo…)</a>
         <a href="{% url 'alocacoes:nova' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🔑</span>Nova alocação</a>
+        <a href="{% url 'alocacoes:lista' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">↩️</span>Devolução de carro <span class="text-xs font-normal text-gray-600">(escolha o carro)</span></a>
       </div>
     </div>
   </nav>
   {% endwith %}
   {% endif %}
+  {% endblock %}
   {# clique HTMX que falha (sem sinal, erro do sistema, página aberta muito tempo): avisa em vez de não acontecer nada #}
   <script>
     document.addEventListener("htmx:sendError", function () {

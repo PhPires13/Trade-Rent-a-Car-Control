@@ -391,8 +391,12 @@ class Caucao(models.Model):
             return "Sem depósito"
         if self.saldo == ZERO and self.devolvido > ZERO:
             return "Devolvida"
-        if self.descontado > ZERO or self.devolvido > ZERO:
+        # "utilizada" só quando a caução pagou alguma cobrança (desconto); uma
+        # devolução parcial (ex.: correção de digitação) não é uso da caução
+        if self.descontado > ZERO:
             return "Parcialmente utilizada"
+        if self.devolvido > ZERO:
+            return "Parcialmente devolvida"
         return "Retida"
 
 

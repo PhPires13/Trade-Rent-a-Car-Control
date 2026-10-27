@@ -193,7 +193,7 @@ def test_erro_no_recebimento_preserva_o_digitado(usuario_logado, cliente):
     # sem caução ativa, "Reforço de caução" nem é oferecido
     assert 'value="caucao"' not in html
     mensagens = [str(m) for m in resposta.context["messages"]]
-    assert any("acima do saldo devedor" in m for m in mensagens)
+    assert any("só faltam" in m for m in mensagens)
     assert not Recebimento.objects.exists()  # nada foi lançado
 
 

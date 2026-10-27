@@ -31,9 +31,10 @@
       {% if valor_semanal %}<span class="text-gray-500">— {{ valor_semanal|brl }} / semana</span>{% endif %}
       {% if substituto_em_uso %}
       <span class="mt-1 block rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">
-        Enquanto este carro está parado, o motorista usa o substituto
+        O motorista está com o substituto
         <a href="{% url 'frota:detalhe' substituto_em_uso.veiculo_substituto.pk %}" class="font-semibold underline">{{ substituto_em_uso.veiculo_substituto.placa }}</a>
-        (desde {{ substituto_em_uso.data_retirada|date:"d/m" }}).
+        desde {{ substituto_em_uso.data_retirada|date:"d/m" }}.
+        {% if not em_oficina %}<a href="{% url 'manutencao:registrar' veiculo.pk %}?volta={% url 'frota:detalhe' veiculo.pk %}" class="underline">Registrar a manutenção do {{ veiculo.placa }}</a>{% endif %}
       </span>
       {% endif %}
       {% else %}<span class="text-gray-600">Sem motorista no momento</span>{% endif %}
@@ -41,7 +42,7 @@
   </div>
   <div class="flex flex-wrap items-center gap-3 text-sm">
     <a href="{% url 'frota:veiculo_editar' veiculo.pk %}" class="underline">Editar</a>
-    <a href="{% url 'manutencao:registrar' veiculo.pk %}" class="underline">Registrar manutenção</a>
+    {% if veiculo.status != "vendido" %}<a href="{% url 'manutencao:registrar' veiculo.pk %}" class="underline">Registrar manutenção</a>{% endif %}
     {% if veiculo.status == "disponivel" and veiculo.uso == "locacao" %}
     <a href="{% url 'alocacoes:nova' %}?veiculo={{ veiculo.pk }}" class="rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">Alocar</a>
     {% endif %}

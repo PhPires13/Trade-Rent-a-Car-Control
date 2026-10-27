@@ -1,4 +1,4 @@
-from django.core.exceptions import ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.core.validators import FileExtensionValidator, MaxValueValidator
 from django.db import models, transaction
 from django.db.models import Max
@@ -474,6 +474,21 @@ class TrocaTemporaria(models.Model):
                     f"A troca não pode começar antes do início da locação "
                     f"({self.alocacao.data_inicio:%d/%m/%Y})."
                 )
+            else:
+                # o cliente não fica com dois substitutos ao mesmo tempo
+                anterior = (
+                    self.alocacao.trocas.exclude(pk=self.pk)
+                    .filter(data_devolucao__gt=self.data_retirada)
+                    .select_related("veiculo_substituto")
+                    .order_by("-data_devolucao")
+                    .first()
+                )
+                if anterior:
+                    erros["data_retirada"] = (
+                        f"O cliente ficou com o substituto {anterior.veiculo_substituto.placa} "
+                        f"até {anterior.data_devolucao:%d/%m/%Y} — a nova troca não pode "
+                        "começar antes disso."
+                    )
         if self.valor_semanal_ajustado is not None and self.valor_semanal_ajustado <= 0:
             erros["valor_semanal_ajustado"] = (
                 "O valor semanal precisa ser maior que zero (deixe vazio para manter o da locação)."
@@ -481,13 +496,14 @@ class TrocaTemporaria(models.Model):
         # Valem também na edição (Admin) — reabrir a troca passa por aqui.
         if self.alocacao_id and self.data_devolucao is None:
             if self.alocacao.status != Alocacao.Status.ATIVA:
-                erros["alocacao"] = "A alocação precisa estar ativa."
+                # erro geral: o formulário da troca não tem o campo "alocacao"
+                erros[NON_FIELD_ERRORS] = "A alocação precisa estar ativa."
             if (
                 self.alocacao.trocas.filter(data_devolucao__isnull=True)
                 .exclude(pk=self.pk)
                 .exists()
             ):
-                erros["alocacao"] = "Já existe uma troca em andamento nesta alocação."
+                erros[NON_FIELD_ERRORS] = "Já existe uma troca em andamento nesta alocação."
         if (
             self.veiculo_substituto_id
             and self.alocacao_id

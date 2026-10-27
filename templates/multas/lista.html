@@ -6,15 +6,15 @@
 <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
   <h1 class="text-2xl font-bold">Multas e autuações</h1>
   <div class="flex flex-wrap items-center gap-3 text-sm">
-    <a href="{% url 'multas:orgaos' %}" class="py-1.5 underline">Órgãos</a>
-    <a href="{% url 'multas:gerar_nd' %}" class="py-1.5 underline">Gerar ND de multas</a>
+    <a href="{% url 'multas:orgaos' %}" class="alvo-toque underline">Órgãos</a>
+    <a href="{% url 'multas:gerar_nd' %}" class="alvo-toque underline">Gerar ND de multas</a>
     <a href="{% url 'multas:nova' %}"
-       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Nova multa</a>
+       class="alvo-toque rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Nova multa</a>
   </div>
 </div>
 
 <details class="mb-4 text-sm text-gray-600">
-  <summary class="cursor-pointer select-none font-medium text-gray-700">O que significam FICI, NIC e AIT?</summary>
+  <summary class="cursor-pointer select-none py-3 font-medium text-gray-700">O que significam FICI, NIC e AIT?</summary>
   <ul class="mt-2 space-y-1 rounded bg-white p-3 shadow-sm">
     <li><strong>AIT</strong> — número do auto de infração (a "multa" que chega pelo correio).</li>
     <li><strong>FICI</strong> — formulário para indicar quem estava dirigindo; assim os pontos vão para o motorista e não para a empresa. Tem prazo.</li>
@@ -36,7 +36,7 @@
 </nav>
 
 {% if tarefa == "indicar" %}
-<p class="mb-3 text-sm text-gray-600">Do prazo mais próximo para o mais distante. Depois de mandar o formulário ao órgão, toque em <strong>Condutor indicado</strong>.</p>
+<p class="mb-3 text-sm text-gray-600">Do prazo mais próximo para o mais distante. Depois de mandar o formulário ao órgão, toque em <strong>Já indiquei o condutor</strong>.</p>
 {% elif tarefa == "pagar" %}
 <p class="mb-3 text-sm text-gray-600">Multas que ainda não foram pagas ao órgão. Depois de pagar, toque em <strong>Marcar paga</strong>.</p>
 {% elif tarefa == "cobrar" %}
@@ -62,7 +62,7 @@
   {% if filtro_cliente %}
   <span class="rounded-full bg-marca-amarelo/30 px-3 py-1">Cliente: <strong>{{ filtro_cliente.nome }}</strong></span>
   {% endif %}
-  {% if filtro_veiculo or filtro_resultado or filtro_cliente or tarefa %}<a href="{% url 'multas:lista' %}" class="py-1.5 text-gray-500 underline">limpar filtros</a>{% endif %}
+  {% if filtro_veiculo or filtro_resultado or filtro_cliente or tarefa %}<a href="{% url 'multas:lista' %}" class="alvo-toque text-gray-500 underline">limpar filtros</a>{% endif %}
 </form>
 
 {% if not multas %}
@@ -80,7 +80,7 @@
         <p class="text-lg font-bold">{{ multa.veiculo.placa }}</p>
         <p class="text-xs text-gray-500">{{ multa.data_infracao|date:"d/m/Y" }}{% if multa.cliente %} · {{ multa.cliente.nome }}{% endif %}</p>
       </div>
-      <p class="text-right text-lg font-bold">{% if multa.valor %}{{ multa.valor|brl }}{% else %}—{% endif %}</p>
+      <p class="text-right text-lg font-bold">{% if multa.valor is None %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-xs font-normal text-yellow-800" title="Preencha o valor em Editar quando a notificação chegar">valor não informado</span>{% else %}{{ multa.valor|brl }}{% endif %}</p>
     </div>
     <p class="mt-1 text-sm">{{ multa.descricao|default:multa.codigo|truncatechars:70 }}</p>
     <div class="mt-2 flex flex-wrap items-center gap-1.5">
@@ -142,7 +142,7 @@
           {% if multa.multa_origem_nic_id %}<span class="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800" title="Multa por não indicação do condutor, aplicada à empresa">NIC</span>{% endif %}
           {% if multa.resultado != "em_aberto" %}<span class="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800" title="Resultado do recurso">{{ multa.get_resultado_display }}</span>{% endif %}
         </td>
-        <td class="px-3 py-2">{% if multa.valor %}{{ multa.valor|brl }}{% else %}—{% endif %}</td>
+        <td class="px-3 py-2">{% if multa.valor is None %}<span class="rounded bg-yellow-100 px-2 py-0.5 text-xs font-normal text-yellow-800" title="Preencha o valor em Editar quando a notificação chegar">valor não informado</span>{% else %}{{ multa.valor|brl }}{% endif %}</td>
         <td class="px-3 py-2">{% include "multas/_selo_fici.html" %}</td>
         <td class="px-3 py-2 text-xs">{{ multa.repasse }}</td>
         <td class="px-3 py-2">{% include "multas/_selo_pagamento.html" %}</td>
@@ -170,13 +170,13 @@
   <span>Mostrando {{ pagina.start_index }}–{{ pagina.end_index }} de {{ pagina.paginator.count }} multas</span>
   <span class="flex items-center gap-2">
     {% if pagina.has_previous %}
-      <a href="?{{ filtros }}&pagina=1" class="underline">« Primeira</a>
-      <a href="?{{ filtros }}&pagina={{ pagina.previous_page_number }}" class="underline">‹ Anterior</a>
+      <a href="?{{ filtros }}&pagina=1" class="alvo-toque underline">« Primeira</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.previous_page_number }}" class="alvo-toque underline">‹ Anterior</a>
     {% endif %}
     <span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
     {% if pagina.has_next %}
-      <a href="?{{ filtros }}&pagina={{ pagina.next_page_number }}" class="underline">Próxima ›</a>
-      <a href="?{{ filtros }}&pagina={{ pagina.paginator.num_pages }}" class="underline">Última »</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.next_page_number }}" class="alvo-toque underline">Próxima ›</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.paginator.num_pages }}" class="alvo-toque underline">Última »</a>
     {% endif %}
   </span>
 </div>

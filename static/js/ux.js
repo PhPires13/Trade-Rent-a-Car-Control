@@ -224,13 +224,89 @@
     document.querySelectorAll("form[data-ux-enviando]").forEach(destravar);
   });
 
+  // Formulário que voltou com erro: no celular o erro ficava fora da tela e parecia
+  // que "não salvou e nada aconteceu". Rola até o primeiro campo com erro (no meio da
+  // tela, longe da barra fixa de baixo) e foca nele. Se a tela não tem o resumo de
+  // erros no topo (_erros_form.html), põe um aviso curto no começo do formulário.
+  function mostrarPrimeiroErro(raiz) {
+    const campos = Array.prototype.filter.call(
+      raiz.querySelectorAll('form[method="post" i] [aria-invalid="true"]'),
+      function (c) { return c.getClientRects().length > 0; } // escondido (passo fechado) não conta
+    );
+    const campo = campos[0];
+    if (!campo) return;
+    const form = campo.form || campo.closest("form");
+    if (!form || form.dataset.uxErroMostrado) return;
+    form.dataset.uxErroMostrado = "1";
+    if (!document.querySelector("[data-resumo-erros]") && !form.querySelector('[role="alert"]')) {
+      const aviso = document.createElement("div");
+      aviso.dataset.resumoErros = "1";
+      aviso.setAttribute("role", "alert");
+      aviso.className = "mb-4 rounded border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm font-semibold text-red-900";
+      aviso.textContent = campos.length > 1
+        ? "Não foi possível salvar — corrija os " + campos.length + " campos destacados em vermelho."
+        : "Não foi possível salvar — corrija o campo destacado em vermelho.";
+      form.prepend(aviso);
+    }
+    // o seletor de arquivo de verdade fica invisível: rola até o botão "Escolher arquivo"
+    const alvo = campo.dataset.uxArquivo && campo.nextElementSibling ? campo.nextElementSibling : campo;
+    try { campo.focus({ preventScroll: true }); } catch (e) { campo.focus(); }
+    alvo.scrollIntoView({ block: "center" });
+  }
+
   function melhorar(raiz) {
     if (!raiz || !raiz.querySelectorAll) return;
     seletorDeArquivo(raiz);
     ligarRotulos(raiz);
     marcarOpcionais(raiz);
     criarDicas(raiz);
+    mostrarPrimeiroErro(raiz);
   }
+
+  // Filtros que recarregam a página ao mudar (onchange="this.form.submit()"): pelo
+  // teclado cada seta já mudava o valor e recarregava — nunca se chegava às opções de
+  // baixo. Mudança feita pelo teclado só envia no Enter ou ao sair do campo, e depois da
+  // recarga o foco volta ao filtro. Toque e mouse continuam enviando na hora.
+  const FILTRO_AUTO = 'select[onchange*="submit"], input[onchange*="submit"]';
+  let mudouPeloTeclado = false;
+
+  function enviarFiltro(campo) {
+    delete campo.dataset.uxPendente;
+    try { if (campo.id) sessionStorage.setItem("ux-foco-filtro", campo.id); } catch (e) { /* sem storage */ }
+    campo.dataset.uxLiberar = "1";
+    campo.dispatchEvent(new Event("change")); // roda o onchange do próprio campo
+    delete campo.dataset.uxLiberar;
+  }
+
+  document.addEventListener("keydown", function (e) {
+    const campo = e.target;
+    if (!campo.matches || !campo.matches(FILTRO_AUTO)) return;
+    if (e.key === "Enter" && campo.dataset.uxPendente) {
+      e.preventDefault();
+      enviarFiltro(campo);
+    } else if (e.key !== "Tab" && e.key !== "Shift") {
+      mudouPeloTeclado = true;
+    }
+  }, true);
+  document.addEventListener("pointerdown", function () { mudouPeloTeclado = false; }, true);
+  document.addEventListener("change", function (e) {
+    const campo = e.target;
+    if (!mudouPeloTeclado || !campo.matches || !campo.matches(FILTRO_AUTO) || campo.dataset.uxLiberar) return;
+    e.stopPropagation(); // na captura: o onchange do campo não roda agora
+    campo.dataset.uxPendente = "1";
+  }, true);
+  document.addEventListener("focusout", function (e) {
+    const campo = e.target;
+    if (campo.dataset && campo.dataset.uxPendente && campo.matches(FILTRO_AUTO)) enviarFiltro(campo);
+  }, true);
+  try {
+    const idFiltro = sessionStorage.getItem("ux-foco-filtro");
+    if (idFiltro) {
+      sessionStorage.removeItem("ux-foco-filtro");
+      const filtro = document.getElementById(idFiltro);
+      if (filtro) filtro.focus();
+    }
+  } catch (e) { /* sem storage: o foco fica no começo da página */ }
 
   melhorar(document.body);
   document.addEventListener("htmx:load", function (e) { melhorar(e.target); });

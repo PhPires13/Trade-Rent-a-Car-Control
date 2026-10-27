@@ -102,7 +102,7 @@ def test_roubo_do_carro_parado_com_troca_aberta_mantem_a_locacao(
         "/sinistros/novo/", _dados(veiculo, tipo=Sinistro.Tipo.ROUBO, token="p2"), follow=True
     )
     html = resposta.content.decode()
-    assert "continua, porque ele está com o carro substituto SUB1A23" in html
+    assert "continua, porque o cliente está com o carro substituto SUB1A23" in html
     alocacao.refresh_from_db()
     troca.refresh_from_db()
     veiculo.refresh_from_db()

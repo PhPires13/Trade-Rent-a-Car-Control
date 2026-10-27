@@ -1,0 +1,2 @@
+{# "Já voltou" do carro: sem investimento = —; resultado negativo = ainda não voltou #}
+{% if f.percentual_recuperado is None %}—{% elif f.percentual_recuperado < 0 %}<span class="text-red-700">ainda não voltou</span>{% else %}{% widthratio f.percentual_recuperado 1 100 %}%{% endif %}

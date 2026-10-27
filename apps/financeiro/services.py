@@ -7,6 +7,7 @@ Decisões dos donos aplicadas aqui:
 - nº 11: DAS calculado só sobre a receita de locação
 """
 
+import logging
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -31,6 +32,8 @@ from .models import (
     Recebimento,
 )
 
+logger = logging.getLogger(__name__)
+
 ENCARGO_CURTO = Decimal("0.05")
 ENCARGO_LONGO = Decimal("0.10")
 ENCARGO_DIAS_CORTE = 4
@@ -50,6 +53,11 @@ def limpar_texto(texto, maximo=MAX_OBSERVACOES):
     return str(texto or "").replace("\x00", "").strip()[:maximo]
 
 
+def inicio_do_mes(hoje):
+    """1º dia do mês de `hoje` — pagamento com data antes disso mexe num DAS anterior."""
+    return hoje.replace(day=1)
+
+
 def inicio_do_mes_passado(hoje):
     """1º dia do mês anterior a `hoje` — antes disso, o DAS já foi para a contabilidade."""
     primeiro = hoje.replace(day=1)
@@ -60,15 +68,16 @@ def validar_data_pagamento(data, hoje=None, mes_passado_confirmado=True):
     """Data em que o dinheiro entrou: nunca no futuro nem com ano impossível.
 
     O pagamento entra no DAS do mês da data; uma data errada mexe no imposto
-    de outro mês. Antes do mês passado, só com a confirmação explícita
-    ("Confirmo: pagamento de mês passado — o DAS daquele mês muda").
+    de outro mês. Qualquer data antes do dia 1º do mês atual pede a confirmação
+    explícita ("Confirmo: pagamento de mês passado — o DAS daquele mês muda"):
+    o DAS do mês anterior vence dia 20 e pode já estar fechado (etapa 17).
     """
     hoje = hoje or timezone.localdate()
     if data.year < ANO_MINIMO_PAGAMENTO:
         raise ValidationError(f"Confira o ano da data do pagamento ({data:%d/%m/%Y}).")
     if data > hoje:
         raise ValidationError("A data do pagamento não pode ser no futuro.")
-    if data < inicio_do_mes_passado(hoje) and not mes_passado_confirmado:
+    if data < inicio_do_mes(hoje) and not mes_passado_confirmado:
         raise ValidationError(
             f"A data {data:%d/%m/%Y} é de um mês que já passou: o DAS daquele mês muda. "
             'Se a data estiver certa, marque "Confirmo: pagamento de mês passado".'
@@ -211,8 +220,25 @@ def _descricao_do_aluguel(alocacao, vencimento, inicio, fim):
     return f"Aluguel proporcional {placa} — {rotulo} ({inicio:%d/%m} a {fim:%d/%m/%Y})"
 
 
-def gerar_cobrancas_semanais(hoje=None):
+class FalhaEmAlguns(Exception):
+    """Rotina que segue mesmo com erro em um item: os outros já foram gravados.
+
+    `criadas` traz o que deu certo; `falhas` diz em quais itens deu errado
+    (a rotina diária termina com falha para o cron acusar)."""
+
+    def __init__(self, criadas, falhas):
+        self.criadas = criadas
+        self.falhas = falhas
+        super().__init__(f"falhou em {len(falhas)}: {', '.join(falhas)}")
+
+
+def gerar_cobrancas_semanais(hoje=None, alocacao=None):
     """Gera as cobranças de aluguel vencidas até hoje (idempotente; recupera dias perdidos).
+
+    Erro numa alocação (contrato com dado ruim) não impede as outras: cada uma
+    roda à parte, o erro vai para o log e, no fim, sobe FalhaEmAlguns.
+    `alocacao`: só ela (nova alocação: um contrato ruim de outro carro não
+    pode barrar o cadastro).
 
     Cada cobrança paga os dias ainda não cobertos até a véspera do próximo
     vencimento — sem dia de graça nem dia em dobro:
@@ -223,38 +249,55 @@ def gerar_cobrancas_semanais(hoje=None):
     """
     hoje = hoje or timezone.localdate()
     criadas = []
+    falhas = []
     alocacoes = Alocacao.objects.filter(
         Q(status=Alocacao.Status.ATIVA) | Q(data_termino__gte=hoje - timedelta(days=60))
     ).select_related("cliente", "veiculo")
-    for alocacao in alocacoes:
-        vencimento, inicio = _proximo_vencimento(alocacao, hoje)
-        # Cobrança pré-paga: a semana só é devida se começa ANTES da devolução.
-        if alocacao.data_termino:
-            limite = min(hoje, alocacao.data_termino - timedelta(days=1))
-        else:
-            limite = hoje
-        while vencimento <= limite:
-            if alocacao.data_termino and inicio >= alocacao.data_termino:
-                break  # transição do dia (D04) que só pagaria dias depois da devolução
-            proximo = _proximo_dia(vencimento + timedelta(days=1), alocacao.dia_vencimento)
-            fim = proximo - timedelta(days=1)
-            if fim >= inicio:
-                cobranca, criada = Cobranca.objects.get_or_create(
-                    alocacao=alocacao,
-                    vencimento=vencimento,
-                    origem=Cobranca.Origem.ALUGUEL,
-                    defaults={
-                        "cliente": alocacao.cliente,
-                        "descricao": _descricao_do_aluguel(alocacao, vencimento, inicio, fim),
-                        "valor": _valor_do_periodo(alocacao, inicio, fim),
-                        "periodo_inicio": inicio,
-                        "periodo_fim": fim,
-                    },
-                )
-                if criada:
-                    criadas.append(cobranca)
-                inicio = periodo_da_cobranca(cobranca)[1] + timedelta(days=1)
-            vencimento = proximo
+    if alocacao is not None:
+        alocacoes = alocacoes.filter(pk=alocacao.pk)
+    for uma in alocacoes:
+        try:
+            with transaction.atomic():
+                criadas.extend(_gerar_semanas_da_alocacao(uma, hoje))
+        except Exception:  # noqa: BLE001 — uma alocação ruim não para as outras
+            logger.exception("Cobranças semanais: falhou na alocação %s (%s).", uma.pk, uma.veiculo)
+            falhas.append(f"alocação {uma.pk} ({uma.veiculo.placa})")
+    if falhas:
+        raise FalhaEmAlguns(criadas, falhas)
+    return criadas
+
+
+def _gerar_semanas_da_alocacao(alocacao, hoje):
+    """As semanas de aluguel vencidas até hoje de uma alocação (ver gerar_cobrancas_semanais)."""
+    criadas = []
+    vencimento, inicio = _proximo_vencimento(alocacao, hoje)
+    # Cobrança pré-paga: a semana só é devida se começa ANTES da devolução.
+    if alocacao.data_termino:
+        limite = min(hoje, alocacao.data_termino - timedelta(days=1))
+    else:
+        limite = hoje
+    while vencimento <= limite:
+        if alocacao.data_termino and inicio >= alocacao.data_termino:
+            break  # transição do dia (D04) que só pagaria dias depois da devolução
+        proximo = _proximo_dia(vencimento + timedelta(days=1), alocacao.dia_vencimento)
+        fim = proximo - timedelta(days=1)
+        if fim >= inicio:
+            cobranca, criada = Cobranca.objects.get_or_create(
+                alocacao=alocacao,
+                vencimento=vencimento,
+                origem=Cobranca.Origem.ALUGUEL,
+                defaults={
+                    "cliente": alocacao.cliente,
+                    "descricao": _descricao_do_aluguel(alocacao, vencimento, inicio, fim),
+                    "valor": _valor_do_periodo(alocacao, inicio, fim),
+                    "periodo_inicio": inicio,
+                    "periodo_fim": fim,
+                },
+            )
+            if criada:
+                criadas.append(cobranca)
+            inicio = periodo_da_cobranca(cobranca)[1] + timedelta(days=1)
+        vencimento = proximo
     return criadas
 
 
@@ -591,8 +634,9 @@ def registrar_recebimento(
             )
         if valor_aplicado > atual.saldo:
             raise ValidationError(
-                f"Aplicação de {brl(valor_aplicado)} acima do saldo devedor "
-                f"({brl(atual.saldo)}) de '{atual.descricao}'."
+                f"Em '{atual.descricao}' só faltam {brl(atual.saldo)}, mas foram colocados "
+                f"{brl(valor_aplicado)}. Diminua esse valor — o que sobrar do pagamento "
+                "pode virar crédito."
             )
         conferidas.append((atual, valor_aplicado))
 
@@ -837,15 +881,22 @@ def resumo_recebimento(recebimento):
         reforco = _reforco_do_recebimento(recebimento)
         if reforco:
             sobra = (reforco.valor, "caucao")
-    devidas = Cobranca.com_quitacao_anotada(
-        recebimento.cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS)
+    devidas = list(
+        Cobranca.com_quitacao_anotada(
+            recebimento.cliente.cobrancas.filter(status__in=Cobranca.STATUS_DEVIDOS)
+        )
     )
+    hoje = timezone.localdate()
     return {
         "recebimento": recebimento,
         "quitadas": quitadas,
         "parciais": parciais,
         "sobra": sobra,
         "devido": sum((c.saldo for c in devidas), ZERO),
+        # "continua inadimplente: deve hoje" usa só o vencido (o mesmo do "Quem deve");
+        # o que ainda vai vencer aparece à parte
+        "vencido": sum((c.saldo for c in devidas if c.vencimento <= hoje), ZERO),
+        "a_vencer": sum((c.saldo for c in devidas if c.vencimento > hoje), ZERO),
         "credito": MovimentoCredito.saldo_do_cliente(recebimento.cliente),
     }
 
@@ -1337,6 +1388,53 @@ def pagamentos_do_mes(ano, mes):
                 "forma": "Desconto na caução",
                 "valor": movimentacao.valor,
                 "entra_no_das": cobranca.classificacao_fiscal == "locacao",
+            }
+        )
+    linhas.sort(key=lambda linha: (linha["data"], linha["cliente"]))
+    return linhas
+
+
+def entradas_fora_do_das(ano, mes):
+    """Dinheiro do mês que NÃO entra no DAS: sobra que virou crédito e caução recebida.
+
+    Uma linha por movimento, no formato de pagamentos_do_mes — as somas batem
+    com "adiantamentos" e "caução recebida" de resumo_fiscal.
+    """
+    linhas = []
+    sobras = (
+        MovimentoCredito.objects.filter(
+            tipo=MovimentoCredito.Tipo.ENTRADA, data__year=ano, data__month=mes
+        )
+        # sobra de um pagamento feito com crédito não é dinheiro novo
+        .exclude(recebimento__forma=Recebimento.Forma.CREDITO)
+        .select_related("cliente", "recebimento")
+    )
+    for sobra in sobras:
+        linhas.append(
+            {
+                "data": sobra.data,
+                "cliente": sobra.cliente.nome,
+                "placa": "",
+                "descricao": "Sobra → crédito do cliente (entra no DAS quando for usada)",
+                "forma": sobra.recebimento.get_forma_display() if sobra.recebimento_id else "",
+                "valor": sobra.valor,
+            }
+        )
+    caucoes = MovimentacaoCaucao.objects.filter(
+        data__year=ano,
+        data__month=mes,
+        tipo__in=[MovimentacaoCaucao.Tipo.RECEBIMENTO, MovimentacaoCaucao.Tipo.REFORCO],
+    ).select_related("caucao__alocacao__cliente", "caucao__alocacao__veiculo")
+    for movimento in caucoes:
+        alocacao = movimento.caucao.alocacao
+        linhas.append(
+            {
+                "data": movimento.data,
+                "cliente": alocacao.cliente.nome,
+                "placa": alocacao.veiculo.placa,
+                "descricao": "Caução recebida (é do cliente — não é receita)",
+                "forma": movimento.get_forma_display(),
+                "valor": movimento.valor,
             }
         )
     linhas.sort(key=lambda linha: (linha["data"], linha["cliente"]))

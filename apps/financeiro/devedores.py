@@ -93,8 +93,13 @@ def devedores(hoje=None):
             devedor.vence_hoje += saldo
         if cobranca.status == Cobranca.Status.JUDICIAL:
             devedor.judicial = True
-        if cobranca.alocacao_id and cobranca.alocacao.veiculo.placa not in devedor.placas:
-            devedor.placas.append(cobranca.alocacao.veiculo.placa)
+        if cobranca.alocacao_id:
+            # carro já devolvido (ex-cliente): "ex-RTC3D06" — o carro pode estar com outra pessoa
+            placa = cobranca.alocacao.veiculo.placa
+            if cobranca.alocacao.status != cobranca.alocacao.Status.ATIVA:
+                placa = f"ex-{placa}"
+            if placa not in devedor.placas:
+                devedor.placas.append(placa)
 
     lista = list(por_cliente.values())
     for devedor in lista:

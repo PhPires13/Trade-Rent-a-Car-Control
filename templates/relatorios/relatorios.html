@@ -14,8 +14,7 @@
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
   <div>
-    <p class="text-sm font-medium text-gray-500">Relatório do mês</p>
-    <h1 class="text-2xl font-bold">{{ nome_mes }}</h1>
+    <h1 class="text-2xl font-bold">Relatórios — {{ nome_mes }}</h1>
   </div>
   <button type="button" onclick="window.print()"
           class="nao-imprime rounded bg-marca-preto px-4 py-3 text-sm font-semibold text-white sm:py-2">
@@ -208,6 +207,7 @@
         {% include "relatorios/_exportar.html" with tipo="recebiveis" %}
       </span>
     </h2>
+    <p class="mb-2 text-xs text-gray-500">Valor à direita = tudo em aberto (o vencido até hoje + o que ainda vai vencer). “Deve hoje” é o mesmo número da tela Quem deve.</p>
     <table class="w-full text-sm">
       <tbody class="divide-y divide-gray-100">
         {% for registro in recebiveis %}
@@ -216,6 +216,10 @@
             <a href="{% url 'financeiro:extrato_cliente' registro.cliente.pk %}" class="underline">{{ registro.cliente.nome }}</a>
             <span class="text-xs text-gray-600">({{ registro.cobrancas|length }} cobrança{{ registro.cobrancas|length|pluralize }})</span>
             {% if registro.judicial > 0 %}{% if registro.judicial == registro.total %}<span class="rounded bg-purple-100 px-1 text-xs text-purple-800">na Justiça</span>{% else %}<span class="rounded bg-purple-100 px-1 text-xs text-purple-800">dos quais {{ registro.judicial|brl }} na Justiça</span>{% endif %}{% endif %}
+            <span class="block text-xs text-gray-600" data-recebivel-detalhe>
+              {% if registro.vencido > 0 %}deve hoje {{ registro.vencido|brl }}{% if registro.a_vencer > 0 %} (+ {{ registro.a_vencer|brl }} a vencer){% endif %}{% else %}nada vencido — {{ registro.a_vencer|brl }} a vencer{% endif %}
+              {% if registro.credito > 0 %}<span class="block text-green-800" data-recebivel-credito>tem {{ registro.credito|brl }} de crédito guardado — {% if registro.liquido > 0 %}descontando o crédito, falta {{ registro.liquido|brl }}{% else %}o crédito já cobre tudo{% endif %}</span>{% endif %}
+            </span>
           </td>
           <td class="px-2 py-1.5 text-right font-semibold">{{ registro.total|brl }}</td>
         </tr>
@@ -251,9 +255,10 @@
           <a href="{% url 'frota:ficha' f.veiculo.pk %}" class="font-semibold underline">{{ f.veiculo.placa }}</a>
           {% include "frota/_nivel.html" %}
         </div>
+        {% if f.motivos %}<p class="mt-1 text-xs text-gray-600" data-motivos>{{ f.motivos|join:"; " }}</p>{% endif %}
         <dl class="mt-1 grid grid-cols-2 gap-x-3 text-sm">
           <dt class="text-gray-500">Resultado</dt><dd class="text-right">{{ f.resultado_operacional|brl }}</dd>
-          <dt class="text-gray-500">Já voltou</dt><dd class="text-right">{% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}</dd>
+          <dt class="text-gray-500">Já voltou</dt><dd class="text-right">{% include "relatorios/_ja_voltou.html" %}</dd>
         </dl>
       </li>
       {% empty %}
@@ -268,8 +273,8 @@
         <tr>
           <td class="px-2 py-1.5"><a href="{% url 'frota:ficha' f.veiculo.pk %}" class="underline">{{ f.veiculo.placa }}</a></td>
           <td class="px-2 py-1.5 text-right">{{ f.resultado_operacional|brl }}</td>
-          <td class="px-2 py-1.5 text-right">{% if f.percentual_recuperado is not None %}{% widthratio f.percentual_recuperado 1 100 %}%{% else %}—{% endif %}</td>
-          <td class="px-2 py-1.5">{% include "frota/_nivel.html" %}</td>
+          <td class="px-2 py-1.5 text-right">{% include "relatorios/_ja_voltou.html" %}</td>
+          <td class="px-2 py-1.5">{% include "frota/_nivel.html" %}{% if f.motivos %}<span class="mt-1 block text-xs text-gray-600" data-motivos>{{ f.motivos|join:"; " }}</span>{% endif %}</td>
         </tr>
         {% empty %}
         <tr><td colspan="4" class="px-2 py-3 text-gray-500">Nenhum carro de locação na frota.</td></tr>

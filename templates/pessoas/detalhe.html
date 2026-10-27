@@ -22,9 +22,15 @@
     <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="px-2 py-1.5 underline">Extrato completo</a>
     <a href="{% url 'pessoas:editar' cliente.pk %}"
        class="rounded border border-gray-300 bg-white px-3 py-1.5 font-medium hover:bg-gray-50">Editar cadastro</a>
+    {# sem dívida nem carro não há o que receber: a ação principal é alocar um carro #}
+    {% if saldo_devedor > 0 or alocacoes_ativas %}
     <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}"
        class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95"
        title="Abre o recebimento já com este cliente escolhido">✓ Recebi</a>
+    {% elif cliente.status != "inativo" %}
+    <a href="{% url 'alocacoes:nova' %}?cliente={{ cliente.pk }}"
+       class="rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Alocar um carro</a>
+    {% endif %}
   </div>
 </div>
 
@@ -43,6 +49,9 @@
           {% if telefone_digitos %}
             <a href="https://wa.me/{{ telefone_digitos }}" target="_blank" rel="noopener"
                class="inline-flex min-h-11 items-center whitespace-nowrap text-green-700 underline sm:min-h-0">{{ cliente.telefone }}</a>
+          {% elif cliente.telefone %}
+            {{ cliente.telefone }}
+            <a href="{% url 'pessoas:editar' cliente.pk %}" class="ml-1 inline-flex min-h-11 items-center rounded bg-yellow-100 px-2 text-xs font-semibold text-yellow-900 underline sm:min-h-0">telefone sem DDD — corrigir</a>
           {% else %}—{% endif %}
         </dd>
       </div>
@@ -51,7 +60,7 @@
       <div>
         <dt class="text-gray-500">CNH</dt>
         <dd>
-          {{ cliente.cnh_numero|default:"—" }}
+          {% if cliente.cnh_numero %}{{ cliente.cnh_numero }}{% elif cliente.cnh_validade or cliente.cnh_categoria %}sem número{% else %}—{% endif %}
           {% if cliente.cnh_categoria %}<span class="text-gray-500">cat. {{ cliente.cnh_categoria }}</span>{% endif %}
           {% if cliente.cnh_validade %}
             <span class="{% if cnh_vencida %}font-semibold text-red-700{% elif cnh_a_vencer %}font-semibold text-yellow-700{% endif %}">
@@ -98,7 +107,7 @@
            class="rounded border border-green-600 px-3 py-1.5 font-semibold text-green-700 hover:bg-green-50"
            title="Abre o WhatsApp com uma mensagem só, com tudo que está em aberto">📱 Cobrar no WhatsApp</a>
         {% elif not telefone_digitos %}
-        <span class="text-xs text-gray-600">Sem telefone no cadastro para cobrar pelo WhatsApp.</span>
+        <span class="text-xs text-gray-600">{% if cliente.telefone %}Telefone sem DDD — corrija no cadastro para cobrar pelo WhatsApp.{% else %}Sem telefone no cadastro para cobrar pelo WhatsApp.{% endif %}</span>
         {% endif %}
       </div>
       {% endif %}

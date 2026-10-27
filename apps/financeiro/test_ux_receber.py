@@ -325,9 +325,9 @@ def test_desfazer_por_get_nao_apaga(usuario_logado, cliente, atrasada):
 def test_extrato_mostra_desfazer_so_para_lancamento_de_hoje(usuario_logado, cliente, atrasada):
     pagar(usuario_logado, cliente, atrasada)
     url = f"/financeiro/cliente/{cliente.pk}/"
-    assert "desfazer (lançado hoje)" in usuario_logado.get(url).content.decode()
+    assert "desfazer (lançado hoje às" in usuario_logado.get(url).content.decode()
     Recebimento.history.update(history_date=timezone.now() - timedelta(days=1))
-    assert "desfazer (lançado hoje)" not in usuario_logado.get(url).content.decode()
+    assert "desfazer (lançado hoje" not in usuario_logado.get(url).content.decode()
 
 
 # ---------- atalhos "Recebi" (proposta nº 5-A) ----------
@@ -348,7 +348,8 @@ def test_recebi_no_extrato_so_para_o_que_falta(usuario_logado, cliente, atrasada
     assert f"cobranca={atrasada.pk}" not in usuario_logado.get(url).content.decode()
 
 
-def test_recebi_no_detalhe_do_cliente(usuario_logado, cliente):
+def test_recebi_no_detalhe_do_cliente(usuario_logado, cliente, atrasada):
+    """Com dívida em aberto o atalho aparece (sem dívida ele some — etapa 17)."""
     html = usuario_logado.get(f"/clientes/{cliente.pk}/").content.decode()
     assert f"{URL}?cliente={cliente.pk}" in html
     assert "✓ Recebi" in html

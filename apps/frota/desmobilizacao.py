@@ -136,6 +136,12 @@ class FichaFinanceira:
         return self.resultado_operacional / self.investido
 
     @property
+    def prejuizo_operacional(self):
+        """Quanto falta para empatar (positivo) quando o carro ainda deu mais gasto que receita."""
+        resultado = self.resultado_operacional
+        return -resultado if resultado < 0 else None
+
+    @property
     def na_janela_de_venda(self):
         """Já devolveu a faixa-alvo do investimento (~75%) — o principal sinal de venda."""
         perc = self.percentual_recuperado
@@ -467,6 +473,14 @@ def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None):
         raise ValidationError(texto_oficina_impede_venda(na_oficina))
     # antes de mexer no objeto: a tela reaproveita o veículo para remontar a ficha
     _validar_data_e_km_da_venda(veiculo, data, km)
+    # a venda não se desfaz: valor zero/negativo estragaria o resultado final do carro
+    erros_valor = []
+    if valor is None or valor <= 0:
+        erros_valor.append("Informe quanto recebeu na venda (valor maior que zero).")
+    if custos is not None and custos < 0:
+        erros_valor.append("Os custos da venda não podem ser negativos.")
+    if erros_valor:
+        raise ValidationError(erros_valor)
     veiculo.data_venda = data
     veiculo.valor_venda = valor
     veiculo.comprador = comprador

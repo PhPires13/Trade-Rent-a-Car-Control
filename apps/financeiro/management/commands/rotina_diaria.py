@@ -12,7 +12,7 @@ import logging
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.financeiro.services import gerar_cobrancas_semanais, marcar_atrasos
+from apps.financeiro.services import FalhaEmAlguns, gerar_cobrancas_semanais, marcar_atrasos
 from apps.km.excedente import gerar_excedentes_pendentes
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,12 @@ class Command(BaseCommand):
         for nome, passo in passos:
             try:
                 resultado = passo()
+            except FalhaEmAlguns as erro:
+                # os outros itens do passo foram gravados; só os ruins ficaram de fora
+                self.stderr.write(self.style.ERROR(f"{nome}: FALHOU em {', '.join(erro.falhas)}"))
+                self.stdout.write(f"{nome}: {len(erro.criadas)} criada(s) nos demais.")
+                falhas.append(nome)
+                continue
             except Exception as erro:  # noqa: BLE001 — um passo não pode parar os outros
                 logger.exception("Rotina diária: o passo '%s' falhou.", nome)
                 self.stderr.write(self.style.ERROR(f"{nome}: FALHOU ({erro})"))

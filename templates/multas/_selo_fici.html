@@ -1,7 +1,7 @@
 {# Selo da indicação do motorista (FICI) — uso: include com multa e hoje #}
 {% if multa.fici_status == "pendente" %}
-  <span class="whitespace-nowrap rounded {% if multa.fici_prazo and multa.fici_prazo < hoje %}bg-red-100 text-red-700 font-semibold{% else %}bg-yellow-100 text-yellow-800{% endif %} px-2 py-0.5 text-xs">
-    {% if multa.fici_prazo and multa.fici_prazo < hoje %}Prazo vencido {{ multa.fici_prazo|date:"d/m" }}{% else %}Indicar{% if multa.fici_prazo %} até {{ multa.fici_prazo|date:"d/m" }}{% else %} (sem prazo){% endif %}{% endif %}
+  <span class="{% if multa.fici_prazo %}whitespace-nowrap {% endif %}rounded {% if multa.fici_prazo and multa.fici_prazo < hoje %}bg-red-100 text-red-700 font-semibold{% else %}bg-yellow-100 text-yellow-800{% endif %} px-2 py-0.5 text-xs">
+    {% if multa.fici_prazo and multa.fici_prazo < hoje %}Prazo vencido {{ multa.fici_prazo|date:"d/m" }}{% else %}Indicar{% if multa.fici_prazo %} até {{ multa.fici_prazo|date:"d/m" }}{% else %} — prazo não informado (confira na notificação){% endif %}{% endif %}
   </span>
 {% elif multa.fici_status == "indicado" %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Indicado</span>
 {% elif multa.fici_status == "prazo_perdido" %}<span class="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Prazo perdido</span>

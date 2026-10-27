@@ -17,7 +17,7 @@
   {% csrf_token %}
   {# token único: reenviar o formulário não grava a vistoria duas vezes #}
   <input type="hidden" name="token" value="{{ token }}">
-  {% for erro in form.non_field_errors %}<p class="text-sm text-red-600">{{ erro }}</p>{% endfor %}
+  {% include "_erros_form.html" %}
 
   <div>
     <label class="mb-1 block text-sm font-medium" for="{{ form.foto.id_for_label }}">{{ form.foto.label }}</label>
@@ -40,8 +40,8 @@
   {% for field in form %}
     {% if field.name == "confirmar_km" %}
     {% if form.km.errors %}
-    <label class="flex items-center gap-2 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-900">
-      <input type="checkbox" name="confirmar_km" id="{{ field.id_for_label }}" value="on" style="width:auto"> {{ field.label }}
+    <label class="flex min-h-11 items-center gap-2 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-900">
+      <input type="checkbox" name="confirmar_km" id="{{ field.id_for_label }}" value="on" class="shrink-0"> {{ field.label }}
     </label>
     {% endif %}
     {% elif field.name != "foto" %}
@@ -92,6 +92,15 @@
 {% endif %}
 
 <script>
+  // com erro, leva a pessoa ao primeiro campo com problema (e não o deixa atrás da barra de baixo)
+  (function () {
+    const comErro = document.querySelector("form .text-red-600");
+    const campo = comErro && comErro.parentElement.querySelector("input:not([type=hidden]), select, textarea");
+    if (!campo) return;
+    campo.scrollIntoView({ block: "center" });
+    campo.focus({ preventScroll: true });
+  })();
+
   // data mínima da vistoria acompanha o carro escolhido (substituto: desde a retirada)
   (function () {
     const carro = document.getElementById("id_veiculo");
@@ -163,5 +172,6 @@
     width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
   }
   form input[type="file"] { border: none; padding: 0.2rem 0; }
+  form input, form select, form textarea { scroll-margin-top: 6rem; scroll-margin-bottom: 7rem; }
 </style>
 {% endblock %}

@@ -3,17 +3,21 @@
 from calendar import monthrange
 from datetime import date
 
-from django.db.models import Sum
+from django.db.models import Min, Sum
 from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
+from django.utils import timezone
 
+from apps.alocacoes.models import Alocacao
+from apps.financeiro.devedores import creditos_por_cliente
 from apps.financeiro.models import (
     ZERO,
     AplicacaoRecebimento,
     Caucao,
     Cobranca,
     MovimentacaoCaucao,
+    Recebimento,
 )
-from apps.financeiro.services import resumo_fiscal
+from apps.financeiro.services import entradas_fora_do_das, resumo_fiscal  # noqa: F401
 from apps.frota.desmobilizacao import (
     ipvas_pagos,
     manutencoes_que_sao_despesa,
@@ -298,8 +302,14 @@ def serie_mensal(ano, mes, quantidade=6):
     return pontos
 
 
-def recebiveis_em_aberto():
-    """Saldo devedor por cliente (inclui cobrança judicial)."""
+def recebiveis_em_aberto(hoje=None):
+    """Saldo devedor por cliente (inclui cobrança judicial).
+
+    Mesma conta do "Quem deve": vencido = vence até hoje (inclusive); o resto
+    é "a vencer". O crédito guardado do cliente (sobra de pagamento) aparece ao
+    lado, com o líquido — quem tem crédito não deve o total cheio.
+    """
+    hoje = hoje or timezone.localdate()
     cobrancas = Cobranca.com_quitacao_anotada(
         Cobranca.objects.filter(status__in=Cobranca.STATUS_DEVIDOS)
         .select_related("cliente")
@@ -312,13 +322,40 @@ def recebiveis_em_aberto():
             continue
         registro = por_cliente.setdefault(
             cobranca.cliente,
-            {"cliente": cobranca.cliente, "cobrancas": [], "total": ZERO, "judicial": ZERO},
+            {
+                "cliente": cobranca.cliente,
+                "cobrancas": [],
+                "total": ZERO,
+                "vencido": ZERO,
+                "a_vencer": ZERO,
+                "judicial": ZERO,
+            },
         )
         registro["cobrancas"].append(cobranca)
         registro["total"] += saldo
+        if cobranca.vencimento <= hoje:
+            registro["vencido"] += saldo
+        else:
+            registro["a_vencer"] += saldo
         if cobranca.status == Cobranca.Status.JUDICIAL:
             registro["judicial"] += saldo
+    creditos = creditos_por_cliente(c.pk for c in por_cliente)
+    for registro in por_cliente.values():
+        registro["credito"] = creditos.get(registro["cliente"].pk, ZERO)
+        registro["liquido"] = max(registro["total"] - registro["credito"], ZERO)
     return list(por_cliente.values())
+
+
+def primeiro_mes_com_dado():
+    """Data mais antiga com movimento (compra de carro, início de aluguel ou
+    pagamento), ou None. O aluguel cobre carro cadastrado sem data de compra."""
+    datas = [
+        Veiculo.objects.aggregate(d=Min("data_aquisicao"))["d"],
+        Alocacao.objects.aggregate(d=Min("data_inicio"))["d"],
+        Recebimento.objects.aggregate(d=Min("data"))["d"],
+    ]
+    datas = [d for d in datas if d]
+    return min(datas) if datas else None
 
 
 def resumo_da_frota(hoje=None):

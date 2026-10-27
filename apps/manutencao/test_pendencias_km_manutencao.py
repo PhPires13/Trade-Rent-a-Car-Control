@@ -132,7 +132,7 @@ def test_carro_nunca_anotado_compara_salto_com_o_cadastro(usuario_logado, veicul
 def test_km_gigante_vira_mensagem_e_nao_erro(usuario_logado, veiculo):
     resposta = usuario_logado.post(_url(veiculo), _dados(km="99999999999", confirmar_km="on"))
     assert resposta.status_code == 200
-    assert "confira os dígitos" in resposta.content.decode()
+    assert "grande demais" in resposta.content.decode()
     assert not Manutencao.objects.exists()
 
 
@@ -149,7 +149,7 @@ def test_caixinha_so_aparece_para_km_fora_do_normal(usuario_logado, veiculo):
     """Erro de KM que "Confirmo" não resolve (dígitos demais) não mostra a caixinha."""
     resposta = usuario_logado.post(_url(veiculo), _dados(km="99999999999"))
     html = resposta.content.decode()
-    assert "confira os dígitos" in html
+    assert "grande demais" in html
     assert 'name="confirmar_km"' not in html
 
 

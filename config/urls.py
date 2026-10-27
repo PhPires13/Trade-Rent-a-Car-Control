@@ -8,6 +8,16 @@ admin.site.site_header = "Trade Rent a Car — Retaguarda"
 admin.site.site_title = "Retaguarda"
 admin.site.index_title = "Correções e cadastros raros"
 
+_acoes_do_django = admin.ModelAdmin.get_action_choices
+
+
+def _acoes_sem_tracos(self, request, default_choices=None):
+    """Seletor "Ação" da Retaguarda sem o "---------" do Django (vale para toda lista)."""
+    return _acoes_do_django(self, request, default_choices or [("", "— escolha a ação —")])
+
+
+admin.ModelAdmin.get_action_choices = _acoes_sem_tracos
+
 
 class BloqueioDeLoginAdmin(admin.ModelAdmin):
     """Lista das senhas erradas em português: só ver e apagar (apagar = destravar).

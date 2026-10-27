@@ -5,6 +5,7 @@ cobrança automaticamente — o dono pode cancelá-la na tela de cobranças se
 decidir não cobrar (mesma flexibilidade dos encargos, decisão nº 13).
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -18,6 +19,8 @@ from apps.financeiro.models import Cobranca
 from apps.formatos import brl
 
 from .models import AcertoExcedenteKm, RegistroKm, mes_anterior
+
+logger = logging.getLogger(__name__)
 
 DIAS_PRAZO_COBRANCA = 7
 #: A rotina diária só gera excedente de leituras recentes — evita uma enxurrada
@@ -287,6 +290,17 @@ def gerar_excedentes_pendentes(hoje=None):
         .select_related("veiculo")
         .order_by("data_leitura")
     )
+    falhas = []
     for registro in recentes:
-        criadas.extend(gerar_cobrancas_excedente(registro, hoje=hoje))
+        # uma leitura com dado ruim não impede o excedente das outras
+        try:
+            with transaction.atomic():
+                criadas.extend(gerar_cobrancas_excedente(registro, hoje=hoje))
+        except Exception:  # noqa: BLE001
+            logger.exception("Excedente de km: falhou na leitura %s.", registro.pk)
+            falhas.append(f"leitura {registro.pk} ({registro.veiculo.placa})")
+    if falhas:
+        from apps.financeiro.services import FalhaEmAlguns
+
+        raise FalhaEmAlguns(criadas, falhas)
     return criadas

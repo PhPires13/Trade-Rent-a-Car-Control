@@ -21,8 +21,9 @@ from apps.financeiro.models import (
 )
 from apps.financeiro.views import _abertas_por_cliente
 
-from . import cnh
-from .models import Cliente, CondutorAutorizado
+from . import cnh, validacao
+from .models import EXTENSOES_CNH, Cliente, CondutorAutorizado
+from .widgets import ArquivoInput
 
 #: Cobranças que ainda pesam no saldo devedor do cliente (docs.md §4.3) —
 #: inclui judicial; a fonte única dos conjuntos de status é o modelo.
@@ -51,12 +52,22 @@ class ClienteForm(FormularioBR, forms.ModelForm):
             "observacoes",
         ]
         widgets = {
-            "foto": forms.ClearableFileInput(attrs={"accept": "image/*"}),
-            "cnh_frente": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
-            "cnh_verso": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
+            "foto": ArquivoInput(attrs={"accept": "image/*"}),
+            "cnh_frente": ArquivoInput(attrs={"accept": "image/*,.pdf"}),
+            "cnh_verso": ArquivoInput(attrs={"accept": "image/*,.pdf"}),
             "cnh_validade": forms.DateInput(attrs={"type": "date"}),
+            # teclado certo no celular: números no CPF/CNH, telefone no telefone
+            "cpf_cnpj": forms.TextInput(attrs={"inputmode": "numeric"}),
+            "cnh_numero": forms.TextInput(attrs={"inputmode": "numeric"}),
+            "telefone": forms.TextInput(attrs={"type": "tel", "inputmode": "tel"}),
             "endereco": forms.Textarea(attrs={"rows": 2}),
             "observacoes": forms.Textarea(attrs={"rows": 3}),
+        }
+        error_messages = {
+            "foto": {
+                "invalid_image": "Envie uma foto (JPG ou PNG) — o arquivo escolhido não é uma "
+                "imagem ou está danificado."
+            },
         }
 
     def __init__(self, *args, **kwargs):
@@ -82,12 +93,70 @@ class ClienteForm(FormularioBR, forms.ModelForm):
             "caucao_referencia"
         ].help_text = "Sugerida ao alocar um carro — o valor que vale é o da alocação."
 
+    #: Cliente que já tem o CPF/CNPJ digitado (a tela mostra o link para o cadastro).
+    cliente_existente = None
+
+    def _mudou(self, campo):
+        """Cadastro novo ou campo alterado: dado antigo da planilha não trava outra edição."""
+        return not self.instance.pk or campo in self.changed_data
+
+    def clean_cpf_cnpj(self):
+        """Confere os números e grava num formato só — o mesmo CPF com ou sem pontos
+        não pode virar dois clientes (o unique do banco compara o texto)."""
+        texto = self.cleaned_data["cpf_cnpj"].strip()
+        if not self._mudou("cpf_cnpj"):
+            return texto
+        numero = validacao.cpf_cnpj(texto)
+        digitos = so_digitos(numero)
+        outros = Cliente.objects.exclude(pk=self.instance.pk).only("pk", "nome", "cpf_cnpj")
+        # compara só os dígitos: acha também cadastro antigo gravado em outro formato
+        repetido = next((c for c in outros if so_digitos(c.cpf_cnpj) == digitos), None)
+        if repetido:
+            self.cliente_existente = repetido
+            raise forms.ValidationError(
+                f"Já existe o cliente {repetido.nome} com este CPF/CNPJ.", code="unique"
+            )
+        return numero
+
+    def clean_cnh_numero(self):
+        texto = self.cleaned_data["cnh_numero"]
+        return validacao.cnh_numero(texto) if self._mudou("cnh_numero") else texto
+
+    def clean_cnh_categoria(self):
+        """'ab' → 'AB' (como está impresso na CNH)."""
+        return "".join(self.cleaned_data["cnh_categoria"].split()).upper()
+
+    def _arquivo_de_documento(self, campo):
+        """Extensão errada com mensagem simples (a padrão do Django lista extensões)."""
+        arquivo = self.cleaned_data.get(campo)
+        nome = getattr(arquivo, "name", "") or ""
+        if campo in self.changed_data and arquivo and nome:
+            extensao = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+            if extensao not in EXTENSOES_CNH:
+                raise forms.ValidationError(
+                    "Envie foto (JPG, PNG ou WebP) ou PDF do documento.", code="extensao"
+                )
+        return arquivo
+
+    def clean_cnh_frente(self):
+        return self._arquivo_de_documento("cnh_frente")
+
+    def clean_cnh_verso(self):
+        return self._arquivo_de_documento("cnh_verso")
+
     def clean_telefone(self):
-        """Telefone sem DDD gera link de WhatsApp inválido — só valida ao salvar."""
+        """Telefone sem DDD gera link de WhatsApp inválido.
+
+        Só confere quando o telefone foi digitado/alterado: um telefone antigo
+        sem DDD (carga das planilhas) não impede salvar outra mudança — a ficha
+        avisa "telefone sem DDD" até alguém corrigir.
+        """
         telefone = self.cleaned_data["telefone"].strip()
-        if telefone and not whatsapp.telefone_whatsapp(telefone):
+        if not telefone or not self._mudou("telefone"):
+            return telefone
+        if not whatsapp.telefone_whatsapp(telefone):
             raise forms.ValidationError(whatsapp.MENSAGEM_TELEFONE_SEM_DDD)
-        return telefone
+        return validacao.formatar_telefone(telefone)
 
     def clean_status(self):
         """Inativar com carro na rua esconderia o cliente da lista e da cobrança.
@@ -108,7 +177,25 @@ class ClienteForm(FormularioBR, forms.ModelForm):
         return status
 
 
-class CondutorInlineForm(forms.ModelForm):
+class _DocumentosDoCondutor:
+    """CPF e CNH do condutor são opcionais, mas se preenchidos têm de fechar (vão para a FICI).
+
+    Na edição, só confere o que foi alterado (dado antigo não trava outra mudança).
+    """
+
+    def _mudou(self, campo):
+        return not self.instance.pk or campo in self.changed_data
+
+    def clean_cpf(self):
+        texto = self.cleaned_data["cpf"]
+        return validacao.cpf(texto) if self._mudou("cpf") else texto
+
+    def clean_cnh_numero(self):
+        texto = self.cleaned_data["cnh_numero"]
+        return validacao.cnh_numero(texto) if self._mudou("cnh_numero") else texto
+
+
+class CondutorInlineForm(_DocumentosDoCondutor, forms.ModelForm):
     """Formulário curto do detalhe do cliente — o cliente vem da URL."""
 
     class Meta:
@@ -131,11 +218,28 @@ def _condutor_repetido(cliente, nome, excluir=None):
     return next((c for c in condutores if sem_acento(c.nome.strip()) == alvo), None)
 
 
-class CondutorForm(forms.ModelForm):
+class CondutorForm(_DocumentosDoCondutor, forms.ModelForm):
     class Meta:
         model = CondutorAutorizado
         fields = ["nome", "cpf", "cnh_numero", "contato", "observacoes"]
-        widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
+        widgets = {
+            "cpf": forms.TextInput(attrs={"inputmode": "numeric"}),
+            "cnh_numero": forms.TextInput(attrs={"inputmode": "numeric"}),
+            "contato": forms.TextInput(attrs={"inputmode": "tel"}),
+            "observacoes": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def clean_nome(self):
+        """Mesma regra do cadastro na ficha: o cliente não tem dois condutores com o mesmo nome."""
+        nome = self.cleaned_data["nome"]
+        cliente = self.instance.cliente
+        if cliente is not None:
+            repetido = _condutor_repetido(cliente, nome, excluir=self.instance.pk)
+            if repetido:
+                raise forms.ValidationError(
+                    f"{repetido.nome} já é condutor(a) autorizado(a) deste cliente."
+                )
+        return nome
 
 
 def _telefone_whatsapp(texto):
@@ -339,11 +443,23 @@ def detalhe(request, cliente_id):
     return render(request, "pessoas/detalhe.html", contexto)
 
 
+def _avisar_cnh_vencida(request, cliente):
+    """Validade digitada já passou: grava (pode ser a CNH antiga), mas avisa."""
+    validade = cliente.cnh_validade
+    if validade and validade < timezone.localdate():
+        messages.warning(
+            request,
+            f"A CNH de {cliente.nome} venceu em {validade:%d/%m/%Y}. Confira a data ou peça a "
+            "CNH renovada antes de entregar o carro.",
+        )
+
+
 def novo(request):
     form = ClienteForm(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
         cliente = form.save()
         messages.success(request, f"Cliente {cliente.nome} cadastrado.")
+        _avisar_cnh_vencida(request, cliente)
         return redirect("pessoas:detalhe", cliente.pk)
     return render(
         request,
@@ -358,6 +474,8 @@ def editar(request, cliente_id):
     if request.method == "POST" and form.is_valid():
         form.save()
         messages.success(request, f"Cadastro de {cliente.nome} atualizado.")
+        if "cnh_validade" in form.changed_data:
+            _avisar_cnh_vencida(request, cliente)
         return redirect("pessoas:detalhe", cliente.pk)
     return render(
         request,

@@ -12,7 +12,7 @@ from django.utils.http import urlencode
 from django.views.decorators.cache import never_cache
 
 from apps.alocacoes.services import cliente_vigente
-from apps.campos import CampoDinheiro, ler_data
+from apps.campos import CampoDinheiro, id_valido, ler_data
 from apps.financeiro import services as financeiro_services
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
@@ -63,7 +63,7 @@ def lista(request):
         multas = multas.filter(veiculo__placa__icontains=normalizar_placa(veiculo))
     cliente = None
     cliente_id = request.GET.get("cliente", "")
-    if cliente_id.isdigit():
+    if id_valido(cliente_id):
         cliente = Cliente.objects.filter(pk=cliente_id).first()
         if cliente:
             multas = multas.filter(cliente=cliente)
@@ -179,7 +179,7 @@ def quem_estava(request):
     dirigia" só com os condutores daquele cliente.
     """
     veiculo = None
-    if request.GET.get("veiculo", "").isdigit():
+    if id_valido(request.GET.get("veiculo", "")):
         veiculo = Veiculo.objects.filter(pk=request.GET["veiculo"]).first()
     try:
         data = date.fromisoformat(request.GET.get("data_infracao", ""))
@@ -187,10 +187,10 @@ def quem_estava(request):
         data = None
     vigente = cliente_vigente(veiculo, data) if veiculo and data else None
     escolhido = None
-    if request.GET.get("cliente", "").isdigit():
+    if id_valido(request.GET.get("cliente", "")):
         escolhido = Cliente.objects.filter(pk=request.GET["cliente"]).first()
     atual = request.GET.get("condutor_autorizado", "")
-    atual = int(atual) if atual.isdigit() else None
+    atual = int(atual) if id_valido(atual) else None
     form = MultaForm(initial={"condutor_autorizado": atual})
     form.fields["condutor_autorizado"].queryset = condutores_do_cliente(escolhido or vigente, atual)
     return render(
@@ -296,7 +296,7 @@ def gerar_nd(request):
     a_cobrar = []
     cliente_id = request.GET.get("cliente") or request.POST.get("cliente")
     if cliente_id:
-        if not cliente_id.isdigit():  # link adulterado dava erro 500 no filtro por pk
+        if not id_valido(cliente_id):  # link adulterado dava erro 500 no filtro por pk
             raise Http404("Cliente inválido.")
         cliente = get_object_or_404(Cliente, pk=cliente_id)
         candidatas = cliente.multas.select_related("veiculo").prefetch_related(
@@ -304,6 +304,7 @@ def gerar_nd(request):
         )
         a_cobrar = [m for m in candidatas if m.repasse == "A cobrar"]
     vencimento = _vencimento_nd(cliente, request) if cliente else None
+    token = request.POST.get("token", "") if request.method == "POST" else ""
     if request.method == "POST" and cliente:
         marcadas = [m.pk for m in a_cobrar if str(m.pk) in request.POST.getlist("multa")]
         # recarrega sem o prefetch: o serviço reconfere `repasse` no banco, dentro da
@@ -312,9 +313,18 @@ def gerar_nd(request):
         try:
             if vencimento["data"] is None:
                 raise ValidationError("Vencimento inválido — use uma data a partir de hoje.")
-            nd = services.gerar_nd_de_multas(
-                cliente, selecionadas, timezone.localdate(), vencimento=vencimento["data"]
-            )
+            # mesmo código único da ND manual: o clique duplo não emite duas NDs
+            with _envio_unico(request, SESSAO_TOKENS_ND_MULTAS, token) as repetido:
+                if repetido:
+                    messages.warning(
+                        request,
+                        "Esta nota de débito já tinha sido emitida — o envio repetido foi "
+                        "ignorado e nada foi cobrado em dobro.",
+                    )
+                    return redirect("financeiro:nds")
+                nd = services.gerar_nd_de_multas(
+                    cliente, selecionadas, timezone.localdate(), vencimento=vencimento["data"]
+                )
             messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")
             return redirect("financeiro:nds")
         except ValidationError as erro:
@@ -322,8 +332,18 @@ def gerar_nd(request):
     return render(
         request,
         "multas/gerar_nd.html",
-        {"clientes": clientes, "cliente": cliente, "multas": a_cobrar, "vencimento": vencimento},
+        {
+            "clientes": clientes,
+            "cliente": cliente,
+            "multas": a_cobrar,
+            "vencimento": vencimento,
+            "token": token or uuid4().hex,
+        },
     )
+
+
+#: chave da sessão com os códigos de formulário de "Gerar ND de multas" já usados
+SESSAO_TOKENS_ND_MULTAS = "nd_multas_tokens_usados"
 
 
 def _vencimento_nd(cliente, request):

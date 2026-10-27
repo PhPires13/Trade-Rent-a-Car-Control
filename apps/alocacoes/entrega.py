@@ -104,10 +104,11 @@ def passos_da_entrega(alocacao):
                 "titulo": f"Receber a caução ({brl(alocacao.caucao_valor)})",
                 "feito": recebido >= alocacao.caucao_valor,
                 "detalhe": detalhe,
+                # ?voltar=: depois de salvar, volta para estes passos na ficha
                 "url": (
-                    reverse("financeiro:caucao_detalhe", args=[caucao.pk])
+                    _url("financeiro:caucao_detalhe", caucao.pk, voltar=ficha)
                     if caucao
-                    else reverse("financeiro:caucoes")
+                    else _url("financeiro:caucoes", voltar=ficha)
                 ),
                 "botao": "Registrar caução",
             }
@@ -141,7 +142,7 @@ def passos_da_entrega(alocacao):
             "titulo": "Receber a 1ª semana",
             "feito": paga,
             "detalhe": detalhe,
-            "url": _url("financeiro:receber", cliente=alocacao.cliente_id),
+            "url": _url("financeiro:receber", cliente=alocacao.cliente_id, voltar=ficha),
             "botao": "Receber pagamento",
         }
     )
@@ -194,6 +195,8 @@ def situacao_da_devolucao(alocacao):
         Cobranca.objects.filter(cliente_id=alocacao.cliente_id, status__in=Cobranca.STATUS_DEVIDOS)
     )
     debitos = 0
+    debitos_vencidos = 0
+    proximo_vencimento = None
     semanas_a_cancelar = []
     for cobranca in devidas:
         if (
@@ -209,12 +212,19 @@ def situacao_da_devolucao(alocacao):
             semanas_a_cancelar.append(cobranca)
         else:
             debitos += cobranca.saldo
+            # ND/semana que só vence depois não é "deve hoje": a tela diz quando vence
+            if cobranca.vencimento <= hoje or cobranca.status == Cobranca.Status.JUDICIAL:
+                debitos_vencidos += cobranca.saldo
+            elif proximo_vencimento is None or cobranca.vencimento < proximo_vencimento:
+                proximo_vencimento = cobranca.vencimento
     return {
         "vistoria_entrega": entrega,
         "vistoria_devolucao": devolucao,
         "data_sugerida": data_devolucao,
         "data_da_vistoria": data_da_vistoria,
         "debitos": debitos,
+        "debitos_vencidos": debitos_vencidos,
+        "proximo_vencimento": proximo_vencimento,
         "semanas_a_cancelar": semanas_a_cancelar,
         "url_vistoria_devolucao": _url(
             "alocacoes:vistoria_nova",

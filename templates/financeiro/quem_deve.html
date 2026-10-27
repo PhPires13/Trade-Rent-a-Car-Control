@@ -3,7 +3,7 @@
 {% block titulo %}Quem deve — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+<h1 class="mb-4 text-2xl font-bold">Financeiro — Quem deve</h1>
 {% include "financeiro/_abas.html" with aba="quem_deve" %}
 
 <div class="mb-4 flex flex-wrap items-baseline justify-between gap-2">
@@ -48,6 +48,8 @@
          class="flex min-h-[48px] items-center justify-center rounded-lg border border-gray-300 font-semibold text-gray-700">Ver extrato</a>
       {% endif %}
     </div>
+    {# com o botão do WhatsApp no lugar, o extrato continua a um toque #}
+    {% if d.link_whatsapp %}<a href="{% url 'financeiro:extrato_cliente' d.cliente.pk %}" class="mt-2 inline-flex min-h-11 items-center text-sm underline" data-ver-extrato>Ver extrato</a>{% endif %}
   </li>
   {% endfor %}
 </ul>

@@ -41,7 +41,7 @@ def linha_do_tempo(veiculo):
                 "data": alocacao.data_inicio,
                 "tipo": "Alocação",
                 "descricao": f"Entregue a {alocacao.cliente.nome} "
-                f"({brl(alocacao.valor_semanal)}/semana, {alocacao.km_entrega} km)",
+                f"({brl(alocacao.valor_semanal)}/semana, {milhar(alocacao.km_entrega)} km)",
             }
         )
         if alocacao.data_termino:
@@ -50,7 +50,7 @@ def linha_do_tempo(veiculo):
                     "data": alocacao.data_termino,
                     "tipo": "Devolução",
                     "descricao": f"Devolvido por {alocacao.cliente.nome}"
-                    + (f" ({alocacao.km_devolucao} km)" if alocacao.km_devolucao else ""),
+                    + (f" ({milhar(alocacao.km_devolucao)} km)" if alocacao.km_devolucao else ""),
                 }
             )
     for troca in TrocaTemporaria.objects.filter(veiculo_substituto=veiculo).select_related(
@@ -70,7 +70,7 @@ def linha_do_tempo(veiculo):
                 {
                     "data": troca.data_devolucao,
                     "tipo": "Fim da troca",
-                    "descricao": f"Devolvido por {cliente} ({troca.km_devolucao} km)",
+                    "descricao": f"Devolvido por {cliente} ({milhar(troca.km_devolucao)} km)",
                 }
             )
     for troca in TrocaTemporaria.objects.filter(alocacao__veiculo=veiculo).select_related(
@@ -112,7 +112,7 @@ def linha_do_tempo(veiculo):
             {
                 "data": manutencao.data,
                 "tipo": "Manutenção",
-                "descricao": rotulo + (f" aos {manutencao.km} km" if manutencao.km else ""),
+                "descricao": rotulo + (f" aos {milhar(manutencao.km)} km" if manutencao.km else ""),
             }
         )
     return sorted(eventos, key=lambda e: e["data"], reverse=True)

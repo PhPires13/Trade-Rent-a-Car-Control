@@ -448,7 +448,7 @@ def test_d27_km_gigante_vira_mensagem_e_nao_erro_500(usuario_logado, alocacao):
         {"data_termino": HOJE.isoformat(), "km_devolucao": "99999999999", "confirmar_km": "1"},
     )
     assert resposta.status_code == 200
-    assert "confira os dígitos" in resposta.text
+    assert "grande demais" in resposta.text
 
 
 def test_d27_corrigir_km_da_vistoria_baixa_o_km_do_carro(alocacao, veiculo):

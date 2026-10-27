@@ -4,7 +4,7 @@
 {% block titulo %}Cobranças — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+<h1 class="mb-4 text-2xl font-bold">Financeiro — Cobranças</h1>
 {% include "financeiro/_abas.html" with aba="cobrancas" %}
 
 <form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -54,12 +54,17 @@
             <a href="{% url 'financeiro:extrato_cliente' cobranca.cliente.pk %}" class="font-semibold underline decoration-marca-amarelo decoration-2 md:font-normal">
               {{ cobranca.cliente.nome }}</a>
             {# celular: o valor que falta, em destaque, ao lado do nome #}
+            {% if cobranca.status == "cancelada" %}
+            <span class="whitespace-nowrap text-sm text-gray-500 md:hidden">não cobrar · <s>{{ cobranca.valor|brl }}</s></span>
+            {% else %}
             <span class="whitespace-nowrap text-lg font-black md:hidden {% if cobranca.status == 'atrasado' %}text-red-700{% endif %}">{{ cobranca.saldo|brl }}</span>
+            {% endif %}
           </div>
         </td>
         <td class="block text-gray-700 md:table-cell md:px-3 md:py-2 md:text-gray-900">{{ cobranca.descricao }}</td>
-        <td class="hidden whitespace-nowrap px-3 py-2 md:table-cell">{{ cobranca.valor|brl }}</td>
-        <td class="hidden whitespace-nowrap px-3 py-2 font-semibold md:table-cell">{{ cobranca.saldo|brl }}</td>
+        <td class="hidden whitespace-nowrap px-3 py-2 md:table-cell">{% if cobranca.status == "cancelada" %}<s class="text-gray-500">{{ cobranca.valor|brl }}</s>{% else %}{{ cobranca.valor|brl }}{% endif %}</td>
+        {# cancelada não se cobra: nada "falta receber" #}
+        <td class="hidden whitespace-nowrap px-3 py-2 font-semibold md:table-cell">{% if cobranca.status == "cancelada" %}<span class="font-normal text-gray-500">— (não cobrar)</span>{% else %}{{ cobranca.saldo|brl }}{% endif %}</td>
         <td class="mt-1 block md:mt-0 md:table-cell md:px-3 md:py-2">
           <span class="text-xs text-gray-500 md:hidden">Vence {{ cobranca.vencimento|date:"d/m/Y" }} ·</span>
           {% if cobranca.status == "pago" %}<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">Pago</span>
@@ -116,7 +121,7 @@
             {# encargo e judicial são decisões independentes (C20): os dois aparecem #}
             {% if cobranca.status == "atrasado" %}
             <form method="post" action="{% url 'financeiro:marcar_judicial' cobranca.pk %}"
-                  onsubmit="return confirm('Marcar como cobrança judicial? O encargo automático para e o status só muda quando ela for quitada ou reaberta.')">
+                  onsubmit="return confirm('Marcar como cobrança judicial? A cobrança sai das listas de atraso e do WhatsApp; o status só muda quando ela for quitada ou reaberta.{% if cobranca.alocacao and cobranca.alocacao.status == "ativa" %} ATENÇÃO: o carro {{ cobranca.alocacao.veiculo.placa }} ainda está com este cliente.{% endif %}')">
               {% csrf_token %}
               <input type="hidden" name="voltar" value="{{ voltar }}">
               <button class="py-1 text-purple-700 underline" title="Passar para cobrança judicial">mandar para judicial</button>

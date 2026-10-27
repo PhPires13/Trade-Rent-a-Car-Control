@@ -101,7 +101,7 @@
   {% for sinistro in sinistros %}
   <li class="rounded-lg bg-white p-3 shadow">
     <a href="{% url 'sinistros:editar' sinistro.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">
-      BO {{ sinistro.boletim_ocorrencia }}</a>
+      BO {{ sinistro.boletim_numero }}</a>
     <span class="text-gray-600">{{ sinistro.veiculo.placa }} · {{ sinistro.get_tipo_display }} em {{ sinistro.data|date:"d/m/Y" }} · {{ sinistro.get_status_display }}</span>
     {% if sinistro.cliente %}<span class="block text-sm text-gray-600">com {{ sinistro.cliente.nome }}</span>{% endif %}
   </li>

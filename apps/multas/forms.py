@@ -7,6 +7,7 @@ tratamento de credenciais: um form próprio no admin já devolveu a senha do
 
 from django import forms
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.campos import FormularioBR
 from apps.pessoas.models import CondutorAutorizado
@@ -98,6 +99,9 @@ class MultaForm(FormularioBR, forms.ModelForm):
         )
         self.fields["responsavel"].widget.attrs["x-model"] = "resp"
         self.fields["responsavel"].widget.attrs["x-on:change"] = "mexeuResp = true"
+        if not self.instance.pk and not self.is_bound:
+            # antes de escolher o carro, só os avulsos — não os condutores de todos
+            self.fields["condutor_autorizado"].queryset = condutores_do_cliente(None)
 
     def clean_valor(self):
         valor = self.cleaned_data.get("valor")
@@ -105,8 +109,78 @@ class MultaForm(FormularioBR, forms.ModelForm):
             raise forms.ValidationError("O valor não pode ser negativo.")
         return valor
 
+    def clean_data_infracao(self):
+        # ano/mês trocado na digitação: a multa ia para a ND com data impossível e
+        # "quem estava com o carro" apontava para ninguém (igual ao sinistro)
+        dia = self.cleaned_data.get("data_infracao")
+        if dia and dia > timezone.localdate() and "data_infracao" in self.changed_data:
+            raise forms.ValidationError("A data da infração não pode ser no futuro.")
+        return dia
+
+    #: pontos que uma infração pode valer (CTB art. 259); 0 = sem pontos
+    PONTOS_VALIDOS = (0, 3, 4, 5, 7)
+
+    def clean_pontos(self):
+        pontos = self.cleaned_data.get("pontos")
+        if pontos is not None and pontos not in self.PONTOS_VALIDOS:
+            raise forms.ValidationError(
+                "Uma infração vale 3, 4, 5 ou 7 pontos (ou 0). Confira na notificação."
+            )
+        return pontos
+
+    def clean_ait(self):
+        return (self.cleaned_data.get("ait") or "").strip()
+
+    def _conferir_ait_repetido(self, dados):
+        """Mesmo AIT no mesmo órgão já cadastrado: seria cobrado duas vezes do cliente."""
+        ait = dados.get("ait")
+        if not ait or "ait" in self._errors:
+            return
+        repetida = (
+            Multa.objects.filter(ait__iexact=ait, orgao=dados.get("orgao"))
+            .exclude(pk=self.instance.pk)
+            .select_related("veiculo")
+            .first()
+        )
+        if repetida is not None:
+            self.add_error(
+                "ait",
+                f"Esta multa já foi cadastrada: AIT {repetida.ait}, {repetida.veiculo.placa} "
+                f"em {repetida.data_infracao:%d/%m/%Y}. Procure-a na lista de multas "
+                "(filtro Concluídas ou pela placa) em vez de cadastrar de novo.",
+            )
+
+    def _novo_ou_mudou(self, *campos):
+        return not self.instance.pk or bool(set(campos) & set(self.changed_data))
+
     def clean(self):
         dados = super().clean()
+        self._conferir_ait_repetido(dados)
+        infracao, prazo = dados.get("data_infracao"), dados.get("fici_prazo")
+        if (
+            infracao
+            and prazo
+            and prazo < infracao
+            and self._novo_ou_mudou("data_infracao", "fici_prazo")
+        ):
+            # mês/ano trocado: a multa já nascia "Prazo vencido" oferecendo NIC à toa
+            self.add_error(
+                "fici_prazo",
+                "O prazo para indicar não pode ser antes da infração — confira o mês e o ano.",
+            )
+        if (
+            dados.get("tipo_condutor") == Multa.TipoCondutor.OUTRO
+            and not dados.get("condutor_autorizado")
+            and "condutor_autorizado" not in self._errors
+            and self._novo_ou_mudou("tipo_condutor", "condutor_autorizado")
+        ):
+            # sem o nome não há quem indicar ao órgão
+            self.add_error(
+                "condutor_autorizado",
+                "Escolha quem estava dirigindo. Se a pessoa não aparece, cadastre-a na ficha "
+                "do cliente (Condutores autorizados) ou escolha “O próprio cliente”.",
+            )
+        self._conferir_vendedor(dados)
         if dados.get("tipo_condutor") != Multa.TipoCondutor.OUTRO:
             # campo escondido na tela não pode deixar um nome esquecido gravado
             dados["condutor_autorizado"] = None
@@ -122,6 +196,26 @@ class MultaForm(FormularioBR, forms.ModelForm):
         self._conferir_condutor_do_cliente(dados)
         return dados
 
+    def _conferir_vendedor(self, dados):
+        """ "Vendedor anterior" só vale para infração de antes da compra do carro (§4.9).
+
+        Depois da compra, a multa ficava sem ser cobrada de ninguém.
+        """
+        veiculo, dia = dados.get("veiculo"), dados.get("data_infracao")
+        if (
+            dados.get("responsavel") == Multa.Responsavel.VENDEDOR
+            and veiculo
+            and dia
+            and veiculo.data_aquisicao
+            and dia >= veiculo.data_aquisicao
+            and (not self.instance.pk or "responsavel" in self.changed_data)
+        ):
+            self.add_error(
+                "responsavel",
+                f"O carro foi comprado em {veiculo.data_aquisicao:%d/%m/%Y}, antes da "
+                "infração: a multa não é do vendedor anterior. Escolha Cliente ou Empresa.",
+            )
+
     def _conferir_condutor_do_cliente(self, dados):
         """Carro/data corrigidos mudam o cliente: o condutor do cliente antigo não serve.
 
@@ -130,6 +224,20 @@ class MultaForm(FormularioBR, forms.ModelForm):
         """
         condutor = dados.get("condutor_autorizado")
         veiculo, dia = dados.get("veiculo"), dados.get("data_infracao")
+        if not self.instance.pk and condutor and condutor.cliente_id and veiculo and dia:
+            # cadastro: o condutor tem de ser do cliente escolhido (ou de quem estava
+            # com o carro) — senão a ND sai para um e o nome indicado é de outro
+            from apps.alocacoes.services import cliente_vigente
+
+            dono = dados.get("cliente") or cliente_vigente(veiculo, dia)
+            if dono is None or dono.pk != condutor.cliente_id:
+                quem = f"com {dono.nome}" if dono else "sem cliente"
+                self.add_error(
+                    "condutor_autorizado",
+                    f"{condutor} é condutor de outro cliente; nessa data o carro estava "
+                    f"{quem}. Confira quem dirigia.",
+                )
+            return
         if not (self.instance.pk and condutor and condutor.cliente_id and veiculo and dia):
             return
         mudou = set(self.changed_data)

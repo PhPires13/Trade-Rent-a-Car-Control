@@ -99,8 +99,8 @@
           </div>
           <div>
             <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM no painel na devolução</label>
-            <input type="number" name="km_devolucao" id="km_devolucao" inputmode="numeric"
-                   value="{% firstof request.POST.km_devolucao km_sugerido %}" min="{{ alocacao.km_entrega }}"
+            <input type="text" name="km_devolucao" id="km_devolucao" inputmode="numeric" autocomplete="off"
+                   value="{% firstof request.POST.km_devolucao km_sugerido %}"
                    placeholder="saiu com {{ alocacao.km_entrega|milhar }}" required>
             {% if km_sugerido and not request.POST.km_devolucao %}
             <p class="mt-1 text-xs text-blue-900">Preenchido com o KM da vistoria de devolução — confira.</p>
@@ -111,7 +111,7 @@
           <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
             <p>{{ aviso_km }}</p>
             <label class="mt-2 flex min-h-11 items-center gap-2 font-semibold">
-              <input type="checkbox" name="confirmar_km" value="1" style="width:auto"> Confirmo o KM
+              <input type="checkbox" name="confirmar_km" value="1" class="shrink-0"> Confirmo o KM
             </label>
           </div>
           {% endif %}
@@ -126,12 +126,21 @@
         <div class="min-w-0 flex-1 text-sm">
           <h2 class="text-base font-semibold">Caução: devolver ou descontar</h2>
           {% if debitos > 0 %}
-          <p class="mt-1 text-red-900"><strong>{{ alocacao.cliente.nome }} deve {{ debitos|brl }} hoje.</strong>
+          <p class="mt-1 text-red-900"><strong>{% if debitos_vencidos == debitos %}{{ alocacao.cliente.nome }} deve {{ debitos|brl }} hoje.{% elif debitos_vencidos %}{{ alocacao.cliente.nome }} tem {{ debitos|brl }} em aberto — {{ debitos_vencidos|brl }} já venceu, o resto vence a partir de {{ proximo_vencimento|date:"d/m" }}.{% else %}{{ alocacao.cliente.nome }} tem {{ debitos|brl }} em aberto (vence {{ proximo_vencimento|date:"d/m" }}).{% endif %}</strong>
             Receba agora ou desconte da caução no próximo passo.</p>
           <a href="{% url 'financeiro:receber' %}?cliente={{ alocacao.cliente.pk }}"
              class="mt-2 block rounded border border-red-300 bg-white px-4 py-3 text-center font-semibold text-red-800 hover:bg-red-50 sm:inline-block sm:py-2">Receber pagamento</a>
           {% else %}
           <p class="mt-1 text-gray-700">Sem débitos em aberto hoje.</p>
+          {% endif %}
+          {% if vistoria_devolucao.avarias and vistoria_devolucao.avarias|lower|cut:" " != vistoria_entrega.avarias|default:""|lower|cut:" " %}
+          {# avaria nova: sem ND não há cobrança para a caução pagar no acerto #}
+          <div class="mt-2 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-amber-900" data-marca-nova>
+            <p class="font-semibold">Marca nova na devolução — cobrar avaria?</p>
+            <p class="mt-1">Emita a nota de débito antes de confirmar: assim o valor aparece no acerto da caução.</p>
+            <a href="{% url 'financeiro:nd_nova' %}?cliente={{ alocacao.cliente.pk }}&voltar={{ request.get_full_path|urlencode }}"
+               class="mt-2 inline-flex min-h-11 items-center font-semibold underline sm:min-h-0">Emitir nota de débito da avaria →</a>
+          </div>
           {% endif %}
           {% if semanas_a_cancelar %}
           <p class="mt-2 rounded bg-blue-50 px-2 py-1.5 text-blue-900">Não cobre agora:

@@ -37,8 +37,8 @@
     </div>
     <div>
       <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM do substituto na devolução</label>
-      <input type="number" name="km_devolucao" id="km_devolucao" inputmode="numeric"
-             value="{{ request.POST.km_devolucao }}" min="{{ troca.km_retirada }}"
+      <input type="text" name="km_devolucao" id="km_devolucao" inputmode="numeric" autocomplete="off"
+             value="{{ request.POST.km_devolucao }}"
              placeholder="saiu com {{ troca.km_retirada|milhar }}" required>
       <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da retirada ({{ troca.km_retirada|milhar }} km).</p>
     </div>
@@ -49,16 +49,17 @@
         <a href="{% url 'manutencao:voltou' oficina_principal.pk %}?volta={{ request.get_full_path|urlencode }}"
            class="inline-flex min-h-11 items-center font-semibold underline">Marque “Carro voltou da oficina”</a></p>
       <label class="mt-1 flex min-h-11 items-center gap-2 font-semibold">
-        <input type="checkbox" name="confirmar_oficina" value="1" style="width:auto"{% if request.POST.confirmar_oficina %} checked{% endif %}>
+        <input type="checkbox" name="confirmar_oficina" value="1" class="shrink-0"{% if request.POST.confirmar_oficina %} checked{% endif %}>
         Confirmo: o cliente vai voltar para o {{ troca.alocacao.veiculo.placa }}
       </label>
+      <p class="text-xs">Com a confirmação, o {{ troca.alocacao.veiculo.placa }} sai da oficina na data da devolução acima (os dias parado param de contar).</p>
     </div>
     {% endif %}
     {% if aviso_km %}
           <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
             <p>{{ aviso_km }}</p>
             <label class="mt-2 flex min-h-11 items-center gap-2 font-semibold">
-              <input type="checkbox" name="confirmar_km" value="1" style="width:auto"> Confirmo o KM
+              <input type="checkbox" name="confirmar_km" value="1" class="shrink-0"> Confirmo o KM
             </label>
           </div>
           {% endif %}

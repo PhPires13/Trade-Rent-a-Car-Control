@@ -4,7 +4,7 @@
 {% block titulo %}DAS de {{ nome_mes }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+<h1 class="mb-4 text-2xl font-bold">Financeiro — DAS</h1>
 {% include "financeiro/_abas.html" with aba="das" %}
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -70,7 +70,7 @@
       {% if resumo.pago_com_credito %}
       <tr>
         <td class="px-4 py-2 text-gray-600">Dos valores acima, pagos com crédito do cliente
-          <div class="text-xs text-gray-500">Não é dinheiro novo: esse dinheiro entrou no banco num mês anterior, como adiantamento.</div></td>
+          <div class="text-xs text-gray-500">Não é dinheiro novo: esse dinheiro pode ter entrado no banco num mês anterior, como adiantamento.</div></td>
         <td class="px-4 py-2 text-right">{{ resumo.pago_com_credito|brl }}</td>
       </tr>
       {% endif %}

@@ -136,8 +136,8 @@ def test_planilha_da_frota_tem_percentual_de_0_a_100_e_recomendacao_legivel(
     resposta = usuario_logado.get("/relatorios/", {"exportar": "frota", "formato": "xlsx"})
     ws = load_workbook(io.BytesIO(resposta.content)).active
     cabecalho = [c.value for c in ws[1]]
-    assert "% recuperado (0–100)" in cabecalho
-    i_perc = cabecalho.index("% recuperado (0–100)")
+    assert "Já voltou (%)" in cabecalho
+    i_perc = cabecalho.index("Já voltou (%)")
     i_rec = cabecalho.index("Recomendação")
     linhas = {linha[0]: linha for linha in ws.iter_rows(min_row=2, values_only=True)}
     assert linhas["SEM1V00"][i_perc] is None  # sem investimento: vazio, não 0
@@ -155,7 +155,7 @@ def test_planilha_da_frota_percentual_em_escala_de_cem(usuario_logado, veiculo, 
     )
     monkeypatch.setattr(views.services, "resumo_da_frota", lambda: ([ficha], media))
     _, colunas, linhas = views._planilha_frota(2026, 10)
-    assert linhas[0][colunas.index("% recuperado (0–100)")] == 75.6
+    assert linhas[0][colunas.index("Já voltou (%)")] == 75.6
 
 
 # --- card de receitas e link para o DAS ------------------------------------------

@@ -1,9 +1,10 @@
 {# Um campo com rótulo, ajuda e erros — uso: {% include "manutencao/_campo.html" with field=form.x %} #}
+{# opcional_quando="expressão Alpine": o "(opcional)" do rótulo aparece só quando ela vale #}
 <div>
   {% if field.field.widget.input_type == "checkbox" %}
   <label class="flex items-center gap-2 text-sm font-medium" for="{{ field.id_for_label }}">{{ field }} {{ field.label }}</label>
   {% else %}
-  <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+  <label class="mb-1 block text-sm font-medium" for="{{ field.id_for_label }}">{{ field.label }}{% if opcional_quando %}<span x-show="{{ opcional_quando }}" class="font-normal text-gray-600"> (opcional)</span>{% endif %}</label>
   {{ field }}
   {% endif %}
   {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}

@@ -41,7 +41,7 @@ def ano_mes(request, padrao=None):
         ano, mes = int(ano), int(mes)
         date(ano, mes, 1)  # rejeita mês fora de 1–12 e ano implausível
         return ano, mes
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, OverflowError):
         if padrao is not None:
             return padrao
         hoje = timezone.localdate()

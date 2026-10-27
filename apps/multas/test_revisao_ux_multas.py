@@ -143,10 +143,11 @@ def test_aba_antiga_nao_desfaz_nic_nem_registra_nic_de_indicada(usuario_logado, 
     assert indicada.fici_data_indicacao == HOJE - timedelta(days=10)
 
 
-def test_multa_sem_valor_indicada_conta_como_concluida(usuario_logado, veiculo):
+def test_multa_sem_valor_indicada_continua_em_pagar(usuario_logado, veiculo):
+    # etapa 17 (extra): sem valor ainda não está paga — não pode ir para "Concluídas"
     _multa(veiculo, valor=None, fici_status=Multa.Fici.INDICADO)
     contas = {a["chave"]: a["total"] for a in usuario_logado.get("/multas/").context["atalhos"]}
-    assert contas == {"indicar": 0, "pagar": 0, "cobrar": 0, "concluidas": 1}
+    assert contas == {"indicar": 0, "pagar": 1, "cobrar": 0, "concluidas": 0}
 
 
 def test_parametros_adulterados_nao_dao_erro(usuario_logado, veiculo):

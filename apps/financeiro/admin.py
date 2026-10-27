@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from simple_history.admin import SimpleHistoryAdmin
 
@@ -52,12 +52,22 @@ class SemIncluirPeloAdmin:
         return False
 
     def changelist_view(self, request, extra_context=None):
-        extra_context = {**(extra_context or {})}
-        if self.tela_certa:
-            extra_context.setdefault(
-                "subtitle", f"Só consulta — para lançar, use {self.tela_certa}"
-            )
+        # Aviso como mensagem (antes ia em "subtitle" e virava o título da aba).
+        if self.tela_certa and request.method == "GET":
+            messages.info(request, f"Só consulta — para lançar, use {self.tela_certa}")
         return super().changelist_view(request, extra_context)
+
+
+class SemApagarPeloAdmin:
+    """Cobrança, ND e recebimento não se apagam pelo Admin (ETAPAS: "Não cobrar").
+
+    Apagar some com o registro sem refazer a conta. O caminho certo: "não cobrar"
+    ou cancelar a ND nas cobranças, e "↩ desfazer" no recebimento. Sem permissão
+    de apagar, o Django também tira a ação "apagar selecionados" da lista.
+    """
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class InlineSoLeitura:
@@ -83,8 +93,10 @@ class InlineSoLeitura:
 
 
 @admin.register(Cobranca)
-class CobrancaAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+class CobrancaAdmin(SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
     tela_certa = "Financeiro → Emitir ND (ou o aluguel, que é gerado sozinho)"
+    ordering = ["-vencimento"]
+    date_hierarchy = "vencimento"
     list_display = ["descricao", "cliente", "origem", "valor", "vencimento", "status"]
     list_filter = ["status", "origem"]
     search_fields = ["descricao", "cliente__nome"]
@@ -99,8 +111,11 @@ class AplicacaoInline(InlineSoLeitura, admin.TabularInline):
 
 
 @admin.register(Recebimento)
-class RecebimentoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+class RecebimentoAdmin(
+    SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin
+):
     tela_certa = "Financeiro → Receber"
+    ordering = ["-data"]
     list_display = ["cliente", "data", "valor", "forma"]
     list_select_related = ["cliente"]
     list_filter = ["forma"]
@@ -116,8 +131,11 @@ class ItemNotaDebitoInline(InlineSoLeitura, admin.TabularInline):
 
 
 @admin.register(NotaDebito)
-class NotaDebitoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+class NotaDebitoAdmin(
+    SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin
+):
     tela_certa = "Financeiro → Emitir ND"
+    ordering = ["-data_emissao"]
     list_display = ["numero", "cliente", "data_emissao", "total"]
     list_select_related = ["cliente"]
 

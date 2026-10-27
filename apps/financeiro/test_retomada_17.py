@@ -315,7 +315,8 @@ def test_tela_da_caucao_desconto_do_mes_passado_nao_pede_confirmacao(
             "token": "t3",
             "tipo": "desconto",
             "valor": "650,00",
-            "data": services.inicio_do_mes_passado(HOJE).isoformat(),
+            # dia 1º do mês atual: ainda não mexe em DAS fechado (etapa 17, navegador)
+            "data": services.inicio_do_mes(HOJE).isoformat(),
             "cobranca": cobranca.pk,
         },
     )

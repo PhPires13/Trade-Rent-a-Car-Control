@@ -2,8 +2,7 @@ from django.shortcuts import render
 from django.utils import timezone
 
 from apps.financeiro.periodos import ano_mes
-from apps.financeiro.services import pagamentos_do_mes, resumo_fiscal
-from apps.financeiro.views import COLUNAS_PAGAMENTOS, _linhas_pagamentos
+from apps.financeiro.views import COLUNAS_PAGAMENTOS, linhas_base_das, linhas_pagamentos_das
 
 from . import exportar, services
 
@@ -56,8 +55,13 @@ def _mes_pedido(request, hoje):
     return ano, mes, None
 
 
-def _opcoes_de_mes(ano, mes, hoje, quantidade=60):
-    """Meses da caixinha de escolha: do mês atual para trás (5 anos)."""
+def _opcoes_de_mes(ano, mes, hoje, quantidade=None):
+    """Meses da caixinha de escolha: do mês atual até o primeiro mês com dado
+    (compra de carro ou pagamento mais antigo) — sem dezenas de meses vazios."""
+    if quantidade is None:
+        primeiro = services.primeiro_mes_com_dado() or hoje
+        quantidade = (hoje.year - primeiro.year) * 12 + hoje.month - primeiro.month + 1
+        quantidade = min(max(quantidade, 1), 120)
     opcoes = []
     a, m = hoje.year, hoje.month
     for _ in range(quantidade):
@@ -132,20 +136,12 @@ def _exportar(tipo, formato, ano, mes, hoje):
 
 def _planilha_das(ano, mes):
     """Aba do DAS — as mesmas linhas da planilha de Financeiro › DAS."""
-    r = resumo_fiscal(ano, mes)
-    linhas = [["Receita de locação (fatura)", r["locacao"], "Sim"]]
-    for rotulo, valor in r["diversos"].items():
-        linhas.append([f"Pagamentos diversos — {rotulo} (ND)", valor, "Não"])
-    linhas.append(["Caução recebida (não é receita — é do cliente)", r["caucao_recebida"], "Não"])
-    linhas.append(["Adiantamentos recebidos (crédito do cliente)", r["adiantamentos"], "Não"])
-    linhas.append(["Pagos com crédito do cliente (já contados acima)", r["pago_com_credito"], "-"])
-    linhas.append(["Total que entrou no caixa", r["entrou_no_caixa"], "-"])
-    return "DAS", ["Grupo", "Valor (R$)", "Entra na base do DAS?"], linhas
+    return "DAS", ["Grupo", "Valor (R$)", "Entra na base do DAS?"], linhas_base_das(ano, mes)
 
 
 def _planilha_pagamentos_das(ano, mes):
-    """Cada pagamento que compõe o DAS — a mesma 2ª aba de Financeiro › DAS."""
-    return "Pagamentos do DAS", COLUNAS_PAGAMENTOS, _linhas_pagamentos(pagamentos_do_mes(ano, mes))
+    """Cada pagamento do DAS e o que entrou fora dele — a mesma 2ª aba de Financeiro › DAS."""
+    return "Pagamentos do DAS", COLUNAS_PAGAMENTOS, linhas_pagamentos_das(ano, mes)
 
 
 def _planilha_receitas(ano, mes):
@@ -193,8 +189,15 @@ def _planilha_despesas(ano, mes):
         ]
         for s in d["franquias"]
     ]
+    # mensalidade é do mês inteiro: a data é o dia 1º (o mês de referência)
     linhas += [
-        ["", v.placa, "Proteção Auto Truck (mensalidade)", "", float(v.mensalidade_protecao)]
+        [
+            f"01/{mes:02d}/{ano}",
+            v.placa,
+            "Proteção Auto Truck (mensalidade)",
+            f"Mensalidade de {MESES[mes - 1].lower()} de {ano}",
+            float(v.mensalidade_protecao),
+        ]
         for v in d["frota_protegida"]
     ]
     linhas += [
@@ -244,19 +247,51 @@ def _planilha_despesas(ano, mes):
 
 def _planilha_recebiveis(ano, mes):
     """Saldo devedor de hoje (não do mês escolhido)."""
-    linhas = [
-        [
-            registro["cliente"].nome,
-            cobranca.descricao,
-            cobranca.vencimento.strftime("%d/%m/%Y"),
-            cobranca.get_status_display(),
-            float(cobranca.saldo),
-        ]
-        for registro in services.recebiveis_em_aberto()
-        for cobranca in registro["cobrancas"]
-    ]
-    colunas = ["Cliente", "Cobrança", "Vencimento", "Status", "Saldo devedor (R$)"]
+    hoje = timezone.localdate()
+    linhas = []
+    for registro in services.recebiveis_em_aberto(hoje):
+        for cobranca in registro["cobrancas"]:
+            linhas.append(
+                [
+                    registro["cliente"].nome,
+                    cobranca.descricao,
+                    cobranca.vencimento.strftime("%d/%m/%Y"),
+                    _situacao(cobranca.vencimento, hoje),
+                    cobranca.get_status_display(),
+                    float(cobranca.saldo),
+                ]
+            )
+        if registro["credito"]:
+            # crédito guardado abate do que o cliente deve (valor negativo)
+            linhas.append(
+                [
+                    registro["cliente"].nome,
+                    "Crédito guardado do cliente (abate do que deve)",
+                    "",
+                    "",
+                    "",
+                    -float(registro["credito"]),
+                ]
+            )
+    colunas = ["Cliente", "Cobrança", "Vencimento", "Situação", "Status", "Saldo devedor (R$)"]
     return f"Recebíveis hoje {timezone.localdate():%d-%m-%Y}", colunas, linhas
+
+
+def _situacao(vencimento, hoje):
+    """Vencida / Vence hoje / A vencer — "vence hoje" já conta no "deve hoje"."""
+    if vencimento < hoje:
+        return "Vencida"
+    return "Vence hoje" if vencimento == hoje else "A vencer"
+
+
+def _ja_voltou(percentual):
+    """Já voltou (%) como na tela: 75 = 75%; sem investimento: vazio;
+    resultado negativo: "ainda não voltou" (e não um "-9%" sem sentido)."""
+    if percentual is None:
+        return None
+    if percentual < 0:
+        return "ainda não voltou"
+    return round(float(percentual) * 100, 1)
 
 
 def _planilha_frota(ano, mes):
@@ -270,13 +305,9 @@ def _planilha_frota(ano, mes):
             float(f.receita_total),
             float(f.despesa_total),
             float(f.resultado_operacional),
-            # 0–100, como na tela ("Já voltou 75%"); sem investimento: vazio, não 0
-            (
-                round(float(f.percentual_recuperado) * 100, 1)
-                if f.percentual_recuperado is not None
-                else None
-            ),
+            _ja_voltou(f.percentual_recuperado),
             RECOMENDACOES.get(f.nivel, f.nivel),
+            "; ".join(f.motivos),
         ]
         for f in fichas
     ]
@@ -287,8 +318,9 @@ def _planilha_frota(ano, mes):
         "Receita",
         "Despesas",
         "Resultado",
-        "% recuperado (0–100)",
+        "Já voltou (%)",
         "Recomendação",
+        "Motivo",
     ]
     return f"Frota hoje {timezone.localdate():%d-%m-%Y}", colunas, linhas
 

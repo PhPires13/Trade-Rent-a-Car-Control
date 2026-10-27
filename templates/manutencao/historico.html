@@ -5,7 +5,7 @@
 
 {% block conteudo %}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-2xl font-bold">Manutenções — {{ veiculo }}</h1>
+  <h1 class="text-2xl font-bold">Manutenções — {{ veiculo.placa }} <span class="font-normal text-gray-500">{{ veiculo.marca_modelo }}</span></h1>
   <div class="flex flex-wrap items-center gap-3 text-sm">
     <a href="{% url 'manutencao:preventivas' %}" class="py-1 underline">← Manutenção da frota</a>
     <a href="{% url 'manutencao:registrar' veiculo.pk %}"

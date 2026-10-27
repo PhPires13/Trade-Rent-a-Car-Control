@@ -185,7 +185,7 @@ def test_multa_anulada_nao_mostra_acoes(usuario_logado, veiculo):
     html = usuario_logado.get("/multas/").content.decode()
     assert "Nada a pagar" in html
     assert "Marcar paga" not in html
-    assert "Condutor indicado" not in html
+    assert "Já indiquei o condutor" not in html
     assert "Registrar NIC" not in html
 
 

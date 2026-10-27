@@ -4,7 +4,7 @@
 
 {% block conteudo %}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-2xl font-bold">Quilometragem — {{ veiculo }}</h1>
+  <h1 class="text-2xl font-bold">Quilometragem — {{ veiculo.placa }} <span class="font-normal text-gray-500">{{ veiculo.marca_modelo }}</span></h1>
   <a href="{% url 'km:lista' %}" class="py-2 text-sm underline">← Registro mensal</a>
 </div>
 <p class="mb-2 text-sm text-gray-500">

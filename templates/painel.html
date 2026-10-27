@@ -104,6 +104,8 @@
      class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo {% if not qtde %}opacity-60{% endif %}">
     <div class="text-3xl font-black">{{ qtde }}</div>
     <div class="text-sm text-gray-500">{{ rotulo }}</div>
+    {# o alugado que vai à oficina segue "Alocado": aqui aparece o total de carros na oficina #}
+    {% if valor == 'em_manutencao' and na_oficina_com_cliente %}<div class="mt-1 text-xs text-orange-800">{{ na_oficina }} na oficina agora ({{ na_oficina_com_cliente }} ainda ligado{{ na_oficina_com_cliente|pluralize }} a cliente)</div>{% endif %}
   </a>
   {% endfor %}
 </div>
@@ -134,7 +136,7 @@
       está com o substituto <span class="font-semibold">{{ troca.veiculo_substituto.placa }}</span>
       desde {{ troca.data_retirada|date:"d/m/Y" }}
       {% if troca.motivo %}<span class="text-gray-500">— {{ troca.motivo }}</span>{% endif %}
-      · <a href="{% url 'alocacoes:troca_devolver' troca.pk %}" class="font-medium underline">registrar devolução</a>
+      · <a href="{% url 'alocacoes:troca_devolver' troca.pk %}" class="alvo-toque font-medium underline">registrar devolução</a>
     </li>
     {% endfor %}
   </ul>
@@ -163,7 +165,7 @@
   {% if fici_em_alerta %}
   <div class="rounded-lg border-l-4 border-red-500 bg-white p-5 shadow">
     <h2 class="mb-3 flex items-center justify-between font-semibold">
-      <span>⚠ Prazos de FICI (evita multa NIC)</span>
+      <span>⚠ Prazo para indicar o motorista da multa (evita multa por não indicar)</span>
       <a href="{% url 'multas:lista' %}?tarefa=indicar" class="text-sm font-normal underline">indicar condutor →</a>
     </h2>
     <ul class="space-y-1 text-sm">
@@ -203,7 +205,7 @@
     <ul class="space-y-2 text-sm">
       {% for veiculo, itens in alertas_preventivas %}
       <li class="rounded border-l-4 border-red-400 bg-red-50 px-3 py-2">
-        <a href="{% url 'manutencao:preventivas' %}#veiculo-{{ veiculo.pk }}" class="font-semibold underline">{{ veiculo.placa }}</a> ({{ veiculo.km_atual|milhar }} km):
+        <a href="{% url 'manutencao:preventivas' %}#veiculo-{{ veiculo.pk }}" class="alvo-toque font-semibold underline">{{ veiculo.placa }}</a> ({{ veiculo.km_atual|milhar }} km):
         {% for p in itens %}
           {{ p.item.nome }}
           {% if p.faltam_km <= 0 %}<span class="font-semibold text-red-700">{{ p.texto_km }}</span>
@@ -225,10 +227,10 @@
       <ul class="space-y-2 text-sm">
         {% for veiculo, itens in preventivas_sem_registro %}
         <li class="rounded border-l-4 border-gray-300 bg-gray-50 px-3 py-2">
-          <a href="{% url 'manutencao:preventivas' %}#veiculo-{{ veiculo.pk }}" class="font-semibold underline">{{ veiculo.placa }}</a>:
+          <a href="{% url 'manutencao:preventivas' %}#veiculo-{{ veiculo.pk }}" class="alvo-toque font-semibold underline">{{ veiculo.placa }}</a>:
           {% for p in itens %}
           <a href="{% url 'manutencao:registrar' veiculo.pk %}?item={{ p.item.pk }}&ultima=1&volta={{ request.get_full_path|urlencode }}"
-             class="underline decoration-marca-amarelo decoration-2">{{ p.item.nome }}</a>{% if not forloop.last %} · {% endif %}
+             class="alvo-toque underline decoration-marca-amarelo decoration-2">{{ p.item.nome }}</a>{% if not forloop.last %} · {% endif %}
           {% endfor %}
         </li>
         {% endfor %}
@@ -247,7 +249,7 @@
     <ul class="flex flex-wrap gap-2 text-sm">
       {% for pendencia in leituras_pendentes %}
       <li><a href="{% url 'km:lista' %}?mes={{ pendencia.mes|date:'Y-m' }}#pendente-{{ pendencia.veiculo.pk }}"
-             class="inline-block rounded px-2 py-1 font-medium {% if pendencia.atrasada %}bg-red-100 text-red-900 hover:bg-red-200{% else %}bg-yellow-100 text-yellow-900 hover:bg-yellow-200{% endif %}">{{ pendencia.veiculo.placa }}{% if pendencia.atrasada %} · {{ pendencia.mes|date:"m/Y" }} esquecido{% endif %}</a></li>
+             class="alvo-toque rounded px-2 py-1 font-medium {% if pendencia.atrasada %}bg-red-100 text-red-900 hover:bg-red-200{% else %}bg-yellow-100 text-yellow-900 hover:bg-yellow-200{% endif %}">{{ pendencia.veiculo.placa }}{% if pendencia.atrasada %} · {{ pendencia.mes|date:"m/Y" }} esquecido{% endif %}</a></li>
       {% endfor %}
     </ul>
     {% else %}

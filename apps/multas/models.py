@@ -261,8 +261,11 @@ class Multa(models.Model):
             return rotulo
         if self.responsavel in (self.Responsavel.EMPRESA, self.Responsavel.VENDEDOR):
             return "Não se aplica"
-        if self.resultado in self.RESULTADOS_ANULADORES or not self.valor:
+        if self.resultado in self.RESULTADOS_ANULADORES or self.valor == 0:
             return "Não se aplica"
+        if self.valor is None:
+            # o valor costuma chegar depois: não é "não se aplica", falta informar
+            return "Falta o valor"
         if self.paga_pelo_cliente:
             # o motorista pagou o boleto direto ao órgão: cobrar de novo seria em dobro
             return "Não se aplica (pago pelo cliente)"

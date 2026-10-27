@@ -145,7 +145,8 @@ def _anotar_maior_km(veiculos, mes):
     vistoria): mostrar só ela faria a pessoa aceitar um número menor sem estranhar.
     Lançamento de depois do mês da tela não conta (num mês passado ele é o futuro).
     """
-    limite = primeiro_dia_do_mes(mes + timedelta(days=32)) + timedelta(days=DIAS_DE_FECHAMENTO)
+    # último dia aceito = dia DIAS_DE_FECHAMENTO do mês seguinte (igual a leitura_cabe_no_mes)
+    limite = primeiro_dia_do_mes(mes + timedelta(days=32)) + timedelta(days=DIAS_DE_FECHAMENTO - 1)
     for veiculo in veiculos:
         veiculo.maior_km = veiculo.ultimo_km
         veiculo.maior_km_data = veiculo.ultima_leitura
@@ -177,7 +178,54 @@ def _contexto_da_linha(mes):
 
 def lista_mensal(request):
     """Registro mensal de KM — pendências e leituras do mês (docs.md §4.8)."""
-    return _pagina_da_lista(request, _mes_da_query(request))
+    mes = _mes_da_query(request)
+    pedido = (request.GET.get("mes") or "").strip()
+    if pedido and _mes_do_valor(pedido) is None:
+        # endereço torto: avisa em vez de trocar de mês calado (como em Relatórios)
+        messages.warning(request, f"Mês inválido — mostrando {mes:%m/%Y}.")
+    return _pagina_da_lista(request, mes)
+
+
+def _entrega_da_primeira_leitura(registro):
+    """(km, data, rótulo) de quando o cliente da data pegou o carro — a base do
+    excedente na 1ª leitura, que não tem "KM anterior". None se não houver."""
+    if registro.km_anterior is not None:
+        return None
+    dia = registro.data_leitura
+    troca = (
+        TrocaTemporaria.objects.filter(
+            veiculo_substituto_id=registro.veiculo_id,
+            data_retirada__lte=dia,
+            km_retirada__isnull=False,
+        )
+        .filter(Q(data_devolucao__isnull=True) | Q(data_devolucao__gte=dia))
+        .order_by("-data_retirada")
+        .first()
+    )
+    if troca is not None:
+        base = (troca.km_retirada, troca.data_retirada, "retirada do substituto")
+    else:
+        alocacao = (
+            Alocacao.objects.filter(
+                veiculo_id=registro.veiculo_id, data_inicio__lte=dia, km_entrega__isnull=False
+            )
+            .filter(Q(data_termino__isnull=True) | Q(data_termino__gte=dia))
+            .order_by("-data_inicio")
+            .first()
+        )
+        if alocacao is None:
+            return None
+        base = (alocacao.km_entrega, alocacao.data_inicio, "entrega")
+    return base if base[0] <= registro.km else None
+
+
+def _texto_desde_a_entrega(registro):
+    """ "2.000 km desde a entrega (35.000 em 20/07)" — ou None."""
+    base = _entrega_da_primeira_leitura(registro)
+    if base is None:
+        return None
+    km, data, rotulo = base
+    return f"{milhar(registro.km - km)} km desde a {rotulo} ({milhar(km)} em {data:%d/%m})"
 
 
 def _pagina_da_lista(request, mes, estados=None):
@@ -282,6 +330,8 @@ def registrar(request, veiculo_id):
         if aviso and request.POST.get("confirmo") != str(registro.km):
             estado["aviso"] = aviso
             estado["km_avisado"] = registro.km
+            # mesmo número avisado e a caixinha em branco: diz o que falta
+            estado["falta_confirmar"] = request.POST.get("avisado") == str(registro.km)
             return _linha_nao_gravada(request, veiculo, mes_da_tela, estado)
         try:
             with transaction.atomic():
@@ -304,7 +354,11 @@ def registrar(request, veiculo_id):
 
     sucesso = f"KM de {veiculo.placa} registrado: {milhar(registro.km)} km"
     if registro.km_utilizado is not None:
-        sucesso += f" (rodou {milhar(registro.km_utilizado)} km desde a leitura anterior)"
+        anterior = registro.registro_anterior()
+        desde = f"a leitura de {anterior.data_leitura:%d/%m/%Y}" if anterior else "a compra"
+        sucesso += f" (rodou {milhar(registro.km_utilizado)} km desde {desde})"
+    elif desde_entrega := _texto_desde_a_entrega(registro):
+        sucesso += f" (rodou {desde_entrega})"
     avisos = [_aviso_reencadeamento(registro)]
     for cobranca in gerar_cobrancas_excedente(registro):
         avisos.append(

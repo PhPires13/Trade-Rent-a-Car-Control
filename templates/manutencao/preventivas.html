@@ -23,7 +23,7 @@
       <span>
         <a href="{% url 'manutencao:historico' m.veiculo_id %}" class="font-bold underline decoration-marca-amarelo decoration-2">{{ m.veiculo.placa }}</a>
         {% if m.oficina %}· {{ m.oficina }}{% endif %}
-        · desde {{ m.data_entrada|date:"d/m" }} ({{ m.dias_parado }} dia{{ m.dias_parado|pluralize }})
+        · desde {% if m.dias_parado == 0 %}hoje{% elif m.dias_parado == 1 %}ontem{% else %}{{ m.data_entrada|date:"d/m" }} ({{ m.dias_parado }} dias){% endif %}
       </span>
       <a href="{% url 'manutencao:voltou' m.pk %}?volta={{ request.get_full_path|urlencode }}"
          class="w-full rounded bg-marca-preto px-3 py-2 text-center font-semibold text-white hover:brightness-125 sm:w-auto sm:py-1">Carro voltou da oficina</a>
@@ -83,7 +83,7 @@
         <th class="px-3 py-2">Última execução</th>
         <th class="px-3 py-2">Próxima com</th>
         <th class="px-3 py-2">Faltam</th>
-        <th class="px-3 py-2">Status</th>
+        <th class="px-3 py-2">Situação</th>
         <th class="px-3 py-2"><span class="sr-only">Ação</span></th>
       </tr>
     </thead>

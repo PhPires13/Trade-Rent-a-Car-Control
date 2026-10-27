@@ -15,12 +15,13 @@ from django.views.decorators.http import require_POST
 
 from apps.alocacoes.km_aviso import suspeita_de_km
 from apps.alocacoes.models import VALIDADOR_KM
-from apps.campos import FormularioBR
+from apps.campos import FormularioBR, id_valido
 from apps.financeiro.models import Cobranca
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 from apps.km.correcao import ajustar_km_atual
+from apps.km.forms import CampoKm
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
 from .repasse import cliente_do_repasse, gerar_repasse
@@ -135,6 +136,47 @@ def _datas_da_oficina(entrada, saida):
     return erros
 
 
+def _pago_sem_custo(dados):
+    """Erro de "Já pagou a oficina? Sim" sem o valor — o gasto sumiria dos relatórios."""
+    if dados.get("pagamento_custo") == "pago" and dados.get("custo_real") is None:
+        return "Informe quanto pagou à oficina (0 se a proteção cobriu)."
+    return None
+
+
+def texto_carro_vendido(veiculo):
+    """Aviso do carro vendido: manutenção nova não entra, só gasto de antes da venda."""
+    quando = f" em {veiculo.data_venda:%d/%m/%Y}" if veiculo.data_venda else ""
+    return (
+        f"Este carro já foi vendido{quando} — não dá para lançar manutenção nova. "
+        f"Só um gasto de antes da venda, com a data em que ele aconteceu."
+    )
+
+
+def _erros_de_data(veiculo, dados, nova):
+    """Erros da data da manutenção: futuro, antes da compra (com gasto) e carro vendido."""
+    data = dados.get("data")
+    if veiculo is None or data is None:
+        return {}
+    erros = {}
+    if data > timezone.localdate():
+        erros["data"] = "A data não pode ser depois de hoje."
+    elif (
+        veiculo.data_aquisicao
+        and data < veiculo.data_aquisicao
+        and (dados.get("custo_real") or dados.get("data_entrada"))
+    ):
+        # a "última troca" de antes da compra é normal; gasto da empresa não
+        erros["data"] = (
+            f"O carro foi comprado em {veiculo.data_aquisicao:%d/%m/%Y} — confira a data."
+        )
+    if nova and veiculo.status == Veiculo.Status.VENDIDO:
+        if veiculo.data_venda is None or data > veiculo.data_venda:
+            erros["data"] = texto_carro_vendido(veiculo)
+        elif dados.get("data_entrada") and not dados.get("data_saida"):
+            erros["data_saida"] = "O carro já foi vendido: informe quando ele saiu da oficina."
+    return erros
+
+
 class ManutencaoForm(FormularioBR, forms.ModelForm):
     """Registro e edição de manutenção, em três partes (o que foi feito, oficina, custo)."""
 
@@ -143,6 +185,21 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
         label="Já gerar a cobrança para o cliente",
         required=False,
         help_text="A cobrança entra no Financeiro como conta a receber.",
+    )
+    #: aceita "48.900" como na leitura mensal; obrigatório só com item que tem intervalo (clean)
+    km = CampoKm(
+        label="KM do carro no dia",
+        required=False,
+        # sem a classe grande da leitura mensal: mesmo tamanho dos outros campos da tela
+        widget=forms.TextInput(attrs={"inputmode": "numeric", "autocomplete": "off"}),
+    )
+    #: com item do plano pode ficar em branco — entra o nome do item (clean)
+    descricao = forms.CharField(
+        label="Descrição do reparo",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Descreva o serviço feito (ex.: troca do para-choque). Com item do plano, "
+        "pode deixar em branco: entra o nome do item.",
     )
     #: só aparece na tela quando o KM foge do normal (D27)
     confirmar_km = forms.BooleanField(
@@ -189,9 +246,7 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
             "data": forms.DateInput(attrs={"type": "date"}),
             "data_entrada": forms.DateInput(attrs={"type": "date"}),
             "data_saida": forms.DateInput(attrs={"type": "date"}),
-            "descricao": forms.Textarea(attrs={"rows": 3}),
             "observacoes": forms.Textarea(attrs={"rows": 2}),
-            "km": forms.NumberInput(attrs={"inputmode": "numeric"}),
         }
 
     def __init__(self, *args, veiculo=None, **kwargs):
@@ -243,8 +298,18 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
         dados = super().clean()
         item = dados.get("item")
         self.instance.tipo = self.tipo_escolhido(dados)
-        if item and item.intervalo_km_padrao and dados.get("km") is None:
+        if (
+            item
+            and item.intervalo_km_padrao
+            and dados.get("km") is None
+            and "km" not in self.errors
+        ):
             self.add_error("km", "Informe o KM para a contagem da próxima troca recomeçar.")
+        if not (dados.get("descricao") or "").strip():
+            if item:
+                dados["descricao"] = item.nome
+            else:
+                self.add_error("descricao", "Descreva o serviço feito (ex.: troca do para-choque).")
         aviso_km = suspeita_do_km_da_manutencao(
             self.veiculo, dados.get("km"), dados.get("data"), self.instance
         )
@@ -270,7 +335,32 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
             dados["gerar_cobranca"] = False
         if dados.get("gerar_cobranca") and not dados.get("valor_cobrado_cliente"):
             self.add_error("valor_cobrado_cliente", "Informe o valor para gerar a cobrança.")
+        elif dados.get("gerar_cobranca") and self.veiculo is not None:
+            self._conferir_cliente_da_cobranca(dados)
+        if "custo_real" not in self.errors and (erro := _pago_sem_custo(dados)):
+            self.add_error("custo_real", erro)
+        for campo, erro in _erros_de_data(self.veiculo, dados, not self.instance.pk).items():
+            if campo not in self.errors:
+                self.add_error(campo, erro)
         return dados
+
+    def _conferir_cliente_da_cobranca(self, dados):
+        """ "Já gerar a cobrança" sem ninguém com o carro: avisa antes de salvar,
+        senão a manutenção ficava "cliente paga" sem cobrança."""
+        rascunho = Manutencao(
+            veiculo=self.veiculo,
+            sinistro=dados.get("sinistro"),
+            data=dados.get("data"),
+            data_entrada=dados.get("data_entrada"),
+        )
+        if rascunho.data is None or cliente_do_repasse(rascunho) is not None:
+            return
+        quando = rascunho.data_entrada or rascunho.data
+        self.add_error(
+            "gerar_cobranca",
+            f"Ninguém estava com o carro em {quando:%d/%m/%Y} — escolha “Empresa” em "
+            f"“Quem paga o conserto” ou cobre pelo Financeiro.",
+        )
 
 
 class VoltouDaOficinaForm(FormularioBR, forms.ModelForm):
@@ -302,6 +392,12 @@ class VoltouDaOficinaForm(FormularioBR, forms.ModelForm):
         if erro:
             raise forms.ValidationError(erro)
         return saida
+
+    def clean(self):
+        dados = super().clean()
+        if "custo_real" not in self.errors and (erro := _pago_sem_custo(dados)):
+            self.add_error("custo_real", erro)
+        return dados
 
 
 class ItemPreventivaForm(FormularioBR, forms.ModelForm):
@@ -336,9 +432,13 @@ class IntervaloPersonalizadoForm(FormularioBR, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["veiculo"].queryset = Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO).exclude(
-            status=Veiculo.Status.VENDIDO
+        self.fields["veiculo"].queryset = (
+            Veiculo.objects.filter(uso=Veiculo.Uso.LOCACAO)
+            .exclude(status=Veiculo.Status.VENDIDO)
+            .order_by("placa")
         )
+        # placa primeiro, como nos outros seletores de carro
+        self.fields["veiculo"].label_from_instance = lambda v: f"{v.placa} — {v.marca_modelo}"
         self.fields["item"].queryset = ItemPreventiva.objects.filter(
             intervalo_km_padrao__isnull=False
         )
@@ -349,7 +449,7 @@ class IntervaloPersonalizadoForm(FormularioBR, forms.ModelForm):
 def _pk_do_post(request, chave):
     """IDs de POST adulterados viram 404, não 500."""
     valor = (request.POST.get(chave) or "").strip()
-    if not valor.isdigit():
+    if not id_valido(valor):
         raise Http404("Registro inválido.")
     return int(valor)
 
@@ -481,13 +581,20 @@ def _avisar_cobranca(request, manutencao, gerar):
     )
 
 
+def _texto_carro_liberado(veiculo):
+    """Aviso do carro que saiu de "Em manutenção" — o fora de locação não vai ser alugado."""
+    if veiculo.uso == Veiculo.Uso.FORA_LOCACAO:
+        return f"{veiculo.placa} saiu da oficina (fica fora de locação)."
+    return f"{veiculo.placa} voltou a ficar disponível para alugar."
+
+
 def _carro_voltou(request, manutencao):
     """Ao fechar a ida à oficina, o carro marcado "Em manutenção" volta a ficar disponível."""
     veiculo = manutencao.veiculo
     if pode_voltar_a_disponivel(veiculo):
         veiculo.status = Veiculo.Status.DISPONIVEL
         veiculo.save(update_fields=["status"])
-        messages.info(request, f"{veiculo.placa} voltou a ficar disponível para alugar.")
+        messages.info(request, _texto_carro_liberado(veiculo))
 
 
 def _carro_foi_para_oficina(request, manutencao):
@@ -515,18 +622,20 @@ def registrar(request, veiculo_id):
     informar_ultima = request.GET.get("ultima") == "1"
     inicial = {} if informar_ultima else {"data": timezone.localdate(), "km": veiculo.km_atual}
     item_id = request.GET.get("item", "")
-    if item_id.isdigit():
+    if id_valido(item_id):
         item = ItemPreventiva.objects.filter(pk=item_id, ativo=True).first()
         if item:
             inicial["item"] = item.pk
             inicial["descricao"] = item.nome
     sinistro_id = request.GET.get("sinistro", "")
-    if sinistro_id.isdigit() and veiculo.sinistros.filter(pk=sinistro_id).exists():
+    if id_valido(sinistro_id) and veiculo.sinistros.filter(pk=sinistro_id).exists():
         inicial.update(sinistro=int(sinistro_id), data_entrada=timezone.localdate())
     # Cada formulário leva um código único (como a ND e a multa): clique duplo,
     # internet lenta ou "Voltar" não gravam a mesma manutenção duas vezes.
     token = request.POST.get("token", "") if request.method == "POST" else ""
     form = ManutencaoForm(request.POST or None, veiculo=veiculo, initial=inicial)
+    if request.method == "GET" and veiculo.status == Veiculo.Status.VENDIDO:
+        messages.warning(request, texto_carro_vendido(veiculo))
     if request.method == "POST" and form.is_valid():
         with _envio_unico(request, SESSAO_TOKENS_MANUTENCAO, token) as repetido:
             if repetido:
@@ -620,14 +729,14 @@ def apagar(request, manutencao_id):
     if aviso_km:
         messages.info(request, aviso_km)
     if voltou:
-        messages.info(request, f"{veiculo.placa} voltou a ficar disponível para alugar.")
+        messages.info(request, _texto_carro_liberado(veiculo))
     return redirect(_volta(request, historico_url))
 
 
 def escolher_carro(request):
     """ "Qual carro?" do quadro de preventivas: leva ao registro do carro escolhido."""
     veiculo_id = request.GET.get("veiculo", "")
-    if veiculo_id.isdigit() and Veiculo.objects.filter(pk=veiculo_id).exists():
+    if id_valido(veiculo_id) and Veiculo.objects.filter(pk=veiculo_id).exists():
         return redirect("manutencao:registrar", int(veiculo_id))
     messages.error(request, "Escolha o carro na lista.")
     return redirect("manutencao:preventivas")

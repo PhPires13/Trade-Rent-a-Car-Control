@@ -25,9 +25,9 @@
 {# dia de pagar e caução do cadastro como sugestão — tudo continua editável.   #}
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-4 shadow sm:p-6"
       x-data="{
-        limite: '{{ form.limite_km.value|default:'ilimitado' }}',
-        veiculo: '{{ form.veiculo.value|default:'' }}',
-        cliente: '{{ form.cliente.value|default:'' }}',
+        limite: '{{ form.limite_km.value|default:'ilimitado'|escapejs }}',
+        veiculo: '{{ form.veiculo.value|default:''|escapejs }}',
+        cliente: '{{ form.cliente.value|default:''|escapejs }}',
         veiculos: JSON.parse(document.getElementById('dados-veiculos').textContent),
         clientes: JSON.parse(document.getElementById('dados-clientes').textContent),
         sugeridoDia: false,
@@ -160,7 +160,7 @@
     {% elif field.name == "confirmar_semanas" %}<p class="mb-1">Serão lançadas {{ form.semanas }} semanas de aluguel de uma vez, todas atrasadas.</p>
     {% endif %}
     <label class="flex min-h-11 items-center gap-2 font-semibold" for="{{ field.id_for_label }}">
-      <input type="checkbox" name="{{ field.name }}" id="{{ field.id_for_label }}" style="width:auto"{% if field.value %} checked{% endif %}>
+      <input type="checkbox" name="{{ field.name }}" id="{{ field.id_for_label }}" class="shrink-0"{% if field.value %} checked{% endif %}>
       {{ field.label }}
     </label>
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-700">{{ erro }}</p>{% endfor %}

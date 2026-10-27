@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
 from apps.frota.models import Veiculo
+from apps.manutencao.models import Manutencao
 from apps.pessoas.models import Cliente
 from apps.sinistros.models import AuxilioMotorista, Sinistro
 
@@ -56,6 +57,19 @@ def sinistro(alocacoes, veiculo):
     # proteção acionada: o auxílio motorista só vale com evento aberto (D26)
     return Sinistro.objects.create(
         veiculo=veiculo, data=date(2026, 7, 10), envolvido="terceiro", acionou_protecao=True
+    )
+
+
+def _parado_oito_dias(sinistro):
+    """Auxílio só depois de 7 dias parado na oficina (decisão nº 10, etapa 17 extra)."""
+    entrada = timezone.localdate() - timedelta(days=8)
+    Manutencao.objects.create(
+        veiculo=sinistro.veiculo,
+        tipo="corretiva",
+        data=entrada,
+        descricao="Conserto",
+        data_entrada=entrada,
+        sinistro=sinistro,
     )
 
 
@@ -193,6 +207,7 @@ def test_quem_estava_mostra_o_motorista_da_data(usuario_logado, alocacoes, veicu
 
 
 def test_lista_tem_editar_e_auxilio_volta_com_filtros(usuario_logado, sinistro):
+    _parado_oito_dias(sinistro)
     lista = reverse("sinistros:lista") + "?status=aberto"
     html = usuario_logado.get(lista).content.decode()
     assert reverse("sinistros:editar", args=[sinistro.pk]) + "?volta=" in html
@@ -205,6 +220,7 @@ def test_lista_tem_editar_e_auxilio_volta_com_filtros(usuario_logado, sinistro):
 
 
 def test_auxilio_pela_pagina_de_editar_volta_para_ela(usuario_logado, sinistro):
+    _parado_oito_dias(sinistro)
     editar = reverse("sinistros:editar", args=[sinistro.pk])
     resposta = usuario_logado.post(
         reverse("sinistros:solicitar_auxilio", args=[sinistro.pk]), {"valor": "", "volta": editar}
@@ -266,6 +282,7 @@ def test_data_no_futuro_e_recusada(usuario_logado, veiculo):
 
 
 def test_pedido_de_auxilio_repetido_nao_duplica(usuario_logado, sinistro):
+    _parado_oito_dias(sinistro)
     url = reverse("sinistros:solicitar_auxilio", args=[sinistro.pk])
     usuario_logado.post(url, {"valor": "1.518,00"})
     usuario_logado.post(url, {"valor": "1.518,00"})

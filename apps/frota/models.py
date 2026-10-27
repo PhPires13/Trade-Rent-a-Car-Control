@@ -2,6 +2,8 @@ from django.core.validators import FileExtensionValidator
 from django.db import models
 from simple_history.models import HistoricalRecords
 
+from apps.campos import validar_tamanho_arquivo
+
 #: CRLV-e exporta em PDF; foto de celular vem em JPG/PNG/WebP.
 EXTENSOES_DOCUMENTO = ["jpg", "jpeg", "png", "webp", "pdf"]
 
@@ -150,13 +152,14 @@ class Veiculo(models.Model):
         null=True,
         blank=True,
         help_text="Aparece no card da frota e na ficha do veículo",
+        validators=[validar_tamanho_arquivo],
     )
     documento = models.FileField(
         "documento do carro — CRLV (foto ou PDF)",
         upload_to="veiculos/documentos/",
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(EXTENSOES_DOCUMENTO)],
+        validators=[FileExtensionValidator(EXTENSOES_DOCUMENTO), validar_tamanho_arquivo],
     )
     # IPVA fica em PagamentoIpva (um registro por ano e parcela) — assim o IPVA dos
     # anos anteriores continua nos relatórios já enviados à contabilidade (decisão nº 21).

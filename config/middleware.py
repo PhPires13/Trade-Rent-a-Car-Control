@@ -10,8 +10,9 @@ verdade e, depois de entrar, volta para a tela onde a pessoa estava.
 from urllib.parse import quote, urlsplit
 
 from django.conf import settings
+from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import resolve_url
+from django.shortcuts import redirect, resolve_url
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import csrf
 
@@ -31,6 +32,15 @@ def falha_csrf(request, reason=""):
     mensagem em vez de "erro 403"); o resto vê a página 403_csrf.html."""
     if _e_fetch(request):
         return JsonResponse({"erro": PAGINA_VELHA}, status=403)
+    if request.path == resolve_url(settings.LOGIN_URL):
+        # tela de login velha (ou aberta em duas abas): "sessão expirou" confundia
+        # quem só queria entrar. Logado vai ao Painel; senão, login novo com aviso.
+        if request.user.is_authenticated:
+            return redirect("painel")
+        messages.info(
+            request, "A página de entrada ficou aberta muito tempo. Tente entrar de novo."
+        )
+        return redirect(request.get_full_path())
     return csrf.csrf_failure(request, reason)
 
 

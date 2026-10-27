@@ -34,6 +34,7 @@
       <option value="{{ valor }}" {% if uso_escolhido == valor %}selected{% endif %}>{{ rotulo }}</option>
       {% endfor %}
     </select>
+    <p class="mt-1 text-xs text-gray-500">Fora de locação = carro de uso próprio, não é alugado. Inativo = parado por um tempo (ex.: carro roubado, até ser recuperado).</p>
   </div>
   <div>
     <label class="mb-1 block text-xs font-medium text-gray-500" for="filtro-placa">Placa</label>
@@ -91,7 +92,7 @@
       {% endif %}
       {% if card.multas_fici_pendentes %}
       <a href="{% url 'multas:lista' %}?veiculo={{ card.veiculo.placa }}" class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-900">
-        {{ card.multas_fici_pendentes }} FICI pendente{{ card.multas_fici_pendentes|pluralize }}</a>
+        {{ card.multas_fici_pendentes }} multa{{ card.multas_fici_pendentes|pluralize }} sem motorista indicado</a>
       {% endif %}
     </div>
     {% endif %}

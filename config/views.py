@@ -3,6 +3,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_not_required
 from django.db.models import Count, OuterRef, Q, Subquery
@@ -29,7 +30,11 @@ from apps.frota.alertas import vigencias_a_vencer
 from apps.frota.desmobilizacao import ranking_da_frota
 from apps.frota.models import Veiculo, normalizar_placa
 from apps.km.models import pendencias_de_leitura
-from apps.manutencao.services import frota_acompanhada, resumos_por_veiculo
+from apps.manutencao.services import (
+    frota_acompanhada,
+    manutencoes_em_aberto,
+    resumos_por_veiculo,
+)
 from apps.multas.models import Multa
 from apps.multas.services import alertas_fici
 from apps.pessoas.models import Cliente, CondutorAutorizado
@@ -98,6 +103,7 @@ def _buscar_clientes(texto, digitos):
             achados[condutor.cliente_id] = {
                 "cliente": condutor.cliente,
                 "motivo": f"condutor autorizado: {condutor.nome}",
+                "condutor": condutor,
             }
     clientes = sorted(achados.values(), key=lambda a: sem_acento(a["cliente"].nome))
     return clientes[:LIMITE_BUSCA], sem_cliente[:LIMITE_BUSCA]
@@ -154,6 +160,13 @@ def buscar(request):
             + [reverse("sinistros:editar", args=[s.pk]) for s in sinistros]
         )
         if len(destinos) == 1:
+            # achou pelo condutor: sem o aviso, a ficha de outra pessoa abria sem explicação
+            if clientes and clientes[0].get("condutor"):
+                messages.info(
+                    request,
+                    f"{clientes[0]['condutor'].nome} é condutor autorizado de "
+                    f"{clientes[0]['cliente'].nome}.",
+                )
             return redirect(destinos[0])
     grupos = [veiculos, clientes, condutores, multas, sinistros]
     return render(
@@ -287,10 +300,18 @@ def painel(request):
         if valor != Veiculo.Status.VENDIDO
     ]
     locacao = Q(uso=Veiculo.Uso.LOCACAO)
+    # carro do contrato que está na oficina com substituto na rua segue "Alocado":
+    # sem tirar ele, o mesmo cliente contava duas vezes na ocupação
+    com_substituto = Alocacao.objects.filter(
+        status=Alocacao.Status.ATIVA, trocas__data_devolucao__isnull=True
+    ).values("veiculo_id")
     contagem = veiculos.aggregate(
         total=Count("pk"),
         locacao=Count("pk", filter=locacao),
-        alugados=Count("pk", filter=locacao & Q(status=Veiculo.Status.ALOCADO)),
+        alugados=Count(
+            "pk",
+            filter=locacao & Q(status=Veiculo.Status.ALOCADO) & ~Q(pk__in=com_substituto),
+        ),
         **{f"status_{valor}": Count("pk", filter=Q(status=valor)) for valor, _ in status_no_painel},
     )
 
@@ -329,7 +350,20 @@ def painel(request):
         .prefetch_related("manutencoes")
     )
     fichas, _ = ranking_da_frota(hoje)
+    # "Na oficina agora": todo carro com ida à oficina em aberto — o alugado que
+    # entra na oficina continua "Alocado" e não aparecia no card "Em manutenção"
+    na_oficina = list(
+        manutencoes_em_aberto()
+        .exclude(veiculo__status=Veiculo.Status.VENDIDO)
+        .order_by()
+        .values_list("veiculo_id", "veiculo__status")
+        .distinct()
+    )
     contexto = {
+        "na_oficina": len(na_oficina),
+        "na_oficina_com_cliente": sum(
+            1 for _, status in na_oficina if status == Veiculo.Status.ALOCADO
+        ),
         "hoje": hoje,
         "total_veiculos": contagem["total"],
         # (valor, rótulo, quantidade) — o valor vira o filtro do card no hub da frota

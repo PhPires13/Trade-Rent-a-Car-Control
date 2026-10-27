@@ -1,23 +1,35 @@
-from decimal import InvalidOperation
+import re
+from decimal import Decimal, InvalidOperation
 
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.files.uploadedfile import UploadedFile
+from django.core.validators import MinValueValidator
 from django.db.models import Count, Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import format_html
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
-from apps.campos import FormularioBR, dinheiro_br, ler_data
+from apps.campos import FormularioBR, dinheiro_br, id_valido, ler_data
 from apps.formatos import milhar, numero_br
+from apps.km.forms import CampoKm, km_digitado
 from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
+from apps.pessoas.widgets import ArquivoInput
 
 from . import alertas, crlv, desmobilizacao
-from .models import Categoria, Fornecedor, PagamentoIpva, Veiculo, normalizar_placa
+from .models import (
+    EXTENSOES_DOCUMENTO,
+    Categoria,
+    Fornecedor,
+    PagamentoIpva,
+    Veiculo,
+    normalizar_placa,
+)
 
 
 def _motorista_e_valor(alocacao, troca):
@@ -135,7 +147,13 @@ def detalhe(request, veiculo_id):
     )
     contexto = {
         "veiculo": veiculo,
-        "total_alocacoes": veiculo.alocacoes.count(),
+        # a linha do tempo também mostra as trocas em que o carro foi o substituto
+        # (uma consulta só: alocações dele + alocações em que ele foi o reserva)
+        "total_alocacoes": Alocacao.objects.filter(
+            Q(veiculo=veiculo) | Q(trocas__veiculo_substituto=veiculo)
+        )
+        .distinct()
+        .count(),
         "total_km": veiculo.registros_km.count(),
         "total_manutencoes": veiculo.manutencoes.count(),
         "total_multas": veiculo.multas.count(),
@@ -244,8 +262,18 @@ _CAMPOS_DE_DATA_VEICULO = (
 )
 
 
+#: Placa antiga (ABC1234) ou Mercosul (ABC1D23), já sem hífen e em maiúsculas.
+_PLACA = re.compile(r"^[A-Z]{3}\d[A-Z0-9]\d{2}$")
+#: Ano do carro: "2021", "20/21" ou "2020/2021" (fabricação/modelo).
+_ANO_VEICULO = re.compile(r"^(\d{2}|\d{4})(?:/(\d{2}|\d{4}))?$")
+
+
 class VeiculoForm(FormularioBR, forms.ModelForm):
     """Cadastro do veículo — os campos de venda são geridos pelo fluxo "Vender"."""
+
+    # texto com teclado numérico: "35.000" vira 35000 (no NumberInput virava 35)
+    km_compra = CampoKm(label="KM na compra", required=False)
+    km_atual = CampoKm(label="KM atual")
 
     class Meta:
         model = Veiculo
@@ -253,8 +281,12 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
         # editar aqui dessincronizaria a alocação ativa e a venda.
         fields = [nome for _, nomes in SECOES_VEICULO for nome in nomes]
         widgets = {
-            "foto": forms.ClearableFileInput(attrs={"accept": "image/*"}),
-            "documento": forms.ClearableFileInput(attrs={"accept": "image/*,.pdf"}),
+            "placa": forms.TextInput(
+                attrs={"maxlength": 8, "autocapitalize": "characters", "autocomplete": "off"}
+            ),
+            # "Ver arquivo atual" / "Remover" / trocar: arquivo novo sempre vence o "Remover"
+            "foto": ArquivoInput(attrs={"accept": "image/*"}),
+            "documento": ArquivoInput(attrs={"accept": "image/*,.pdf"}),
             "observacoes": forms.Textarea(attrs={"rows": 3}),
             **{nome: forms.DateInput(attrs={"type": "date"}) for nome in _CAMPOS_DE_DATA_VEICULO},
         }
@@ -268,6 +300,10 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
                 "passados — confirmo",
                 required=False,
             )
+        texto_foto = "Envie uma foto do carro (JPG ou PNG)."
+        self.fields["foto"].error_messages.update(
+            invalid_image=texto_foto, invalid_extension=texto_foto
+        )
         if not self.instance.pk:
             # carro novo: em branco, o KM atual é o da compra (preenchido no clean)
             self.fields["km_atual"].required = False
@@ -281,7 +317,68 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
 
     def clean_placa(self):
         """Normaliza antes da checagem de duplicidade — o modelo grava sem hífen e em maiúsculas."""
-        return normalizar_placa(self.cleaned_data["placa"])
+        placa = normalizar_placa(self.cleaned_data["placa"])
+        # carro já gravado com placa fora do padrão continua editável (só a troca é conferida)
+        if placa != self.instance.placa and not _PLACA.match(placa):
+            raise ValidationError("Placa inválida — ex.: ABC1D23 ou ABC1234.")
+        outro = Veiculo.objects.filter(placa=placa).exclude(pk=self.instance.pk).first()
+        if outro:
+            raise ValidationError(
+                format_html(
+                    'Já existe um carro com a placa {} — <a href="{}" class="underline">'
+                    "abrir o cadastro dele</a>.",
+                    placa,
+                    reverse("frota:detalhe", args=[outro.pk]),
+                )
+            )
+        return placa
+
+    def clean_ano(self):
+        """Fabricação/modelo ("20/21" ou "2020/2021"); o modelo é o mesmo ano ou o seguinte."""
+        ano = re.sub(r"\s+", "", self.cleaned_data.get("ano") or "")
+        if not ano or ano == self.instance.ano:  # cadastro antigo fora do padrão segue editável
+            return ano
+        casou = _ANO_VEICULO.match(ano)
+        if casou:
+            fabricacao, modelo = casou.group(1), casou.group(2) or casou.group(1)
+            limite = timezone.localdate().year + 1
+            fab = int(fabricacao) if len(fabricacao) == 4 else 2000 + int(fabricacao)
+            mod = int(modelo) if len(modelo) == 4 else 2000 + int(modelo)
+            if len(fabricacao) == 2 and fab > limite:  # "98/99" é 1998/1999
+                fab -= 100
+            if len(modelo) == 2 and mod > limite:
+                mod -= 100
+            if 1950 <= fab <= limite and mod in (fab, fab + 1):
+                return ano
+        raise ValidationError("Confira o ano de fabricação/modelo — ex.: 20/21 ou 2020/2021.")
+
+    def clean_renavam(self):
+        """Só números (9 a 11 dígitos); pontos, traços e espaços são tirados."""
+        renavam = re.sub(r"[\s.\-]", "", self.cleaned_data.get("renavam") or "")
+        if renavam and renavam != self.instance.renavam and not re.fullmatch(r"\d{9,11}", renavam):
+            raise ValidationError("Renavam tem só números (11 dígitos).")
+        return renavam
+
+    def clean_data_aquisicao(self):
+        data = self.cleaned_data.get("data_aquisicao")
+        if data and data != self.instance.data_aquisicao:
+            if data > timezone.localdate():
+                raise ValidationError("A data de compra não pode ser depois de hoje.")
+            if self.instance.data_venda and data > self.instance.data_venda:
+                raise ValidationError(
+                    f"A compra não pode ser depois da venda ({self.instance.data_venda:%d/%m/%Y})."
+                )
+        return data
+
+    def clean_documento(self):
+        """Extensão errada com texto simples (o modelo diria "extensão não permitida")."""
+        documento = self.cleaned_data.get("documento")
+        nome = getattr(documento, "name", "") or ""
+        if isinstance(documento, UploadedFile) and (
+            nome.rsplit(".", 1)[-1].lower() not in EXTENSOES_DOCUMENTO or "." not in nome
+        ):
+            raise ValidationError("Envie foto (JPG/PNG) ou PDF do documento.")
+        return documento
 
     def clean_km_atual(self):
         """O odômetro nunca anda para trás pela edição (ETAPAS, etapa 8).
@@ -322,6 +419,11 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
             self.add_error(
                 "km_atual",
                 f"O KM atual não pode ser menor que o KM na compra ({milhar(km_compra)}).",
+            )
+        troca, garantia = dados.get("bateria_data_troca"), dados.get("bateria_garantia_fim")
+        if troca and garantia and garantia < troca:
+            self.add_error(
+                "bateria_garantia_fim", "A garantia termina antes da troca — confira as datas."
             )
         # proteção mês a mês conta a partir da compra: sem a data, não há o que lançar
         if dados.get("mensalidade_protecao") and not dados.get("data_aquisicao"):
@@ -430,6 +532,9 @@ def veiculo_editar(request, veiculo_id):
     return _formulario_veiculo(request, get_object_or_404(Veiculo, pk=veiculo_id))
 
 
+_VALOR_POSITIVO = MinValueValidator(Decimal("0.01"), "Informe um valor maior que zero.")
+
+
 class PagamentoIpvaForm(FormularioBR, forms.ModelForm):
     class Meta:
         model = PagamentoIpva
@@ -443,15 +548,21 @@ class PagamentoIpvaForm(FormularioBR, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        texto_ano = "Use o ano com 4 dígitos (ex.: 2026)"
-        self.fields["ano"].validators += [
-            MinValueValidator(2000, texto_ano),
-            MaxValueValidator(timezone.localdate().year + 1, texto_ano),
-        ]
-        self.fields["ano"].error_messages["invalid"] = texto_ano
+        ano_maximo = timezone.localdate().year + 1
+
+        def validar_ano_ipva(ano):
+            # uma mensagem só: "26" é ano pela metade; "1990" tem 4 dígitos, mas está fora
+            if ano < 1000:
+                raise ValidationError("Use o ano com 4 dígitos (ex.: 2026).")
+            if not 2000 <= ano <= ano_maximo:
+                raise ValidationError(f"Ano do IPVA entre 2000 e {ano_maximo}.")
+
+        self.fields["ano"].validators.append(validar_ano_ipva)
+        self.fields["ano"].error_messages["invalid"] = "Use o ano com 4 dígitos (ex.: 2026)."
         self.fields["parcela"].validators.append(
             MinValueValidator(1, "A parcela começa em 1 (use 1 para cota única).")
         )
+        self.fields["valor"].validators.append(_VALOR_POSITIVO)
 
     def clean(self):
         dados = super().clean()
@@ -460,6 +571,9 @@ class PagamentoIpvaForm(FormularioBR, forms.ModelForm):
             self.add_error("valor", "Informe o valor do IPVA.")
         elif dados.get("pago_em") and dados.get("valor") is None:
             self.add_error("valor", "Informe quanto foi pago — sem valor não entra na despesa.")
+        if dados.get("pago_em") and dados["pago_em"] > timezone.localdate():
+            # a despesa cairia num mês futuro e o alerta de IPVA em aberto sumiria agora
+            self.add_error("pago_em", "A data do pagamento não pode ser depois de hoje.")
         veiculo_id = self.instance.veiculo_id
         if (
             veiculo_id
@@ -516,14 +630,37 @@ def ipva(request, veiculo_id):
     return render(request, "frota/ipva.html", {"veiculo": veiculo, "formset": formset})
 
 
-class CategoriaForm(FormularioBR, forms.ModelForm):
+class _NomeSemRepetir:
+    """Mixin: "gol" e "Gol" são o mesmo nome — recusa o repetido com texto simples."""
+
+    artigo_e_tipo = ""  # ex.: "a categoria"
+
+    def clean_nome(self):
+        nome = " ".join(self.cleaned_data["nome"].split())
+        repetido = (
+            self._meta.model.objects.filter(nome__iexact=nome).exclude(pk=self.instance.pk).first()
+        )
+        if repetido:
+            raise ValidationError(f"Já existe {self.artigo_e_tipo} {repetido.nome}.")
+        return nome
+
+
+class CategoriaForm(_NomeSemRepetir, FormularioBR, forms.ModelForm):
+    artigo_e_tipo = "a categoria"
+
     class Meta:
         model = Categoria
         fields = ["nome", "valor_semanal_referencia", "observacoes"]
         widgets = {"observacoes": forms.Textarea(attrs={"rows": 2})}
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["valor_semanal_referencia"].validators.append(_VALOR_POSITIVO)
 
-class FornecedorForm(FormularioBR, forms.ModelForm):
+
+class FornecedorForm(_NomeSemRepetir, FormularioBR, forms.ModelForm):
+    artigo_e_tipo = "o fornecedor"
+
     class Meta:
         model = Fornecedor
         fields = ["nome", "cnpj", "contato", "tipo_servico", "observacoes"]
@@ -535,7 +672,7 @@ def _cadastro_simples(request, form_classe, modelo, template, chave_id, contexto
     form = form_classe()
     if request.method == "POST":
         registro_id = (request.POST.get(chave_id) or "").strip() or None
-        if registro_id is not None and not registro_id.isdigit():
+        if registro_id is not None and not id_valido(registro_id):
             raise Http404("Registro inválido.")
         instancia = get_object_or_404(modelo, pk=registro_id) if registro_id else None
         form = form_classe(request.POST, instance=instancia)
@@ -607,6 +744,16 @@ def ficha(request, veiculo_id):
     return render(request, "frota/ficha.html", {"f": ficha, "veiculo": veiculo})
 
 
+def _km_da_venda(texto):
+    """KM opcional da venda: "45.000" vira 45000; número torto vira mensagem simples."""
+    if not texto.strip():
+        return None
+    try:
+        return km_digitado(texto)
+    except ValidationError as erro:
+        raise ValidationError(f"KM na venda: {erro.messages[0]}") from None
+
+
 def vender(request, veiculo_id):
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
     if request.method == "POST":
@@ -622,11 +769,8 @@ def vender(request, veiculo_id):
                     if request.POST.get("custos", "").strip()
                     else None
                 ),
-                km=(
-                    int(request.POST["km"].replace(".", "").strip())
-                    if request.POST.get("km", "").strip()
-                    else None
-                ),
+                # "45.000" vira 45000; "12.5" é recusado (não vira 125)
+                km=_km_da_venda(request.POST.get("km", "")),
             )
             messages.success(
                 request,

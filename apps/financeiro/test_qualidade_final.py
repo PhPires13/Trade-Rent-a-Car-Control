@@ -692,7 +692,7 @@ def test_seletor_de_cliente_distingue_homonimos(usuario_logado, cliente, alocaca
     _aluguel(cliente, alocacao, valor="428.57")
     Cliente.objects.create(nome="Patrícia Souza", cpf_cnpj="999.888.777-66")
     html = usuario_logado.get(URL_RECEBER).content.decode()
-    assert "Patrícia — RTC3D06 — deve R$ 428,57" in html
+    assert "Patrícia — RTC3D06 — deve hoje R$ 428,57" in html
     assert 'label="Com valor em aberto"' in html and 'label="Demais clientes"' in html
     assert "Patrícia — RTC3D06" in usuario_logado.get("/financeiro/nd/nova/").content.decode()
 

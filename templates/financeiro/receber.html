@@ -4,7 +4,7 @@
 {% block titulo %}Receber — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
-<h1 class="mb-4 text-2xl font-bold">Financeiro</h1>
+<h1 class="mb-4 text-2xl font-bold">Financeiro — Receber</h1>
 {% include "financeiro/_abas.html" with aba="receber" %}
 
 {% if resumo %}
@@ -36,10 +36,13 @@
   </ul>
   <p class="mb-4 font-semibold">
     {% if resumo.devido > 0 %}
-      {% if cliente.status == "inadimplente" %}
-      <span class="text-red-700">⚠ {{ cliente.nome }} continua inadimplente: ainda deve {{ resumo.devido|brl }}.</span>
+      {# "deve hoje" é só o vencido (o mesmo número do "Quem deve"); o resto vence depois #}
+      {% if cliente.status == "inadimplente" and resumo.vencido > 0 %}
+      <span class="text-red-700">⚠ {{ cliente.nome }} continua inadimplente: deve hoje {{ resumo.vencido|brl }}{% if resumo.a_vencer > 0 %} (+ {{ resumo.a_vencer|brl }} a vencer){% endif %}.</span>
+      {% elif resumo.vencido > 0 %}
+      <span class="text-yellow-800">{{ cliente.nome }} deve hoje {{ resumo.vencido|brl }}{% if resumo.a_vencer > 0 %} (+ {{ resumo.a_vencer|brl }} a vencer){% endif %}.</span>
       {% else %}
-      <span class="text-yellow-800">{{ cliente.nome }} ainda tem {{ resumo.devido|brl }} em aberto (ainda não atrasado).</span>
+      <span class="text-yellow-800">{{ cliente.nome }} ainda tem {{ resumo.a_vencer|brl }} a vencer (ainda não atrasado).</span>
       {% endif %}
     {% else %}
       <span class="text-green-800">{{ cliente.nome }} está em dia ✓</span>
@@ -52,7 +55,7 @@
       💬 Enviar recibo no WhatsApp
     </a>
     {% else %}
-    <span class="text-xs text-gray-600">Sem telefone no cadastro de {{ cliente.nome }} — não dá para mandar o recibo pelo WhatsApp.</span>
+    <span class="text-xs text-gray-600">{% if cliente.telefone %}Telefone incompleto{% else %}Sem telefone{% endif %} no cadastro de {{ cliente.nome }} — não dá para mandar o recibo pelo WhatsApp.</span>
     {% endif %}
     {% if resumo.pode_desfazer %}
     <form method="post" action="{% url 'financeiro:desfazer_recebimento' resumo.recebimento.pk %}"
@@ -69,7 +72,14 @@
   <p class="mt-2 text-xs text-gray-600">Errou o cliente ou o valor? Dá para desfazer só hoje, no mesmo dia do lançamento.</p>
   {% endif %}
 </section>
-{% endif %}
+{# depois de lançar, só o cartão do recibo: o formulário pronto de novo convidava a lançar em dobro #}
+<div class="mb-6 flex flex-wrap gap-3 text-sm" data-depois-do-recibo>
+  {% if voltar.0 %}
+  <a href="{{ voltar.0 }}" class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 sm:py-2" data-voltar>← {{ voltar.1 }}</a>
+  {% endif %}
+  <a href="{% url 'financeiro:receber' %}" class="rounded border border-gray-300 bg-white px-4 py-3 font-semibold hover:bg-gray-50 sm:py-2">Lançar outro pagamento</a>
+</div>
+{% else %}
 
 <form method="get" class="mb-6 flex flex-wrap items-center gap-2 text-sm">
   <label for="cliente" class="font-medium">De qual cliente você recebeu?</label>
@@ -95,7 +105,8 @@
 {% if cliente %}
 <div class="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
   {# mesmo número do "Quem deve": vencido até hoje; o que vence depois aparece à parte #}
-  <span class="whitespace-nowrap">Vencido: <strong class="{% if vencido > 0 %}text-red-700{% endif %}">{{ vencido|brl }}</strong></span>
+  {# vence hoje ainda não é atraso: o rótulo e o vermelho só para o que venceu antes de hoje #}
+  <span class="whitespace-nowrap">{% if vencido > atrasado %}Para pagar até hoje{% else %}Vencido{% endif %}: <strong class="{% if atrasado > 0 %}text-red-700{% endif %}">{{ vencido|brl }}</strong></span>
   {% if a_vencer > 0 %}<span class="whitespace-nowrap">A vencer: <strong>{{ a_vencer|brl }}</strong></span>{% endif %}
   <span class="whitespace-nowrap">Crédito guardado: <strong>{{ credito|brl }}</strong></span>
   <a href="{% url 'financeiro:extrato_cliente' cliente.pk %}" class="underline">ver extrato</a>
@@ -108,9 +119,17 @@
       data-devido="{{ devido|stringformat:'.2f' }}"
       data-nome="{{ cliente.nome }}"
       data-cobrancas="{{ linhas|length }}"
-      data-mes-passado="{{ inicio_mes_passado|date:'Y-m-d' }}"
+      data-mes-passado="{{ inicio_do_mes|date:'Y-m-d' }}"
       x-data='{ valor: 0, aplicado: 0, destino: "credito", usandoCredito: false, usarJunto: false, enviando: false,
                 credito: 0, devido: 0, nome: "", temCobrancas: false, dataPag: "", inicioMesPassado: "",
+                casasErradas: false, acimaDaCobranca: "",
+                /* "1.000,0010000": mais de 2 casas depois da vírgula (o servidor também recusa) */
+                casasDemais(texto) {
+                  let t = String(texto || "").replace(/R\$|\s/g, "");
+                  if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+                  const m = t.match(/\.(\d+)$/);
+                  return !!m && /[1-9]/.test(m[1].slice(2));
+                },
                 br(texto) {
                   let t = String(texto || "").replace(/R\$|\s/g, "");
                   if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
@@ -128,7 +147,17 @@
                   if (el.dataset.encargoDe) return this.br(document.getElementById("encargo_" + el.dataset.encargoDe).value);
                   return parseFloat(el.dataset.saldo) || 0;
                 },
-                recalc() { this.aplicado = this.campos().reduce((s, el) => s + this.br(el.value), 0); },
+                recalc() {
+                  this.aplicado = this.campos().reduce((s, el) => s + this.br(el.value), 0);
+                  const valorEl = document.getElementById("valor");
+                  this.casasErradas = [valorEl, ...this.campos()].some((el) => el && this.casasDemais(el.value));
+                  /* valor numa cobrança acima do que falta dela: avisa já, sem esperar o envio */
+                  const acima = this.campos().find((el) => this.br(el.value) > this.saldoDe(el) + 0.005);
+                  this.acimaDaCobranca = acima
+                    ? "Em \u201c" + (acima.dataset.descricao || "uma cobrança") + "\u201d só faltam " + this.reais(this.saldoDe(acima)) +
+                      " — diminua esse valor. O que sobrar do pagamento pode virar crédito."
+                    : "";
+                },
                 distribuir() {
                   let resta = this.disponivel;
                   this.campos().forEach((el) => {
@@ -185,6 +214,10 @@
             class="w-full rounded border border-green-600 bg-green-50 px-4 py-3 font-semibold text-green-800 hover:bg-green-100 sm:w-auto sm:py-2">
       Usar o crédito de {{ credito|brl }} (sem dinheiro novo)
     </button>
+    {# "✓ Recebi" de uma cobrança abre com o valor como dinheiro novo: lembra do crédito antes #}
+    <p x-show="!usandoCredito && !usarJunto" class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-aviso-credito>
+      ⚠ {{ cliente.nome }} tem {{ credito|brl }} de crédito guardado — usar antes? Só lance como Pix/dinheiro o que entrou de verdade agora.
+    </p>
     <p x-show="usandoCredito" x-cloak class="rounded bg-green-50 px-3 py-2 text-sm text-green-900">
       Pagando com o crédito guardado de {{ cliente.nome }} — não entra dinheiro novo.
       <button type="button" x-on:click="pararCredito()" class="ml-1 underline">voltar para pagamento normal</button>
@@ -230,10 +263,16 @@
     {# só aparece quando sobra dinheiro, mas é sempre enviado #}
     <div x-show="!usandoCredito && disponivel > aplicado + 0.005" x-cloak>
       <label for="sobra_destino" class="mb-1 block text-sm font-medium" title="Quando o cliente paga mais do que foi colocado nas cobranças abaixo">O que sobrar vira</label>
+      {% if tem_caucao %}
       <select name="sobra_destino" id="sobra_destino" x-model="destino" class="w-full rounded border border-gray-300 px-2 py-2 sm:py-1">
         <option value="credito">Crédito do cliente</option>
-        {% if tem_caucao %}<option value="caucao" {% if post.sobra_destino == "caucao" %}selected{% endif %}>Reforço de caução</option>{% endif %}
+        <option value="caucao" {% if post.sobra_destino == "caucao" %}selected{% endif %}>Reforço de caução</option>
       </select>
+      {% else %}
+      {# uma opção só: texto fixo no lugar de um seletor sem escolha #}
+      <input type="hidden" name="sobra_destino" id="sobra_destino" value="credito">
+      <p class="py-2 text-sm sm:py-1">Crédito do cliente</p>
+      {% endif %}
     </div>
   </div>
 
@@ -300,7 +339,7 @@
           <input type="text" name="aplicar_{{ cobranca.pk }}" id="aplicar_{{ cobranca.pk }}" placeholder="0,00" value="{{ digitado }}"
                  inputmode="decimal" autocomplete="off"
                  {# ponto decimal fixo: o parseFloat da distribuição não entende vírgula #}
-                 data-saldo="{{ cobranca.saldo|stringformat:'.2f' }}"
+                 data-saldo="{{ cobranca.saldo|stringformat:'.2f' }}" data-descricao="{{ cobranca.descricao }}"
                  class="aplicacao w-full rounded border border-gray-300 px-2 py-2 text-base sm:w-28 sm:py-1 sm:text-sm"
                  x-on:input="recalc()">
           {% if cobranca.encargo_sugerido %}
@@ -308,7 +347,7 @@
             <label for="aplicar_encargo_{{ cobranca.pk }}" class="mb-1 block text-xs text-gray-500">Para o encargo (R$)</label>
             <input type="text" name="aplicar_encargo_{{ cobranca.pk }}" id="aplicar_encargo_{{ cobranca.pk }}" placeholder="0,00"
                    value="{{ cobranca.encargo_para_aplicar }}" inputmode="decimal" autocomplete="off"
-                   data-encargo-de="{{ cobranca.pk }}" x-bind:disabled="!incluir" {% if not cobranca.encargo_incluido %}disabled{% endif %}
+                   data-encargo-de="{{ cobranca.pk }}" data-descricao="encargo de {{ cobranca.descricao }}" x-bind:disabled="!incluir" {% if not cobranca.encargo_incluido %}disabled{% endif %}
                    class="aplicacao w-full rounded border border-gray-300 px-2 py-2 text-base sm:w-28 sm:py-1 sm:text-sm"
                    x-on:input="recalc()">
           </div>
@@ -337,6 +376,10 @@
     <span x-text="reais(disponivel - aplicado)"></span> vai ficar guardado como
     <span x-text="destino === 'caucao' ? 'reforço da caução de ' + nome : 'crédito de ' + nome"></span>.
   </p>
+  <p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700" x-show="casasErradas" x-cloak>
+    ⚠ Algum valor tem mais de 2 casas depois da vírgula — use só 2 casas (ex.: 1.250,00).
+  </p>
+  <p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700" x-show="acimaDaCobranca" x-cloak x-text="acimaDaCobranca"></p>
   <p class="mb-4 rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700" x-show="aplicado > disponivel + 0.005" x-cloak>
     ⚠ Você colocou nas cobranças mais do que o cliente pagou. Diminua os valores nas cobranças ou corrija o valor recebido.
   </p>
@@ -346,11 +389,12 @@
     <input type="text" name="observacoes" id="observacoes" placeholder="observações (opcional)" value="{{ post.observacoes|default:'' }}" maxlength="500"
            class="min-w-[12rem] rounded border border-gray-300 px-2 py-2 text-sm sm:order-2 sm:flex-1 sm:py-1">
     <button class="rounded bg-marca-amarelo px-4 py-3 font-bold text-marca-preto hover:brightness-95 sm:order-1 sm:py-2"
-            x-bind:disabled="enviando || aplicado > disponivel + 0.005 || creditoDemais"
-            x-bind:class="enviando || aplicado > disponivel + 0.005 || creditoDemais ? 'opacity-50 cursor-not-allowed' : ''">
+            x-bind:disabled="enviando || aplicado > disponivel + 0.005 || creditoDemais || casasErradas || acimaDaCobranca"
+            x-bind:class="enviando || aplicado > disponivel + 0.005 || creditoDemais || casasErradas || acimaDaCobranca ? 'opacity-50 cursor-not-allowed' : ''">
       <span x-text="enviando ? 'Lançando…' : 'Confirmar recebimento'">Confirmar recebimento</span>
     </button>
   </div>
 </form>
 {% endif %}
+{% endif %}{# fim do "sem recibo" #}
 {% endblock %}

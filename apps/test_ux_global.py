@@ -47,7 +47,7 @@ def test_barra_de_atalhos_no_celular(usuario_logado):
 
 def test_conteudo_nao_fica_atras_da_barra(usuario_logado):
     html = usuario_logado.get("/").content.decode()
-    main = re.search(r'<main class="([^"]*)"', html).group(1)
+    main = re.search(r'<main [^>]*class="([^"]*)"', html).group(1)
     assert "pb-28" in main and "xl:pb-6" in main
 
 

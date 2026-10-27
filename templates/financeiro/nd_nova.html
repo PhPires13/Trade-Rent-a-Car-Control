@@ -4,6 +4,7 @@
 
 {% block conteudo %}
 <h1 class="mb-4 text-2xl font-bold">Emitir nota de débito</h1>
+{% if voltar.0 %}<p class="mb-4"><a href="{{ voltar.0 }}" class="text-sm underline" data-voltar>← {{ voltar.1 }}</a> <span class="text-sm text-gray-500">(depois de emitir, você volta para lá)</span></p>{% endif %}
 <p class="mb-6 max-w-xl text-sm text-gray-500">
   Use para cobrar do cliente o que não é aluguel (multa, avaria, franquia, combustível…).
   O número da nota é gerado sozinho e a nota vira uma cobrança em aberto para o cliente.
@@ -15,7 +16,7 @@
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
       x-data='{ itens: JSON.parse(document.getElementById("nd-itens-iniciais").textContent), enviando: false,
                 dias: JSON.parse(document.getElementById("nd-dias-pagamento").textContent),
-                cliente: "{{ post.cliente|default:''|escapejs }}",
+                cliente: "{{ cliente_inicial|escapejs }}",
                 emissao: "{% if post.data_emissao %}{{ post.data_emissao|escapejs }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}",
                 venc: "{{ post.vencimento|default:''|escapejs }}",
                 manual: {% if post.vencimento %}true{% else %}false{% endif %},
@@ -55,6 +56,7 @@
       x-on:submit="if (temIncompleta) { $event.preventDefault(); return; } if (!confirm('Emitir a nota de débito de ' + reais(total) + (venc ? ', com vencimento em ' + ddmm(venc) : '') + '? Depois de emitida, o número fica usado.')) { $event.preventDefault(); } else { enviando = true; }">
   {% csrf_token %}
   <input type="hidden" name="token" value="{{ token }}">
+  {% if voltar.0 %}<input type="hidden" name="voltar" value="{{ voltar.0 }}">{% endif %}
   <div>
     <label for="nd-cliente" class="mb-1 block text-sm font-medium">Cliente</label>
     <select name="cliente" id="nd-cliente" required x-model="cliente" x-on:change="ajustar()">
@@ -62,7 +64,7 @@
       {% for grupo, opcoes in grupos_clientes %}
       <optgroup label="{{ grupo }}">
         {% for pk, rotulo in opcoes %}
-        <option value="{{ pk }}" {% if post.cliente == pk|stringformat:"s" %}selected{% endif %}>{{ rotulo }}</option>
+        <option value="{{ pk }}" {% if cliente_inicial == pk|stringformat:"s" %}selected{% endif %}>{{ rotulo }}</option>
         {% endfor %}
       </optgroup>
       {% endfor %}

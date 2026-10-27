@@ -284,7 +284,8 @@ def pendencias_do_veiculo(veiculo, hoje=None, na_oficina=_BUSCAR):
         adicionar(
             f"Na oficina desde {na_oficina.data_entrada:%d/%m/%Y}"
             + (f" ({na_oficina.oficina})" if na_oficina.oficina else ""),
-            f"{dias} dia{'s' if dias != 1 else ''} parado — quando o carro voltar, registre aqui",
+            ("entrou hoje" if dias == 0 else f"{dias} dia{'s' if dias != 1 else ''} parado")
+            + " — quando o carro voltar, registre aqui",
             f"{reverse('manutencao:voltou', args=[na_oficina.pk])}"
             f"?volta={quote(reverse('frota:detalhe', args=[veiculo.pk]))}",
             "Carro voltou da oficina",

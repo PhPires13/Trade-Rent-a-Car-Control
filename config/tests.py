@@ -185,8 +185,9 @@ def test_painel_nao_cresce_com_as_cobrancas(usuario_logado, django_assert_max_nu
     """
     _cobrancas_no_painel(10)
     # 20 + 1 dos aluguéis ainda a vencer na semana (D32, uma query só para a
-    # frota toda) + 1 dos pagamentos de IPVA nos alertas de vigência
-    with django_assert_max_num_queries(22):
+    # frota toda) + 1 dos pagamentos de IPVA nos alertas de vigência + 1 dos
+    # carros na oficina (card "Em manutenção")
+    with django_assert_max_num_queries(23):
         resposta = usuario_logado.get("/")
     contexto = resposta.context
     assert contexto["semana_total"] == Decimal("6500.00")

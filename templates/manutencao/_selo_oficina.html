@@ -2,4 +2,4 @@
 {% if m %}<a href="{% url 'manutencao:historico' m.veiculo_id %}"
    class="rounded bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-800"
    title="Entrou na oficina em {{ m.data_entrada|date:'d/m/Y' }}{% if m.oficina %} ({{ m.oficina }}){% endif %}">
-  Na oficina desde {{ m.data_entrada|date:"d/m" }} ({{ m.dias_parado }} dia{{ m.dias_parado|pluralize }})</a>{% endif %}
+  Na oficina desde {% if m.dias_parado == 0 %}hoje{% elif m.dias_parado == 1 %}ontem{% else %}{{ m.data_entrada|date:"d/m" }} ({{ m.dias_parado }} dias){% endif %}</a>{% endif %}

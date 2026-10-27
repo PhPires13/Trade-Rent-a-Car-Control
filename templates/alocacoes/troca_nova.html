@@ -37,7 +37,7 @@
   <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
     <p class="mb-1">{{ form.texto_km }}</p>
     <label class="flex min-h-11 items-center gap-2 font-semibold" for="{{ field.id_for_label }}">
-      <input type="checkbox" name="confirmar_km" id="{{ field.id_for_label }}" style="width:auto"{% if field.value %} checked{% endif %}>
+      <input type="checkbox" name="confirmar_km" id="{{ field.id_for_label }}" class="shrink-0"{% if field.value %} checked{% endif %}>
       {{ field.label }}
     </label>
   </div>

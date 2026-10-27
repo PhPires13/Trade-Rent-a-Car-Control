@@ -2,6 +2,8 @@ from django.core.validators import FileExtensionValidator
 from django.db import models
 from simple_history.models import HistoricalRecords
 
+from apps.campos import validar_tamanho_arquivo
+
 #: A CNH digital (app CDT) exporta em PDF; foto de celular vem em JPG/PNG/WebP.
 EXTENSOES_CNH = ["jpg", "jpeg", "png", "webp", "pdf"]
 
@@ -35,20 +37,21 @@ class Cliente(models.Model):
         null=True,
         blank=True,
         help_text="Aparece no card de clientes e na ficha",
+        validators=[validar_tamanho_arquivo],
     )
     cnh_frente = models.FileField(
         "CNH — frente (foto ou PDF)",
         upload_to="cnh/",
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(EXTENSOES_CNH)],
+        validators=[FileExtensionValidator(EXTENSOES_CNH), validar_tamanho_arquivo],
     )
     cnh_verso = models.FileField(
         "CNH — verso (foto ou PDF)",
         upload_to="cnh/",
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(EXTENSOES_CNH)],
+        validators=[FileExtensionValidator(EXTENSOES_CNH), validar_tamanho_arquivo],
     )
     cnh_numero = models.CharField("CNH — número", max_length=20, blank=True)
     cnh_categoria = models.CharField("CNH — categoria", max_length=5, blank=True)

@@ -1,0 +1,3 @@
+{# Quanto do investimento já voltou — uso: {% include "frota/_recuperado.html" with f=<FichaFinanceira> %} (fundo escuro: cor_prejuizo="text-red-300") #}
+{# resultado negativo não vira "-9%": a pessoa lê "ainda não voltou" e o tamanho do prejuízo #}
+{% if f.percentual_recuperado is None %}—{% elif f.prejuizo_operacional %}ainda não voltou <span class="block text-xs font-normal {{ cor_prejuizo|default:'text-red-700' }}">(prejuízo de {{ f.prejuizo_operacional|brl }})</span>{% else %}{% widthratio f.percentual_recuperado 1 100 %}%{% endif %}

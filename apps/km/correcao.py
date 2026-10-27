@@ -125,27 +125,69 @@ def _menor_que_o_km_atual(registro):
     """Aviso quando a leitura nova é menor que o KM que o carro já marcou em outro
     lançamento (manutenção, devolução, vistoria...). None se não for o caso.
 
-    Só para leitura nova e que seja a mais recente: num mês esquecido (há
-    leitura depois) o número menor é o esperado.
+    Só para a leitura mais recente: num mês esquecido (há leitura depois) o
+    número menor é o esperado. Na correção, o KM atual pode ser o da própria
+    leitura errada — compara com o maior KM dos outros lançamentos.
     """
     veiculo = registro.veiculo
-    if registro.pk is not None or registro.km >= veiculo.km_atual:
+    corrigindo = registro.pk is not None
+    km_base = km_atual_recalculado(veiculo, registro) if corrigindo else veiculo.km_atual
+    if registro.km >= km_base:
         return None
     if registro.registro_seguinte() is not None:
         return None
-    rotulo, data = origem_do_km(veiculo, veiculo.km_atual)
+    rotulo, data = origem_do_km(veiculo, km_base)
     if data is not None and data > registro.data_leitura:
         return None  # o lançamento com o KM maior é de depois desta leitura: normal
     if data is None:
+        if corrigindo:
+            return None  # só o cadastro: suspeita_do_km já compara com o KM de compra
         return (
             f"Você digitou {milhar(registro.km)} km, mas o cadastro do carro está com "
-            f"{milhar(veiculo.km_atual)} km (o número é menor). Confira o painel. Confirma?"
+            f"{milhar(km_base)} km (o número é menor). Confira o painel. Confirma?"
         )
     return (
         f"Você digitou {milhar(registro.km)} km, mas o carro já marcou "
-        f"{milhar(veiculo.km_atual)} km ({texto_da_origem(rotulo, data)}). "
+        f"{milhar(km_base)} km ({texto_da_origem(rotulo, data)}). "
         f"Confira o painel. Confirma?"
     )
+
+
+def _salto_da_primeira_leitura(registro, cadastro):
+    """1ª leitura com um zero a mais num carro de KM baixo (1.000 → 10.000)?
+
+    Desconfia de 10 vezes o cadastro ou mais (carro zero, com poucos km no
+    cadastro, fica de fora: nele qualquer número é muitas vezes o cadastro) e,
+    com a data de onde veio o KM base (entrega, compra...), da mesma régua de
+    LIMITE_KM_POR_DIA das outras leituras.
+    """
+    rodado = registro.km - cadastro
+    if rodado <= KM_MINIMO_PARA_COMPARAR_MEDIA:
+        return False
+    if cadastro >= KM_MINIMO_PARA_COMPARAR_MEDIA and registro.km >= 10 * cadastro:
+        return True
+    veiculo = registro.veiculo
+    _rotulo, data = origem_do_km(veiculo, cadastro)
+    if data is None:
+        data = veiculo.data_aquisicao
+    if data is None or data > registro.data_leitura:
+        return False
+    dias = (registro.data_leitura - data).days
+    return rodado > LIMITE_KM_POR_DIA * max(dias, 1)
+
+
+def _maior_km_conhecido(registro, anterior):
+    """ " e já marcou X km (manutenção de 16/10)" — o mesmo número da "Última" da
+    linha, quando outro lançamento passou da leitura mensal anterior."""
+    if registro.pk is not None:
+        return ""  # na correção o KM atual pode ser o da própria leitura errada
+    veiculo = registro.veiculo
+    if veiculo.km_atual <= anterior.km or veiculo.km_atual >= registro.km:
+        return ""
+    rotulo, data = origem_do_km(veiculo, veiculo.km_atual)
+    if data is None or data > registro.data_leitura:
+        return ""
+    return f" e já marcou {milhar(veiculo.km_atual)} km ({texto_da_origem(rotulo, data)})"
 
 
 def suspeita_do_km(registro):
@@ -175,7 +217,9 @@ def suspeita_do_km(registro):
                 f"{digitado}, mas o cadastro do carro está com {milhar(cadastro)} km "
                 f"(o número é menor). Confirma?"
             )
-        if registro.km - cadastro > SALTO_MAXIMO_SEM_LEITURA:
+        if registro.km - cadastro > SALTO_MAXIMO_SEM_LEITURA or _salto_da_primeira_leitura(
+            registro, cadastro
+        ):
             return (
                 f"{digitado}, mas o cadastro do carro está com {milhar(cadastro)} km — "
                 f"seriam {milhar(registro.km - cadastro)} km a mais. Confirma?"
@@ -187,7 +231,7 @@ def suspeita_do_km(registro):
     media = rodado / max(dias, 1)
     contexto = (
         f"{digitado} — o carro estava com {milhar(anterior.km)} km {_ha_quanto_tempo(dias)} "
-        f"(em {anterior.data_leitura:%d/%m/%Y})."
+        f"(em {anterior.data_leitura:%d/%m/%Y}){_maior_km_conhecido(registro, anterior)}."
     )
     if media > LIMITE_KM_POR_DIA:
         return (
@@ -211,8 +255,11 @@ def suspeita_do_km(registro):
 # --- Correção ----------------------------------------------------------------
 
 
-def km_atual_recalculado(veiculo):
-    """Maior odômetro conhecido do carro em todos os lançamentos do sistema."""
+def km_atual_recalculado(veiculo, sem_registro=None):
+    """Maior odômetro conhecido do carro em todos os lançamentos do sistema.
+
+    `sem_registro`: leitura mensal que fica de fora (a que está sendo corrigida).
+    """
     from apps.alocacoes.models import Alocacao, TrocaTemporaria, Vistoria
     from apps.manutencao.models import Manutencao
 
@@ -227,8 +274,11 @@ def km_atual_recalculado(veiculo):
         .aggregate(a=Max("km_retirada"), b=Max("km_devolucao"))
         .values()
     )
+    leituras = RegistroKm.objects.filter(veiculo=veiculo)
+    if sem_registro is not None:
+        leituras = leituras.exclude(pk=sem_registro.pk)
     for consulta in (
-        RegistroKm.objects.filter(veiculo=veiculo),
+        leituras,
         # D10: a vistoria diz o carro vistoriado (o substituto, durante a troca)
         Vistoria.objects.filter(veiculo=veiculo),
         Manutencao.objects.filter(veiculo=veiculo),

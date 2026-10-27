@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from uuid import uuid4
 
@@ -15,13 +16,13 @@ from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from apps.alocacoes.models import Alocacao
 from apps.alocacoes.services import cliente_vigente
 from apps.alocacoes.views import _avisar_acerto_das_semanas
-from apps.campos import OPCAO_VAZIA, CampoDinheiro, FormularioBR, ler_data
+from apps.campos import OPCAO_VAZIA, CampoDinheiro, FormularioBR, id_valido, ler_data
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
 from apps.frota.models import Veiculo, normalizar_placa
 
 from . import services
-from .models import AuxilioMotorista, Sinistro
+from .models import DIAS_CARENCIA_AUXILIO, AuxilioMotorista, Sinistro
 
 # input type="date" só entende AAAA-MM-DD; no formato pt-BR (01/07/2026) a data
 # some da tela ao editar um sinistro já salvo.
@@ -29,6 +30,11 @@ _DATA = {"type": "date"}
 
 #: franquia e auxílio são dinheiro pago/recebido: negativo viraria crédito falso
 SEM_NEGATIVO = MinValueValidator(0, message="O valor não pode ser negativo.")
+
+#: "BO", "B.O.", "BO nº", "BO:" digitados no começo do número do boletim
+_PREFIXO_BO = re.compile(
+    r"^\s*b\s*\.?\s*o(?![a-z])\.?[\s:\-–#]*(n[º°o]?\.?\s*[:\-]?\s*)?", re.IGNORECASE
+)
 
 
 class SinistroForm(FormularioBR, forms.ModelForm):
@@ -140,7 +146,9 @@ class SinistroForm(FormularioBR, forms.ModelForm):
             ("empresa", "Empresa"),
             ("cliente", "Cliente (motorista)"),
         ]
-        campos["boletim_ocorrencia"].help_text = "Se ainda não tem, preencha depois em Editar."
+        campos[
+            "boletim_ocorrencia"
+        ].help_text = "Só o número, sem escrever “BO”. Se ainda não tem, preencha depois em Editar."
         campos[
             "franquia_valor"
         ].help_text = "Zero quando entrou nas franquias grátis do plano. Pode preencher depois."
@@ -152,14 +160,49 @@ class SinistroForm(FormularioBR, forms.ModelForm):
             del campos["status"]
             del campos["observacoes"]
 
+    def clean_boletim_ocorrencia(self):
+        # a tela já mostra "BO" antes do número: "BO 123" digitado virava "BO BO 123"
+        return _PREFIXO_BO.sub("", self.cleaned_data.get("boletim_ocorrencia") or "").strip()
+
     def clean_data(self):
         dia = self.cleaned_data["data"]
         if dia and dia > timezone.localdate():
             raise ValidationError("A data do ocorrido não pode ser no futuro.")
+        recuperado = self.instance.pk and self.instance.data_recuperacao
+        if dia and recuperado and dia > recuperado:
+            # "roubado em 27/10, recuperado em 26/10"
+            raise ValidationError(
+                f"O carro foi recuperado em {recuperado:%d/%m/%Y}: o roubo não pode ser "
+                "depois disso."
+            )
         return dia
+
+    def clean_data_evento(self):
+        dia = self.cleaned_data.get("data_evento")
+        if dia and dia > timezone.localdate():
+            # a franquia ia para as despesas de um mês que ainda não chegou
+            raise ValidationError("A data não pode ser no futuro.")
+        return dia
+
+    def _conferir_auxilio(self, dados):
+        """Auxílio já pedido só existe com proteção acionada em colisão (decisão nº 10).
+
+        Desmarcar a proteção ou trocar o tipo deixava o pedido pendurado na lista.
+        """
+        if not self.instance.pk or not self.instance.auxilios.exists():
+            return
+        aviso = (
+            "Este sinistro já tem auxílio motorista registrado — ele só vale para colisão "
+            "com a proteção acionada. Se foi engano, fale com quem cuida do sistema."
+        )
+        if "acionou_protecao" in self.changed_data and not dados.get("acionou_protecao"):
+            self.add_error("acionou_protecao", aviso)
+        if "tipo" in self.changed_data and dados.get("tipo") != Sinistro.Tipo.COLISAO:
+            self.add_error("tipo", aviso)
 
     def clean(self):
         dados = super().clean()
+        self._conferir_auxilio(dados)
         if not dados.get("acionou_protecao"):
             # campos escondidos na tela não podem ficar com valor velho gravado —
             # nem barrar o salvar com um erro que a pessoa nem enxerga
@@ -276,7 +319,7 @@ def _data_digitada(request, minimo=None, rotulo_minimo=""):
     if dia > hoje:
         raise ValidationError("A data não pode ser no futuro.")
     if minimo and dia < minimo:
-        raise ValidationError(f"A data não pode ser antes de {rotulo_minimo} ({minimo:%d/%m/%Y}).")
+        raise ValidationError(f"A data não pode ser antes {rotulo_minimo} ({minimo:%d/%m/%Y}).")
     return dia
 
 
@@ -338,6 +381,13 @@ def _lembrar_franquia(request, sinistro):
             f"Franquia de {brl(sinistro.franquia_valor)} a cobrar de {sinistro.cliente.nome}: "
             "use o botão “Cobrar do cliente” na lista de sinistros.",
         )
+    elif sinistro.franquia_a_cobrar:
+        # sem motorista na data a franquia ficava esquecida, sem aviso nem botão
+        messages.warning(
+            request,
+            f"Franquia de {brl(sinistro.franquia_valor)} a cobrar, mas nenhum motorista estava "
+            "com o carro na data. Escolha o motorista no sinistro (Editar) para cobrar.",
+        )
 
 
 def _avisar_data_do_roubo(request, sinistro, data_antiga):
@@ -387,15 +437,15 @@ def _aplicar_roubo(request, sinistro):
         troca = resultado.troca
         texto += (
             f" {placa} era o carro substituto de {troca.alocacao.cliente.nome}: a troca foi "
-            f"encerrada em {troca.data_devolucao:%d/%m/%Y}. A locação dele continua com o "
-            f"{troca.alocacao.veiculo.placa} — se ele ficou sem carro, combine com ele e "
-            "ajuste em Alocações."
+            f"encerrada em {troca.data_devolucao:%d/%m/%Y}. A locação continua com o "
+            f"{troca.alocacao.veiculo.placa} — se o cliente ficou sem carro, combine com "
+            "ele e ajuste em Alocações."
         )
     if resultado.locacao_continua is not None:
         continua = resultado.locacao_continua
         texto += (
-            f" A locação de {continua.cliente.nome} continua, porque ele está com o carro "
-            f"substituto {continua.troca_ativa.veiculo_substituto.placa}."
+            f" A locação de {continua.cliente.nome} continua, porque o cliente está com o "
+            f"carro substituto {continua.troca_ativa.veiculo_substituto.placa}."
         )
     messages.warning(request, texto)
     if alocacao is not None:
@@ -503,7 +553,7 @@ def quem_estava(request):
     """Pedaço de tela (htmx): com quem o carro estava na data escolhida."""
     pk = request.GET.get("veiculo", "")
     # ?veiculo=abc (ou lixo vindo do navegador) dava erro 500 no filtro por pk
-    veiculo = Veiculo.objects.filter(pk=pk).first() if pk.isdigit() else None
+    veiculo = Veiculo.objects.filter(pk=pk).first() if id_valido(pk) else None
     try:
         dia = date.fromisoformat(request.GET.get("data", ""))
     except ValueError:
@@ -539,6 +589,17 @@ def _solicitar_auxilio(request, sinistro):
             request,
             "O auxílio motorista só é pago com a proteção acionada (evento aberto na "
             "Auto Truck). Marque isso no sinistro antes de pedir.",
+        )
+        return redirect(_volta(request))
+    if sinistro.dias_parado <= DIAS_CARENCIA_AUXILIO:
+        # decisão nº 10: só quando o conserto passa de 7 dias parado
+        parado = sinistro.dias_parado
+        messages.error(
+            request,
+            f"O auxílio motorista só pode ser pedido quando o carro passa de "
+            f"{DIAS_CARENCIA_AUXILIO} dias parado na oficina por este sinistro (agora: "
+            f"{parado} dia{'s' if parado != 1 else ''}). Registre a ida para a oficina, "
+            "se ainda não registrou.",
         )
         return redirect(_volta(request))
     try:
@@ -606,7 +667,7 @@ def carro_recuperado(request, sinistro_id):
     sinistro = get_object_or_404(Sinistro.objects.select_related("veiculo"), pk=sinistro_id)
     if request.method == "POST":
         try:
-            voltou_em = _data_digitada(request, sinistro.data, "a data do roubo")
+            voltou_em = _data_digitada(request, sinistro.data, "da data do roubo")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
             return redirect(_volta(request))

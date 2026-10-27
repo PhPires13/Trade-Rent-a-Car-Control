@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block titulo %}{% if editando %}Editar manutenção{% else %}Registrar manutenção{% endif %} — {{ veiculo.placa }}{% endblock %}
+{% block titulo %}{% if editando %}Editar manutenção{% else %}Registrar manutenção{% endif %} — {{ veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <div class="mb-1 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-2xl font-bold">{% if editando %}Editar manutenção{% else %}Registrar manutenção{% endif %} — {{ veiculo }}</h1>
+  <h1 class="text-2xl font-bold">{% if editando %}Editar manutenção{% else %}Registrar manutenção{% endif %} — {{ veiculo.placa }} <span class="font-normal text-gray-500">{{ veiculo.marca_modelo }}</span></h1>
   <a href="{% url 'manutencao:historico' veiculo.pk %}" class="py-1 text-sm underline">Ver histórico do carro</a>
 </div>
 <p class="mb-6 text-sm text-gray-500">
@@ -30,17 +30,15 @@
     {% include "manutencao/_campo.html" with field=form.item %}
     <div class="grid gap-4 sm:grid-cols-2">
       {% include "manutencao/_campo.html" with field=form.data %}
-      <div>
-        {% include "manutencao/_campo.html" with field=form.km %}
-        <p x-show="tipos[item] === 'preventiva'" x-cloak class="mt-1 text-xs font-medium text-yellow-800">Obrigatório para a contagem da próxima troca.</p>
-      </div>
+      {# "(opcional)" só quando vale: com item do plano o KM é obrigatório (ux.js não marca rótulo que já diz "opcional") #}
+      {% include "manutencao/_campo.html" with field=form.km opcional_quando="tipos[item] !== 'preventiva'" %}
     </div>
     {% if form.km_suspeito %}
     <label class="flex items-start gap-2 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-900" for="{{ form.confirmar_km.id_for_label }}">
       {{ form.confirmar_km }} {{ form.confirmar_km.label }}
     </label>
     {% endif %}
-    {% include "manutencao/_campo.html" with field=form.descricao %}
+    {% include "manutencao/_campo.html" with field=form.descricao opcional_quando="item" %}
   </fieldset>
 
   <fieldset class="space-y-4 border-t border-gray-100 pt-4">

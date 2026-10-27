@@ -19,7 +19,7 @@
 {% if data_sugerida %}
 <p class="mb-2 text-sm text-gray-500">
   Digite o número que aparece no painel (odômetro) de cada carro e toque em <strong>Registrar</strong>.
-  A linha fica verde e o cursor já vai para o próximo carro. O KM precisa ser igual ou maior que a última leitura.
+  A linha fica verde e o cursor já vai para o próximo carro. Número menor que a leitura do mês anterior não é aceito; menor que o KM de manutenção/devolução ou alto demais, o sistema pede para conferir.
   {% if fechamento %}A leitura feita hoje fecha {{ mes|date:"m/Y" }}.{% endif %}
 </p>
 {% else %}
@@ -99,7 +99,7 @@
         <td class="flex justify-between gap-3 py-0.5 sm:table-cell sm:px-3 sm:py-2"><span class="text-gray-500 sm:hidden">Dias</span>{{ registro.dias|default:"—" }}</td>
         <td class="flex flex-wrap justify-between gap-x-3 py-0.5 font-semibold sm:table-cell sm:px-3 sm:py-2">
           <span class="font-normal text-gray-500 sm:hidden">KM rodado</span>
-          <span>{{ registro.km_utilizado|milhar }}
+          <span>{% if registro.km_utilizado is None and registro.desde_entrega %}{{ registro.desde_entrega }}{% else %}{{ registro.km_utilizado|milhar }}{% endif %}
           {% if registro.cobranca_excedente and registro.cobranca_excedente.status != "cancelada" %}
             <span class="ml-1 rounded bg-yellow-100 px-1.5 py-0.5 text-xs font-normal text-yellow-800"
                   title="Rodou além da franquia contratada — {{ registro.cobranca_excedente.descricao }}">

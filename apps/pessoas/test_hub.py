@@ -85,7 +85,7 @@ def test_link_whatsapp_usa_somente_digitos(usuario_logado, cliente):
 
 
 def test_detalhe_mostra_alocacao_ativa_multas_e_condutores(usuario_logado, alocacao, cliente):
-    CondutorAutorizado.objects.create(nome="Maria Condutora", cpf="000.111.222-33", cliente=cliente)
+    CondutorAutorizado.objects.create(nome="Maria Condutora", cpf="000.111.222-85", cliente=cliente)
     resposta = usuario_logado.get(f"/clientes/{cliente.pk}/")
     assert resposta.status_code == 200
     conteudo = resposta.content.decode()
@@ -98,7 +98,7 @@ def test_detalhe_mostra_alocacao_ativa_multas_e_condutores(usuario_logado, aloca
 def test_criar_cliente_pela_tela(usuario_logado, db):
     dados = {
         "nome": "Novo Cliente",
-        "cpf_cnpj": "123.456.789-00",
+        "cpf_cnpj": "123.456.789-09",
         "telefone": "21999990000",
         "email": "",
         "endereco": "",
@@ -112,7 +112,7 @@ def test_criar_cliente_pela_tela(usuario_logado, db):
     }
     resposta = usuario_logado.post("/clientes/novo/", dados)
     assert resposta.status_code == 302
-    criado = Cliente.objects.get(cpf_cnpj="123.456.789-00")
+    criado = Cliente.objects.get(cpf_cnpj="123.456.789-09")
     assert resposta.url == f"/clientes/{criado.pk}/"
 
 
@@ -175,7 +175,7 @@ def test_inadimplente_nao_e_opcao_manual(usuario_logado, cliente):
 def test_adicionar_condutor_pelo_form_inline(usuario_logado, cliente):
     resposta = usuario_logado.post(
         f"/clientes/{cliente.pk}/condutores/novo/",
-        {"nome": "Maria Condutora", "cpf": "000.111.222-33", "contato": "21988880000"},
+        {"nome": "Maria Condutora", "cpf": "000.111.222-85", "contato": "21988880000"},
     )
     assert resposta.status_code == 302
     assert resposta.url == f"/clientes/{cliente.pk}/"
@@ -190,8 +190,8 @@ def test_editar_condutor_volta_para_o_cliente(usuario_logado, cliente):
         f"/clientes/condutores/{condutor.pk}/editar/",
         {
             "nome": "Maria Condutora",
-            "cpf": "000.111.222-33",
-            "cnh_numero": "987654321",
+            "cpf": "000.111.222-85",
+            "cnh_numero": "98765432100",
             "contato": "21988880000",
             "observacoes": "",
         },
@@ -200,4 +200,4 @@ def test_editar_condutor_volta_para_o_cliente(usuario_logado, cliente):
     assert resposta.url == f"/clientes/{cliente.pk}/"
     condutor.refresh_from_db()
     assert condutor.nome == "Maria Condutora"
-    assert condutor.cnh_numero == "987654321"
+    assert condutor.cnh_numero == "98765432100"

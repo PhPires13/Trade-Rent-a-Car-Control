@@ -76,7 +76,7 @@ def test_detalhe_do_carro_na_oficina_mostra_o_substituto(usuario_logado, veiculo
     conteudo = usuario_logado.get(f"/frota/veiculo/{veiculo.pk}/").content.decode()
     assert "Arlen" in conteudo
     assert "(substituto)" not in conteudo
-    assert "o motorista usa o substituto" in conteudo
+    assert "O motorista está com o substituto" in conteudo
     assert "RNB9J66" in conteudo
 
 

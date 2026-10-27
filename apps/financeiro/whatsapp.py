@@ -81,6 +81,12 @@ def o_que_e(cobranca):
         return _aluguel(cobranca) + (f" do carro {placa}" if placa else "")
     if cobranca.origem == Cobranca.Origem.NOTA_DEBITO:
         return "a " + _minuscula(descricao)
+    if cobranca.origem == Cobranca.Origem.REPASSE_SINISTRO and descricao.lower().startswith(
+        "franquia"
+    ):
+        # "Franquia do sinistro RTD4E07 de 15/10/2026" já diz o que é: sem
+        # "o repasse de sinistro (Franquia do sinistro …)" repetindo a ideia
+        return "a " + _minuscula(descricao)
     if cobranca.origem in _ROTULOS:
         rotulo, prefixo = _ROTULOS[cobranca.origem]
         detalhe = descricao
@@ -163,8 +169,12 @@ def link_cliente(cliente, cobrancas, hoje):
     return _link(cliente, mensagem_cliente(cliente, cobrancas, hoje))
 
 
-def mensagem_nd(nd, hoje):
-    """A nota de débito para o motorista: itens, total, vencimento e Pix."""
+def mensagem_nd(nd, hoje, credito=ZERO):
+    """A nota de débito para o motorista: itens, total, vencimento e Pix.
+
+    Com crédito guardado, a mensagem avisa: ele pode abater a ND (o motorista
+    não deve ser cobrado como se não tivesse nada com a gente).
+    """
     cobranca = getattr(nd, "cobranca", None)
     nome = _primeiro_nome(nd.cliente)
     itens = list(nd.itens.all())
@@ -177,13 +187,20 @@ def mensagem_nd(nd, hoje):
         ):
             total += f" (já recebemos {brl(cobranca.total_quitado)}; falta {brl(cobranca.saldo)})"
         total += f" — {_quando(cobranca, hoje)}"
-    linhas.append(f"{total}.{_fechamento()}")
+    if credito and credito > ZERO:
+        linhas.append(f"{total}.")
+        linhas.append(
+            f"Você tem {brl(credito)} de crédito guardado com a gente: "
+            f"podemos usar para abater este valor.{_fechamento()}"
+        )
+    else:
+        linhas.append(f"{total}.{_fechamento()}")
     return "\n".join(linhas)
 
 
-def link_nd(nd, hoje):
+def link_nd(nd, hoje, credito=ZERO):
     """Botão "Enviar ao motorista": só para ND com saldo no fluxo normal."""
     cobranca = getattr(nd, "cobranca", None)
     if cobranca is None or not _cobravel(cobranca):
         return ""
-    return _link(nd.cliente, mensagem_nd(nd, hoje))
+    return _link(nd.cliente, mensagem_nd(nd, hoje, credito))

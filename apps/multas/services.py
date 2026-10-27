@@ -10,6 +10,7 @@ from django.utils import timezone
 from apps.financeiro.models import Cobranca, ItemNotaDebito, NotaDebito
 from apps.financeiro.services import proximo_dia_pagamento
 from apps.formatos import brl
+from apps.pessoas.models import Cliente
 
 from .models import Multa
 
@@ -54,12 +55,23 @@ def registrar_nic(multa, data_infracao=None, valor=None):
     return nic
 
 
+def _travar_cliente(cliente):
+    """Trava a linha do cliente até o fim da transação (como registrar_recebimento):
+    o 2º pedido de ND do mesmo cliente espera o 1º gravar e então vê a multa na ND."""
+    Cliente.objects.select_for_update().filter(pk=cliente.pk).first()
+
+
 @transaction.atomic
 def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
     """Agrupa multas 'a cobrar' do cliente numa ND numerada (docs.md §4.3/4.7)."""
     multas = list(multas)
     if not multas:
         raise ValidationError("Selecione ao menos uma multa.")
+    _travar_cliente(cliente)
+    # relê do banco depois da trava: dois "Gerar ND" ao mesmo tempo (clique duplo)
+    # viam as duas a multa "A cobrar" e ela entrava em duas NDs
+    pks = [multa.pk for multa in multas]
+    multas = list(Multa.objects.select_related("veiculo").filter(pk__in=pks).order_by("pk"))
     for multa in multas:
         if multa.cliente_id != cliente.pk:
             raise ValidationError(f"{multa} não é do cliente {cliente.nome}.")
@@ -74,8 +86,13 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
     for multa in multas:
         ItemNotaDebito.objects.create(
             nota_debito=nd,
-            descricao=f"Multa {multa.codigo or ''} {multa.descricao} "
-            f"({multa.data_infracao:%d/%m/%Y})".strip(),
+            # só as partes que existem: multa sem código ficava "Multa  descrição"
+            descricao=" ".join(
+                parte.strip()
+                for parte in ("Multa", multa.codigo or "", multa.descricao or "")
+                if parte and parte.strip()
+            )
+            + f" ({multa.data_infracao:%d/%m/%Y})",
             valor=multa.valor,
             multa=multa,
         )
@@ -131,7 +148,11 @@ def _filtros_tarefa():
     """
     anulada = Q(resultado__in=Multa.RESULTADOS_ANULADORES)
     indicar = Q(fici_status=Multa.Fici.PENDENTE) & ~anulada
-    pagar = Q(pagamento=Multa.Pagamento.PENDENTE, valor__gt=0) & ~anulada
+    # sem valor ainda (a carta com o valor chega depois) também é tarefa: antes a
+    # multa sumia das tarefas e caía em "Concluídas" sem ter sido paga
+    pagar = (
+        Q(pagamento=Multa.Pagamento.PENDENTE) & (Q(valor__gt=0) | Q(valor__isnull=True)) & ~anulada
+    )
     paga_pelo_cliente = Q(pagamento=Multa.Pagamento.PAGO, pago_por__iexact=Multa.PAGO_POR_CLIENTE)
     devida_pelo_motorista = (
         Q(_tem_nd=False, valor__gt=0)

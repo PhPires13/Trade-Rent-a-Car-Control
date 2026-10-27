@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block titulo %}Editar alocação — {{ alocacao.veiculo.placa }}{% endblock %}
+{% block titulo %}Editar alocação — {{ alocacao.veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <h1 class="mb-1 text-2xl font-bold">Editar alocação</h1>
@@ -12,7 +12,7 @@
 </p>
 
 <form method="post" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow"
-      x-data="{ limite: '{{ form.limite_km.value|default:'ilimitado' }}' }">
+      x-data="{ limite: '{{ form.limite_km.value|default:'ilimitado'|escapejs }}' }">
   {% csrf_token %}
   {% include "_erros_form.html" %}
   {% for field in form %}

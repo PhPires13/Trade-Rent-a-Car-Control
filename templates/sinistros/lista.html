@@ -10,9 +10,9 @@
 </div>
 
 <form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-base sm:text-sm">
-  <label for="filtro-status-sinistro" class="sr-only">Status</label>
+  <label for="filtro-status-sinistro" class="sr-only">Situação</label>
   <select id="filtro-status-sinistro" name="status" onchange="this.form.submit()" class="rounded border border-gray-300 px-2 py-2 sm:py-1">
-    <option value="">Todos os status</option>
+    <option value="">Todas as situações</option>
     {% for valor, rotulo in statuses %}
     <option value="{{ valor }}" {% if filtro == valor %}selected{% endif %}>{{ rotulo }}</option>
     {% endfor %}
@@ -21,7 +21,7 @@
   <input id="filtro-placa-sinistro" type="search" name="veiculo" value="{{ filtro_veiculo }}" placeholder="placa"
          class="w-32 rounded border border-gray-300 px-2 py-2 sm:w-28 sm:py-1">
   <button class="rounded bg-marca-preto px-4 py-2 text-white sm:px-3 sm:py-1">Buscar</button>
-  {% if filtro or filtro_veiculo %}<a href="{% url 'sinistros:lista' %}" class="text-gray-500 underline">limpar filtros</a>{% endif %}
+  {% if filtro or filtro_veiculo %}<a href="{% url 'sinistros:lista' %}" class="alvo-toque text-gray-500 underline">limpar filtros</a>{% endif %}
 </form>
 
 <div class="space-y-4">
@@ -47,7 +47,7 @@
       </div>
     </div>
     <p class="mb-2 text-sm text-gray-600">{{ sinistro.descricao|default:"(sem descrição)" }}
-      {% if sinistro.boletim_ocorrencia %}<span class="text-xs text-gray-600">· BO {{ sinistro.boletim_ocorrencia }}</span>{% endif %}
+      {% if sinistro.boletim_numero %}<span class="text-xs text-gray-600">· BO {{ sinistro.boletim_numero }}</span>{% endif %}
     </p>
     <div class="flex flex-wrap items-center gap-3 text-sm">
       {% if sinistro.franquia_a_cobrar and sinistro.cliente %}
@@ -57,6 +57,18 @@
           <input type="hidden" name="volta" value="{{ aqui }}">
           <span class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-800">Franquia de {{ sinistro.franquia_valor|brl }} a cobrar de {{ sinistro.cliente.nome }}</span>
           <button class="rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:px-2 sm:py-0.5 sm:text-xs">Cobrar do cliente</button>
+        </form>
+      {% elif sinistro.franquia_a_cobrar %}
+        <a href="{% url 'sinistros:editar' sinistro.pk %}?volta={{ aqui|urlencode }}"
+           class="rounded bg-yellow-100 px-2 py-0.5 font-semibold text-yellow-800 underline">Franquia de {{ sinistro.franquia_valor|brl }} a cobrar: escolha o motorista no sinistro</a>
+      {% endif %}
+      {% if sinistro.tipo == "roubo" and not sinistro.data_recuperacao and sinistro.veiculo.status != "inativo" and sinistro.veiculo.status != "vendido" %}
+        <form method="post" action="{% url 'sinistros:aplicar_roubo' sinistro.pk %}" class="flex flex-wrap items-center gap-2"
+              onsubmit="return confirm('Encerrar o uso de {{ sinistro.veiculo.placa|escapejs }} em {{ sinistro.data|date:"d/m/Y" }} e deixar o carro Inativo?')">
+          {% csrf_token %}
+          <input type="hidden" name="volta" value="{{ aqui }}">
+          <span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700" title="A locação não foi encerrada e o carro não ficou Inativo">Roubo ainda não aplicado</span>
+          <button class="rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:px-2 sm:py-0.5 sm:text-xs">Aplicar o roubo</button>
         </form>
       {% endif %}
       {% if sinistro.tipo == "colisao" and sinistro.status != "concluido" and not sinistro.manutencoes.all %}
@@ -116,13 +128,13 @@
   <span>Mostrando {{ pagina.start_index }}–{{ pagina.end_index }} de {{ pagina.paginator.count }} sinistros</span>
   <span class="flex items-center gap-2">
     {% if pagina.has_previous %}
-      <a href="?{{ filtros }}&pagina=1" class="underline">« Primeira</a>
-      <a href="?{{ filtros }}&pagina={{ pagina.previous_page_number }}" class="underline">‹ Anterior</a>
+      <a href="?{{ filtros }}&pagina=1" class="alvo-toque underline">« Primeira</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.previous_page_number }}" class="alvo-toque underline">‹ Anterior</a>
     {% endif %}
     <span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
     {% if pagina.has_next %}
-      <a href="?{{ filtros }}&pagina={{ pagina.next_page_number }}" class="underline">Próxima ›</a>
-      <a href="?{{ filtros }}&pagina={{ pagina.paginator.num_pages }}" class="underline">Última »</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.next_page_number }}" class="alvo-toque underline">Próxima ›</a>
+      <a href="?{{ filtros }}&pagina={{ pagina.paginator.num_pages }}" class="alvo-toque underline">Última »</a>
     {% endif %}
   </span>
 </div>
