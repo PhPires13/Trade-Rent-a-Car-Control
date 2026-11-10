@@ -424,14 +424,13 @@ def marcar_atrasos(hoje=None):
     hoje = hoje or timezone.localdate()
     limite = hoje - timedelta(days=DIAS_PARA_INADIMPLENCIA)
     # o total pago vem anotado (uma consulta para todas); só a cobrança que muda
-    # de status é relida e gravada — um pagamento lançado enquanto a rotina roda
-    # não é desfeito por um saldo velho
+    # de status é relida — travada — e gravada
     abertas = Cobranca.com_quitacao_anotada(
         Cobranca.objects.filter(status__in=Cobranca.STATUS_EM_ABERTO)
     )
     for cobranca in abertas:
         if cobranca.novo_status(cobranca.total_quitado, hoje) != cobranca.status:
-            cobranca.atualizar_status(hoje)
+            _atualizar_status_travado(cobranca, hoje)
     devedores = set(
         Cobranca.objects.filter(_filtro_devedor(limite)).values_list("cliente_id", flat=True)
     )
@@ -441,6 +440,19 @@ def marcar_atrasos(hoje=None):
     Cliente.objects.filter(status=Cliente.Status.INADIMPLENTE).exclude(pk__in=devedores).update(
         status=Cliente.Status.ATIVO
     )
+
+
+@transaction.atomic
+def _atualizar_status_travado(cobranca, hoje):
+    """Relê a cobrança com a linha travada e recalcula o status.
+
+    A lista da rotina diária foi lida antes: um pagamento (ou cancelamento)
+    gravado noutra tela nesse meio tempo não pode ser desfeito por um status
+    velho. Trava o cliente antes da cobrança — a mesma ordem do Receber: com o
+    Receber ainda gravando, a rotina espera e depois lê o pagamento já salvo.
+    """
+    Cliente.objects.select_for_update().filter(pk=cobranca.cliente_id).first()
+    Cobranca.objects.select_for_update().get(pk=cobranca.pk).atualizar_status(hoje)
 
 
 def atualizar_inadimplencia(cliente, hoje=None):

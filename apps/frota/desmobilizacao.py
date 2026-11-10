@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.utils.text import capfirst
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
-from apps.financeiro.models import ZERO, AplicacaoRecebimento, MovimentacaoCaucao
+from apps.financeiro.models import ZERO, AplicacaoRecebimento, Cobranca, MovimentacaoCaucao
 from apps.formatos import brl, milhar
 from apps.manutencao.models import Manutencao
 from apps.multas.models import Multa
@@ -100,6 +100,8 @@ class FichaFinanceira:
     veiculo: Veiculo
     investido: Decimal = ZERO
     receita_aluguel: Decimal = ZERO
+    #: excedente de km, encargo por atraso e outras cobranças do contrato
+    receita_extras_locacao: Decimal = ZERO
     receita_repasses: Decimal = ZERO
     receita_auxilios: Decimal = ZERO
     despesa_manutencao: Decimal = ZERO
@@ -118,7 +120,12 @@ class FichaFinanceira:
 
     @property
     def receita_total(self):
-        return self.receita_aluguel + self.receita_repasses + self.receita_auxilios
+        return (
+            self.receita_aluguel
+            + self.receita_extras_locacao
+            + self.receita_repasses
+            + self.receita_auxilios
+        )
 
     @property
     def despesa_total(self):
@@ -244,15 +251,23 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         return fichas
     ids = [veiculo.pk for veiculo in veiculos]
 
-    aluguel = _somas(
-        AplicacaoRecebimento.objects.filter(cobranca__alocacao__veiculo_id__in=ids),
-        "cobranca__alocacao__veiculo",
-        "valor",
-    )
+    # cobranças do contrato: o aluguel semanal numa linha; excedente de km, encargo
+    # e outras do contrato em outra — uma query só, separada pela origem
+    aluguel, extras_locacao = {}, {}
+    for linha in (
+        AplicacaoRecebimento.objects.filter(cobranca__alocacao__veiculo_id__in=ids)
+        .values("cobranca__alocacao__veiculo", "cobranca__origem")
+        .annotate(total=Sum("valor"))
+    ):
+        destino = (
+            aluguel if linha["cobranca__origem"] == Cobranca.Origem.ALUGUEL else extras_locacao
+        )
+        chave = linha["cobranca__alocacao__veiculo"]
+        destino[chave] = destino.get(chave, ZERO) + (linha["total"] or ZERO)
     # Cobrança quitada por desconto de caução também é receita do carro (docs.md §4.3):
-    # a da locação soma no aluguel; repasse de manutenção e franquia (sem alocação)
-    # somam nos repasses — uma query só, separada pelo tipo de cobrança
-    descontos_aluguel, descontos_repasse = {}, {}
+    # a da locação soma no aluguel (ou nos extras do contrato); repasse de manutenção
+    # e franquia (sem alocação) somam nos repasses — uma query só, separada pelo tipo
+    descontos_aluguel, descontos_extras, descontos_repasse = {}, {}, {}
     for linha in (
         MovimentacaoCaucao.objects.filter(tipo=MovimentacaoCaucao.Tipo.DESCONTO)
         .filter(
@@ -270,10 +285,15 @@ def montar_fichas_em_lote(veiculos, hoje=None):
                 Q(cobranca__alocacao__isnull=False), output_field=BooleanField()
             ),
         )
-        .values("veiculo_do_desconto", "de_locacao")
+        .values("veiculo_do_desconto", "de_locacao", "cobranca__origem")
         .annotate(total=Sum("valor"))
     ):
-        destino = descontos_aluguel if linha["de_locacao"] else descontos_repasse
+        if not linha["de_locacao"]:
+            destino = descontos_repasse
+        elif linha["cobranca__origem"] == Cobranca.Origem.ALUGUEL:
+            destino = descontos_aluguel
+        else:
+            destino = descontos_extras
         chave = linha["veiculo_do_desconto"]
         destino[chave] = destino.get(chave, ZERO) + (linha["total"] or ZERO)
     # repasses de manutenção e a franquia do sinistro cobrada do cliente (D09) —
@@ -309,6 +329,9 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         veiculo = ficha.veiculo
         ficha.investido = (veiculo.valor_compra or ZERO) + (veiculo.custos_entrada or ZERO)
         ficha.receita_aluguel = aluguel.get(veiculo.pk, ZERO) + descontos_aluguel.get(
+            veiculo.pk, ZERO
+        )
+        ficha.receita_extras_locacao = extras_locacao.get(veiculo.pk, ZERO) + descontos_extras.get(
             veiculo.pk, ZERO
         )
         ficha.receita_repasses = repasses.get(veiculo.pk, ZERO) + descontos_repasse.get(

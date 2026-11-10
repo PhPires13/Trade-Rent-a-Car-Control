@@ -6,6 +6,7 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.frota.models import Veiculo
+from apps.multas.models import placa_ou_aviso
 from apps.pessoas.models import Cliente
 
 DIAS_CARENCIA_AUXILIO = 7  # decisão nº 10: auxílio quando conserto de colisão passa de 7 dias
@@ -110,7 +111,8 @@ class Sinistro(models.Model):
         ordering = ["-data"]
 
     def __str__(self):
-        return f"{self.veiculo.placa} — {self.get_tipo_display()} em {self.data:%d/%m/%Y}"
+        dia = f"{self.data:%d/%m/%Y}" if self.data else "sem data"
+        return f"{placa_ou_aviso(self)} — {self.get_tipo_display()} em {dia}"
 
     def save(self, *args, **kwargs):
         if self.cliente_id is None and self.veiculo_id and self.data:
@@ -209,4 +211,8 @@ class AuxilioMotorista(models.Model):
         ordering = ["-pk"]
 
     def __str__(self):
-        return f"Auxílio — {self.sinistro} ({self.get_status_display()})"
+        try:
+            sinistro = str(self.sinistro)
+        except Sinistro.DoesNotExist:
+            sinistro = "sinistro apagado"
+        return f"Auxílio — {sinistro} ({self.get_status_display()})"

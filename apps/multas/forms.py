@@ -475,6 +475,13 @@ class OrgaoForm(FormularioBR, forms.ModelForm):
             "endereco": forms.Textarea(attrs={"rows": 3}),
             "observacoes": forms.Textarea(attrs={"rows": 3}),
         }
+        error_messages = {
+            # a padrão do Django ("Órgão autuador com este Nome já existe.") não diz o que fazer
+            "nome": {
+                "unique": "Já existe um órgão com este nome. Procure-o na lista de órgãos "
+                "e use o cadastro que já existe (lá dá para editar).",
+            },
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

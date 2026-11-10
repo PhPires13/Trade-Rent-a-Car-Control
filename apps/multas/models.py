@@ -8,6 +8,18 @@ from apps.pessoas.models import Cliente, CondutorAutorizado
 from .fields import CampoCriptografado
 
 
+def placa_ou_aviso(registro):
+    """Placa do carro do registro — sem derrubar a tela quando o carro não existe mais.
+
+    O histórico (e o /admin) monta multas e sinistros antigos cujo carro pode ter
+    sido apagado depois; sem isso o __str__ dava erro 500.
+    """
+    try:
+        return registro.veiculo.placa
+    except Veiculo.DoesNotExist:
+        return "carro apagado"
+
+
 class OrgaoAutuador(models.Model):
     """Órgão de trânsito com portal, credenciais e procedimento (docs.md §4.1)."""
 
@@ -188,7 +200,8 @@ class Multa(models.Model):
 
     def __str__(self):
         rotulo = self.descricao or self.codigo
-        return f"{self.veiculo.placa} — {rotulo} em {self.data_infracao:%d/%m/%Y}"
+        dia = f"{self.data_infracao:%d/%m/%Y}" if self.data_infracao else "sem data"
+        return f"{placa_ou_aviso(self)} — {rotulo} em {dia}"
 
     def save(self, *args, **kwargs):
         if (

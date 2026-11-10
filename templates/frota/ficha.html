@@ -52,6 +52,9 @@
     <table class="w-full text-sm">
       <tbody class="divide-y divide-gray-100">
         <tr><td class="py-1.5">Aluguéis recebidos</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_aluguel|brl }}</td></tr>
+        {% if f.receita_extras_locacao %}
+        <tr><td class="py-1.5">Excedente de km, encargos e outras cobranças do contrato</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_extras_locacao|brl }}</td></tr>
+        {% endif %}
         <tr><td class="py-1.5">Consertos e franquias cobrados dos clientes</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_repasses|brl }}</td></tr>
         <tr><td class="py-1.5">Auxílio motorista recebido</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_auxilios|brl }}</td></tr>
         <tr><td class="py-1.5">Manutenções (custo real)</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_manutencao|brl }}</td></tr>

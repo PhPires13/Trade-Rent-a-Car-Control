@@ -1,6 +1,8 @@
 from django.contrib import admin
 from simple_history.admin import SimpleHistoryAdmin
 
+from apps.formatos import brl
+
 from .forms import OrgaoForm
 from .models import Multa, OrgaoAutuador
 
@@ -21,7 +23,7 @@ class MultaAdmin(SimpleHistoryAdmin):
         "cliente",
         "data_infracao",
         "descricao",
-        "valor",
+        "valor_rs",
         "resultado",
         "fici_status",
         "pagamento",
@@ -29,3 +31,7 @@ class MultaAdmin(SimpleHistoryAdmin):
     list_filter = ["resultado", "fici_status", "pagamento", "orgao"]
     list_select_related = ["veiculo", "cliente", "orgao"]
     search_fields = ["veiculo__placa", "cliente__nome", "ait", "codigo"]
+
+    @admin.display(description="valor", ordering="valor")
+    def valor_rs(self, obj):
+        return brl(obj.valor)

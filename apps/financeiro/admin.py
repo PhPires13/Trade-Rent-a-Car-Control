@@ -2,6 +2,8 @@ from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from simple_history.admin import SimpleHistoryAdmin
 
+from apps.formatos import brl
+
 from .models import (
     AplicacaoRecebimento,
     Caucao,
@@ -16,6 +18,16 @@ from .models import (
 # Decisão D11: valores e status financeiros são só leitura no Admin. Mudar ali
 # não refazia a conta (cobrança "Paga" faltando dinheiro, ou dívida que não
 # existe). Para corrigir: cancelar/desfazer e lançar de novo pelas telas normais.
+
+
+def coluna_em_reais(campo, titulo, ordenar_por=None):
+    """Coluna da lista do Admin com o valor em R$ ("R$ 1.234,50", não "1234.50")."""
+
+    @admin.display(description=titulo, ordering=ordenar_por)
+    def coluna(self, obj):
+        return brl(getattr(obj, campo))
+
+    return coluna
 
 
 class SoLeituraNaEdicao:
@@ -101,7 +113,8 @@ class CobrancaAdmin(SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, 
     tela_certa = "Financeiro → Emitir ND (ou o aluguel, que é gerado sozinho)"
     ordering = ["-vencimento"]
     date_hierarchy = "vencimento"
-    list_display = ["descricao", "cliente", "origem", "valor", "vencimento", "status"]
+    list_display = ["descricao", "cliente", "origem", "valor_rs", "vencimento", "status"]
+    valor_rs = coluna_em_reais("valor", "valor", "valor")
     list_filter = ["status", "origem"]
     search_fields = ["descricao", "cliente__nome"]
     list_select_related = ["cliente"]
@@ -120,7 +133,8 @@ class RecebimentoAdmin(
 ):
     tela_certa = "Financeiro → Receber"
     ordering = ["-data"]
-    list_display = ["cliente", "data", "valor", "forma"]
+    list_display = ["cliente", "data", "valor_rs", "forma"]
+    valor_rs = coluna_em_reais("valor", "valor", "valor")
     list_select_related = ["cliente"]
     list_filter = ["forma"]
     inlines = [AplicacaoInline]
@@ -139,7 +153,8 @@ class NotaDebitoAdmin(
 ):
     tela_certa = "Financeiro → Emitir ND"
     ordering = ["-data_emissao"]
-    list_display = ["numero", "cliente", "data_emissao", "total"]
+    list_display = ["numero", "cliente", "data_emissao", "total_rs"]
+    total_rs = coluna_em_reais("total", "total")
     list_select_related = ["cliente"]
 
     def get_queryset(self, request):
@@ -167,21 +182,10 @@ class CaucaoAdmin(SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, Si
         # recebido/descontado/devolvido anotados em lote (antes: ~12 consultas por linha)
         return Caucao.com_saldos_anotados(super().get_queryset(request))
 
-    @admin.display(description="recebido")
-    def recebido(self, obj):
-        return obj.recebido
-
-    @admin.display(description="descontado")
-    def descontado(self, obj):
-        return obj.descontado
-
-    @admin.display(description="devolvido")
-    def devolvido(self, obj):
-        return obj.devolvido
-
-    @admin.display(description="saldo")
-    def saldo(self, obj):
-        return obj.saldo
+    recebido = coluna_em_reais("recebido", "recebido", "_recebido_anotado")
+    descontado = coluna_em_reais("descontado", "descontado", "_descontado_anotado")
+    devolvido = coluna_em_reais("devolvido", "devolvido", "_devolvido_anotado")
+    saldo = coluna_em_reais("saldo", "saldo")
 
 
 @admin.register(MovimentoCredito)
@@ -189,7 +193,8 @@ class MovimentoCreditoAdmin(
     SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin
 ):
     tela_certa = "Financeiro → Receber (a sobra do pagamento vira crédito)"
-    list_display = ["cliente", "tipo", "valor", "data"]
+    list_display = ["cliente", "tipo", "valor_rs", "data"]
+    valor_rs = coluna_em_reais("valor", "valor", "valor")
     list_select_related = ["cliente"]
     list_filter = ["tipo"]
     campos_financeiros = ("cliente", "tipo", "valor")

@@ -48,11 +48,16 @@ COBRANCAS_POR_PAGINA = 50
 #: atraso (decisão nº 13, "ajustável caso a caso") e cobranças avulsas.
 #: A ND entra pela decisão D05: multa anulada no recurso → cancela-se a ND
 #: inteira (sem pagamento nem judicial) e emite-se outra sem ela.
+#: O conserto cobrado do cliente também: a manutenção manda "cancelar a
+#: cobrança no Financeiro" antes de apagar e não tem botão próprio para isso.
+#: A franquia de sinistro NÃO: ela se cancela no sinistro (o botão de lá
+#: libera o sinistro para corrigir e cobrar de novo).
 ORIGENS_CANCELAVEIS = [
     Cobranca.Origem.EXCEDENTE_KM,
     Cobranca.Origem.ENCARGO,
     Cobranca.Origem.OUTRO,
     Cobranca.Origem.NOTA_DEBITO,
+    Cobranca.Origem.REPASSE_MANUTENCAO,
 ]
 
 CENTAVO = Decimal("0.01")
@@ -387,10 +392,18 @@ def cancelar(request, cobranca_id):
 
 def _cancelar(request, cobranca):
     """As conferências e o cancelamento em si (a cobrança já vem travada)."""
-    if cobranca.origem not in ORIGENS_CANCELAVEIS:
+    if cobranca.origem == Cobranca.Origem.REPASSE_SINISTRO:
         _erro_no_painel(
             request,
-            "Só cobranças de excedente, encargo, nota de débito ou avulsas podem ser canceladas.",
+            "A franquia de sinistro se cancela no próprio sinistro: abra o sinistro "
+            "(menu Sinistros) e use “Cancelar esta cobrança”. Assim o sinistro fica "
+            "livre para corrigir e cobrar de novo.",
+        )
+    elif cobranca.origem not in ORIGENS_CANCELAVEIS:
+        _erro_no_painel(
+            request,
+            "Só cobranças de excedente, encargo, nota de débito, conserto ou avulsas "
+            "podem ser canceladas.",
         )
     elif cobranca.status == Cobranca.Status.JUDICIAL:
         _erro_no_painel(request, "Cobrança em cobrança judicial não pode ser cancelada.")
@@ -406,6 +419,12 @@ def _cancelar(request, cobranca):
         # era a única dívida atrasada: o cliente volta a Ativo na hora, sem esperar a rotina
         services.atualizar_inadimplencia(cobranca.cliente)
         messages.success(request, f"Cancelada (não será cobrada): {cobranca.descricao}.")
+        if cobranca.origem == Cobranca.Origem.REPASSE_MANUTENCAO:
+            messages.info(
+                request,
+                "A manutenção continua no histórico do carro. Para cobrar outro valor, "
+                "apague a manutenção lá e lance de novo.",
+            )
 
 
 @transaction.atomic
