@@ -84,7 +84,29 @@
 
 {% if fichas_vendidos %}
 <h2 class="mb-3 mt-10 text-xl font-bold">Carros já vendidos — lucro ou prejuízo final</h2>
-<div class="overflow-x-auto rounded-lg bg-white shadow">
+{# celular: um cartão por carro, com o resultado final à vista (a tabela não cabia) #}
+<ul class="space-y-3 md:hidden" aria-label="Carros já vendidos">
+  {% for f in fichas_vendidos %}
+  <li class="rounded-lg bg-white p-4 text-sm shadow">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <a href="{% url 'frota:ficha' f.veiculo.pk %}" class="font-bold underline decoration-marca-amarelo decoration-2">{{ f.veiculo.placa }}</a>
+        <span class="text-gray-600">{{ f.veiculo.marca_modelo }}</span>
+        <p class="text-gray-500">vendido em {{ f.veiculo.data_venda|date:"d/m/Y"|default:"—" }}</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="text-xs text-gray-500">Resultado final</div>
+        <div class="whitespace-nowrap text-lg font-black {% if f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">{{ f.resultado_final|brl }}</div>
+      </div>
+    </div>
+    <p class="mt-2 text-gray-600">
+      <span class="whitespace-nowrap">Venda {{ f.veiculo.valor_venda|brl }}</span> ·
+      <span class="whitespace-nowrap">investido {{ f.investido|brl }}</span>
+    </p>
+  </li>
+  {% endfor %}
+</ul>
+<div class="hidden overflow-x-auto rounded-lg bg-white shadow md:block">
   <table class="w-full text-sm">
     <thead class="bg-marca-preto text-left text-white">
       <tr>

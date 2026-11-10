@@ -5,6 +5,8 @@ tratamento de credenciais: um form próprio no admin já devolveu a senha do
 órgão em claro no HTML (revisão de segurança).
 """
 
+import string
+
 from django import forms
 from django.db.models import Q
 from django.utils import timezone
@@ -157,26 +159,22 @@ class MultaForm(FormularioBR, forms.ModelForm):
         if not ait or "ait" in self._errors or not self._novo_ou_mudou("ait", "orgao", "veiculo"):
             return
         orgao, veiculo = dados.get("orgao"), dados.get("veiculo")
+        # o banco já devolve só as candidatas: o AIT igual (maiúscula ou não) ou um AIT
+        # gravado com outro caractere (hífen, espaço, acento — de antes da normalização
+        # ou do /admin), que só o Python sabe normalizar igual à busca
+        filtro = Q(ait__iexact=ait) | Q(ait__regex=f"[^{string.digits}{string.ascii_letters}]")
+        if orgao is not None:
+            mesma_multa = Q(orgao__isnull=True) | Q(orgao=orgao)
+            if veiculo is not None:
+                mesma_multa |= Q(veiculo=veiculo)
+            filtro &= mesma_multa
         candidatas = (
-            Multa.objects.exclude(ait="")
+            Multa.objects.filter(filtro)
             .exclude(pk=self.instance.pk)
             .select_related("veiculo")
             .order_by("pk")
         )
-        repetida = next(
-            (
-                multa
-                for multa in candidatas
-                if normalizar_ait(multa.ait) == ait
-                and (
-                    orgao is None
-                    or multa.orgao_id is None
-                    or multa.orgao_id == orgao.pk
-                    or (veiculo is not None and multa.veiculo_id == veiculo.pk)
-                )
-            ),
-            None,
-        )
+        repetida = next((multa for multa in candidatas if normalizar_ait(multa.ait) == ait), None)
         if repetida is not None:
             self.add_error(
                 "ait",

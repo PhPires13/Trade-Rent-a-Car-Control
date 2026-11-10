@@ -105,3 +105,107 @@ def test_tela_da_ficha_mostra_a_linha_do_excedente_so_quando_ha(usuario_logado, 
     assert "Excedente de km, encargos e outras cobranças do contrato" in html
     assert "+ R$ 65,00" in html
     assert "+ R$ 650,00" in html
+
+
+# --- (2) /frota/desmobilizacao/: vendidos em cartões no celular -------------------------
+
+
+def test_vendidos_viram_cartoes_no_celular_com_o_resultado_a_vista(usuario_logado):
+    Veiculo.objects.create(
+        placa="VND8C18",
+        marca_modelo="HB20",
+        data_aquisicao=HOJE - timedelta(days=400),
+        valor_compra=Decimal("40000.00"),
+        status=Veiculo.Status.VENDIDO,
+        data_venda=HOJE - timedelta(days=5),
+        valor_venda=Decimal("45000.00"),
+    )
+    html = usuario_logado.get(reverse("frota:ranking")).content.decode()
+    # o cartão (só no celular) mostra o resultado; a tabela só aparece da tela média em diante
+    assert '<ul class="space-y-3 md:hidden" aria-label="Carros já vendidos">' in html
+    assert '<div class="hidden overflow-x-auto rounded-lg bg-white shadow md:block">' in html
+    cartao = html.split('aria-label="Carros já vendidos">')[1].split("</ul>")[0]
+    assert "VND8C18" in cartao
+    assert "Resultado final" in cartao
+    assert "R$ 5.000,00" in cartao  # 45.000 − 40.000
+    assert "investido R$ 40.000,00" in cartao
+
+
+# --- (3) Atalho "Dar carro substituto" no detalhe do carro ------------------------------
+
+
+def _na_oficina(carro):
+    from apps.manutencao.models import Manutencao
+
+    return Manutencao.objects.create(
+        veiculo=carro,
+        tipo=Manutencao.Tipo.ESPORADICA,
+        data=HOJE - timedelta(days=2),
+        data_entrada=HOJE - timedelta(days=2),
+        descricao="Motor",
+    )
+
+
+def test_detalhe_mostra_dar_carro_substituto_com_carro_alocado_na_oficina(
+    usuario_logado, alocacao, carro
+):
+    url = reverse("frota:detalhe", args=[carro.pk])
+    assert "Dar carro substituto" not in usuario_logado.get(url).content.decode()
+    _na_oficina(carro)
+    html = usuario_logado.get(url).content.decode()
+    assert "Dar carro substituto" in html
+    link = reverse("alocacoes:troca_nova", args=[alocacao.pk])
+    assert (
+        f"{link}?motivo=Manuten%C3%A7%C3%A3o%20do%20carro%20principal&amp;voltar="
+        f"/frota/veiculo/{carro.pk}/" in html
+    )
+
+
+def test_detalhe_sem_atalho_quando_nao_ha_alocacao_ou_ja_tem_substituto(
+    usuario_logado, alocacao, carro
+):
+    from apps.alocacoes.models import TrocaTemporaria
+
+    _na_oficina(carro)
+    reserva = Veiculo.objects.create(placa="RES8C18", marca_modelo="Gol", km_atual=1000)
+    TrocaTemporaria.objects.create(
+        alocacao=alocacao,
+        veiculo_substituto=reserva,
+        data_retirada=HOJE - timedelta(days=1),
+        km_retirada=1000,
+    )
+    url = reverse("frota:detalhe", args=[carro.pk])
+    assert "Dar carro substituto" not in usuario_logado.get(url).content.decode()
+    # carro sem contrato, só na oficina: não há a quem dar substituto
+    sozinho = Veiculo.objects.create(placa="SOL8C18", marca_modelo="Gol")
+    _na_oficina(sozinho)
+    html = usuario_logado.get(reverse("frota:detalhe", args=[sozinho.pk])).content.decode()
+    assert "Dar carro substituto" not in html
+
+
+# --- (4) Retaguarda: KM e R$ formatados nas listas --------------------------------------
+
+
+def test_retaguarda_formata_km_e_reais_nas_listas(admin_client, carro):
+    from apps.frota.models import Categoria, PagamentoIpva
+
+    carro.km_atual = 48_900
+    carro.mensalidade_protecao = Decimal("1234.50")
+    carro.save()
+    PagamentoIpva.objects.create(veiculo=carro, ano=HOJE.year, valor=Decimal("1890.75"))
+    Categoria.objects.create(nome="Hatch 8C", valor_semanal_referencia=Decimal("1650.00"))
+
+    html = admin_client.get("/admin/frota/veiculo/").content.decode()
+    assert "48.900" in html and "R$ 1.234,50" in html
+    assert "R$ 1.890,75" in admin_client.get("/admin/frota/pagamentoipva/").content.decode()
+    assert "R$ 1.650,00" in admin_client.get("/admin/frota/categoria/").content.decode()
+    # a coluna continua ordenável pelo campo do banco
+    assert admin_client.get("/admin/frota/veiculo/?o=7").status_code == 200
+
+
+# --- (5) Ranking: <summary> com alvo de toque de 44px -----------------------------------
+
+
+def test_summary_do_ranking_tem_alvo_de_toque_de_44px(usuario_logado):
+    html = usuario_logado.get(reverse("frota:ranking")).content.decode()
+    assert '<summary class="-my-3 cursor-pointer py-3 font-semibold">' in html

@@ -12,7 +12,9 @@ from django.db import transaction
 from django.db.models import Max
 
 from apps.financeiro.models import ZERO, Cobranca
+from apps.financeiro.services import atualizar_inadimplencia
 from apps.formatos import brl, milhar
+from apps.pessoas.models import Cliente
 
 from .excedente import gerar_cobrancas_excedente
 from .models import RegistroKm
@@ -378,10 +380,26 @@ def _cobranca_intocavel(cobranca):
     return cobranca.status == Cobranca.Status.JUDICIAL or cobranca.total_quitado > ZERO
 
 
+def _travada(cobranca):
+    """A cobrança relida com a linha travada (dentro de uma transação).
+
+    A leitura de KM foi carregada antes: um pagamento ou "judicial" gravado
+    noutra tela nesse meio tempo precisa ser visto antes de cancelar. Trava o
+    cliente antes da cobrança — a mesma ordem do Receber e do painel de
+    cobranças (em ordem trocada, duas telas ao mesmo tempo se esperariam).
+    """
+    Cliente.objects.select_for_update().filter(pk=cobranca.cliente_id).first()
+    return Cobranca.objects.select_for_update().select_related("cliente").get(pk=cobranca.pk)
+
+
 def _cancelar(cobranca, motivo):
+    """Cancela (a cobrança já vem travada) e recalcula a inadimplência na hora:
+    se o excedente era a única dívida atrasada, o cliente volta a Ativo sem
+    esperar a rotina do dia seguinte (como o cancelar do Financeiro)."""
     cobranca.status = Cobranca.Status.CANCELADA
     cobranca.observacoes = f"{cobranca.observacoes}\n{motivo}".strip()
     cobranca.save(update_fields=["status", "observacoes"])
+    atualizar_inadimplencia(cobranca.cliente)
 
 
 def _desfazer_acertos(registro, rotulo):
@@ -389,8 +407,8 @@ def _desfazer_acertos(registro, rotulo):
     para serem refeitos. Devolve (avisos, {alocacao_id: cobrança cancelada}, pks
     de alocação que ficam como estão)."""
     avisos, cancelados, mantidos = [], {}, set()
-    for acerto in registro.acertos_excedente.select_related("cobranca__cliente"):
-        cobranca = acerto.cobranca
+    for acerto in registro.acertos_excedente.select_related("cobranca"):
+        cobranca = _travada(acerto.cobranca)
         mantidos.add(acerto.alocacao_id)
         if cobranca.status == Cobranca.Status.CANCELADA:
             continue  # o dono decidiu não cobrar
@@ -437,6 +455,7 @@ def _avisos_dos_acertos(registro, rotulo, cancelados, mantidos):
     return avisos
 
 
+@transaction.atomic
 def refazer_excedente(registro):
     """Recalcula a cobrança de excedente da leitura depois de uma correção.
 
@@ -456,6 +475,8 @@ def refazer_excedente(registro):
 
 def _refazer_principal(registro, rotulo):
     cobranca = registro.cobranca_excedente
+    if cobranca is not None:
+        cobranca = _travada(cobranca)
     if cobranca is not None and cobranca.status == Cobranca.Status.CANCELADA:
         gerar_cobrancas_excedente(registro)  # refaz só os acertos
         return None
@@ -522,29 +543,33 @@ _ajustar_km_atual = ajustar_km_atual
 
 def apagar_leitura(registro):
     """Apaga a leitura, reapoia o mês seguinte e refaz excedente e KM atual."""
-    cobranca = registro.cobranca_excedente
-    acertos = [
-        acerto.cobranca
-        for acerto in registro.acertos_excedente.select_related("cobranca")
-        if acerto.cobranca.status != Cobranca.Status.CANCELADA
-    ]
-    if any(_cobranca_intocavel(acerto) for acerto in acertos):
-        raise ValidationError(
-            "Esta leitura gerou cobrança de excedente que já tem pagamento (ou está em "
-            "cobrança judicial) — não dá para apagar. Corrija o número em vez de apagar."
-        )
-    if (
-        cobranca is not None
-        and cobranca.status != Cobranca.Status.CANCELADA
-        and _cobranca_intocavel(cobranca)
-    ):
-        raise ValidationError(
-            f"Esta leitura gerou cobrança de excedente de {brl(cobranca.valor)} que já tem "
-            f"pagamento (ou está em cobrança judicial) — não dá para apagar. Corrija o número "
-            f"em vez de apagar."
-        )
     avisos = []
     with transaction.atomic():
+        # relidas com a linha travada: um pagamento lançado noutra tela agora há
+        # pouco também impede apagar
+        cobranca = registro.cobranca_excedente
+        if cobranca is not None:
+            cobranca = _travada(cobranca)
+        acertos = [
+            _travada(acerto.cobranca)
+            for acerto in registro.acertos_excedente.select_related("cobranca")
+        ]
+        acertos = [acerto for acerto in acertos if acerto.status != Cobranca.Status.CANCELADA]
+        if any(_cobranca_intocavel(acerto) for acerto in acertos):
+            raise ValidationError(
+                "Esta leitura gerou cobrança de excedente que já tem pagamento (ou está em "
+                "cobrança judicial) — não dá para apagar. Corrija o número em vez de apagar."
+            )
+        if (
+            cobranca is not None
+            and cobranca.status != Cobranca.Status.CANCELADA
+            and _cobranca_intocavel(cobranca)
+        ):
+            raise ValidationError(
+                f"Esta leitura gerou cobrança de excedente de {brl(cobranca.valor)} que já tem "
+                f"pagamento (ou está em cobrança judicial) — não dá para apagar. Corrija o "
+                f"número em vez de apagar."
+            )
         veiculo, km_errado = registro.veiculo, registro.km
         seguinte = registro.registro_seguinte()
         if cobranca is not None and cobranca.status != Cobranca.Status.CANCELADA:

@@ -3,14 +3,12 @@ dados, o "baixar tudo" sem refazer o DAS três vezes e uma rede de segurança
 que confere as três cópias das mesmas contas (série, mês a mês e ficha do carro).
 """
 
-import io
 from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from openpyxl import load_workbook
 
 from apps.alocacoes.models import Alocacao
 from apps.financeiro import services as financeiro
@@ -130,11 +128,6 @@ def _consultas(funcao):
     return len(contexto.captured_queries), resultado
 
 
-def _abas(resposta):
-    livro = load_workbook(io.BytesIO(resposta.content))
-    return {aba.title: [list(linha) for linha in aba.iter_rows(values_only=True)] for aba in livro}
-
-
 @pytest.mark.parametrize("n", [3, 12])
 def test_medicao(usuario_logado, n):
     _montar_base(n)
@@ -143,16 +136,3 @@ def test_medicao(usuario_logado, n):
         lambda: usuario_logado.get("/relatorios/", {"mes": "2026-08", "exportar": "tudo"})
     )
     print(f"\nn={n} tela={tela} tudo={tudo}")
-
-
-def test_dump_tudo(usuario_logado):
-    import json
-    import os
-
-    _montar_base(12)
-    abas = {}
-    for mes in ["2026-06", "2026-07", "2026-08", "2026-09"]:
-        r = usuario_logado.get("/relatorios/", {"mes": mes, "exportar": "tudo"})
-        abas[mes] = _abas(r)
-    with open(os.environ["DUMP_TUDO"], "w") as f:
-        json.dump(abas, f, default=str, ensure_ascii=False, sort_keys=True)

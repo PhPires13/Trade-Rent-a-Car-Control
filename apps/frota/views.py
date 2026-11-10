@@ -64,6 +64,8 @@ def _quem_esta_com_o_carro(veiculo, na_oficina=alertas._BUSCAR):
     return {
         "motorista": motorista,
         "valor_semanal": valor,
+        # a troca ("Dar carro substituto") parte da alocação ativa do próprio carro
+        "alocacao_ativa": alocacao,
         # o dono do contrato pode estar rodando com um substituto (carro na oficina)
         "substituto_em_uso": alocacao.troca_ativa if alocacao else None,
         "impedimento_venda": _impedimento_venda(alocacao, troca, veiculo, na_oficina),

@@ -252,7 +252,13 @@ class Alocacao(models.Model):
         self.km_devolucao = km_devolucao
         self.status = self.Status.ENCERRADA
         self.save()
-        self.acerto_semanas_nao_usadas = self._cancelar_semanas_nao_usadas(data_termino)
+        # cada semana mexida termina gravada com o status final logo abaixo: sem o
+        # recálculo dos sinais ao apagar o pagamento, o histórico não ganha uma
+        # versão intermediária falsa (atrasado/pendente) antes da "cancelada"
+        from apps.financeiro import signals as sinais_financeiro
+
+        with sinais_financeiro.sem_recalculo_automatico():
+            self.acerto_semanas_nao_usadas = self._cancelar_semanas_nao_usadas(data_termino)
         # semana cancelada que já estava atrasada não pode deixar o ex-cliente
         # inadimplente até a rotina da madrugada
         from apps.financeiro.services import atualizar_inadimplencia

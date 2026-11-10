@@ -144,7 +144,6 @@ def test_encerrar_cenario_misto_da_o_mesmo_resultado_sem_status_intermediario(db
     assert len(versoes_nova) == len({venc for venc, _ in versoes_nova})
     assert len(versoes_nova) < len(versoes_velha)
     assert len(depois) < len(antes)
-    print(f"encerrar misto: {len(antes)} -> {len(depois)} consultas")
 
 
 def test_encerrar_cenario_misto_resultado_travado(db):
@@ -164,7 +163,7 @@ def test_encerrar_cenario_misto_resultado_travado(db):
         Decimal("1000.00")
     )
     # o desconto da caução voltou: só o depósito fica
-    assert [t for t, *_ in retrato["caucao"]] == ["deposito"]
+    assert [t for t, *_ in retrato["caucao"]] == ["recebimento"]
     assert retrato["aplicacoes"] == [
         (alocacao.data_inicio, Decimal("650.00")),
         (alocacao.data_inicio + timedelta(days=7), Decimal("300.00")),

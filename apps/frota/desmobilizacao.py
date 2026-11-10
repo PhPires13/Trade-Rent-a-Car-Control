@@ -35,6 +35,10 @@ FATOR_CUSTO_ACIMA_DA_MEDIA = Decimal("1.5")
 #: pontos de alerta → nível da recomendação (3 ou mais = vender)
 NIVEIS = {0: "manter", 1: "observar", 2: "preparar", 3: "vender"}
 
+#: conserto e franquia cobrados do cliente: na ficha vão para "Consertos e
+#: franquias", mesmo quando a cobrança aponta para a alocação
+ORIGENS_DE_REPASSE = (Cobranca.Origem.REPASSE_MANUTENCAO, Cobranca.Origem.REPASSE_SINISTRO)
+
 
 # Critérios de despesa — fonte única da ficha do carro e dos relatórios do mês
 # (apps/relatorios/services.py), para os dois fecharem entre si.
@@ -252,16 +256,19 @@ def montar_fichas_em_lote(veiculos, hoje=None):
     ids = [veiculo.pk for veiculo in veiculos]
 
     # cobranças do contrato: o aluguel semanal numa linha; excedente de km, encargo
-    # e outras do contrato em outra — uma query só, separada pela origem
-    aluguel, extras_locacao = {}, {}
+    # e outras do contrato em outra; conserto/franquia que aponte para a alocação
+    # soma nos repasses — uma query só, separada pela origem
+    aluguel, extras_locacao, repasses_da_locacao = {}, {}, {}
+    destinos = {
+        Cobranca.Origem.ALUGUEL: aluguel,
+        **dict.fromkeys(ORIGENS_DE_REPASSE, repasses_da_locacao),
+    }
     for linha in (
         AplicacaoRecebimento.objects.filter(cobranca__alocacao__veiculo_id__in=ids)
         .values("cobranca__alocacao__veiculo", "cobranca__origem")
         .annotate(total=Sum("valor"))
     ):
-        destino = (
-            aluguel if linha["cobranca__origem"] == Cobranca.Origem.ALUGUEL else extras_locacao
-        )
+        destino = destinos.get(linha["cobranca__origem"], extras_locacao)
         chave = linha["cobranca__alocacao__veiculo"]
         destino[chave] = destino.get(chave, ZERO) + (linha["total"] or ZERO)
     # Cobrança quitada por desconto de caução também é receita do carro (docs.md §4.3):
@@ -288,7 +295,7 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         .values("veiculo_do_desconto", "de_locacao", "cobranca__origem")
         .annotate(total=Sum("valor"))
     ):
-        if not linha["de_locacao"]:
+        if not linha["de_locacao"] or linha["cobranca__origem"] in ORIGENS_DE_REPASSE:
             destino = descontos_repasse
         elif linha["cobranca__origem"] == Cobranca.Origem.ALUGUEL:
             destino = descontos_aluguel
@@ -297,12 +304,13 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         chave = linha["veiculo_do_desconto"]
         destino[chave] = destino.get(chave, ZERO) + (linha["total"] or ZERO)
     # repasses de manutenção e a franquia do sinistro cobrada do cliente (D09) —
-    # esta sem alocação na cobrança, então entra aqui para anular a franquia que
-    # já é despesa do carro; uma query só para as duas origens
+    # sem alocação na cobrança (a com alocação já entrou acima), para anular a
+    # franquia que já é despesa do carro; uma query só para as duas origens
     repasses = _somas(
         AplicacaoRecebimento.objects.filter(
             Q(cobranca__manutencao_repassada__veiculo_id__in=ids)
-            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids, cobranca__alocacao__isnull=True)
+            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids),
+            cobranca__alocacao__isnull=True,
         ).annotate(
             veiculo_do_repasse=Coalesce(
                 "cobranca__manutencao_repassada__veiculo", "cobranca__sinistro_franquia__veiculo"
@@ -334,8 +342,10 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         ficha.receita_extras_locacao = extras_locacao.get(veiculo.pk, ZERO) + descontos_extras.get(
             veiculo.pk, ZERO
         )
-        ficha.receita_repasses = repasses.get(veiculo.pk, ZERO) + descontos_repasse.get(
-            veiculo.pk, ZERO
+        ficha.receita_repasses = (
+            repasses.get(veiculo.pk, ZERO)
+            + repasses_da_locacao.get(veiculo.pk, ZERO)
+            + descontos_repasse.get(veiculo.pk, ZERO)
         )
         ficha.receita_auxilios = auxilios.get(veiculo.pk, ZERO)
         ficha.despesa_manutencao = manutencoes.get(veiculo.pk, ZERO)

@@ -22,6 +22,9 @@
       {% include "manutencao/_selo_oficina.html" with m=em_oficina %}
       {% if em_oficina %}<a href="{% url 'manutencao:voltou' em_oficina.pk %}?volta={% url 'frota:detalhe' veiculo.pk %}"
          class="rounded bg-marca-preto px-3 py-1 text-xs font-semibold text-white hover:brightness-125">Carro voltou da oficina</a>{% endif %}
+      {# carro do contrato parado na oficina e o motorista ainda sem substituto: atalho para a troca #}
+      {% if em_oficina and alocacao_ativa and not substituto_em_uso %}<a href="{% url 'alocacoes:troca_nova' alocacao_ativa.pk %}?motivo={{ "Manutenção do carro principal"|urlencode }}&amp;voltar={{ request.path|urlencode }}"
+         class="rounded border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50">Dar carro substituto</a>{% endif %}
     </div>
     <p class="mt-1 text-gray-600">
       {{ veiculo.marca_modelo }}{% if veiculo.ano %} · {{ veiculo.ano }}{% endif %} · {{ veiculo.km_atual|intcomma }} km

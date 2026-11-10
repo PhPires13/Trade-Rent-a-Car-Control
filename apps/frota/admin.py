@@ -2,6 +2,9 @@ from django import forms
 from django.contrib import admin
 from simple_history.admin import SimpleHistoryAdmin
 
+from apps.financeiro.admin import coluna_em_reais
+from apps.formatos import milhar
+
 from .models import Categoria, Fornecedor, PagamentoIpva, Veiculo
 
 
@@ -13,7 +16,10 @@ class FornecedorAdmin(SimpleHistoryAdmin):
 
 @admin.register(Categoria)
 class CategoriaAdmin(SimpleHistoryAdmin):
-    list_display = ["nome", "valor_semanal_referencia"]
+    list_display = ["nome", "valor_semanal_rs"]
+    valor_semanal_rs = coluna_em_reais(
+        "valor_semanal_referencia", "valor semanal de referência", "valor_semanal_referencia"
+    )
 
 
 class PagamentoIpvaInline(admin.TabularInline):
@@ -23,7 +29,8 @@ class PagamentoIpvaInline(admin.TabularInline):
 
 @admin.register(PagamentoIpva)
 class PagamentoIpvaAdmin(SimpleHistoryAdmin):
-    list_display = ["veiculo", "ano", "parcela", "valor", "vencimento", "pago_em"]
+    list_display = ["veiculo", "ano", "parcela", "valor_rs", "vencimento", "pago_em"]
+    valor_rs = coluna_em_reais("valor", "valor", "valor")
     list_filter = ["ano"]
     search_fields = ["veiculo__placa"]
 
@@ -71,9 +78,17 @@ class VeiculoAdmin(SimpleHistoryAdmin):
         "categoria",
         "uso",
         "status",
-        "km_atual",
-        "mensalidade_protecao",
+        "km_atual_formatado",
+        "mensalidade_rs",
     ]
     list_select_related = ["categoria"]
+    mensalidade_rs = coluna_em_reais(
+        "mensalidade_protecao", "mensalidade da proteção", "mensalidade_protecao"
+    )
+
+    @admin.display(description="KM atual", ordering="km_atual")
+    def km_atual_formatado(self, obj):
+        return milhar(obj.km_atual)
+
     list_filter = ["status", "uso", "categoria"]
     search_fields = ["placa", "marca_modelo", "renavam", "chassi"]

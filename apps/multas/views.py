@@ -295,8 +295,9 @@ def indicar_fici(request, multa_id):
         multa.save(update_fields=["fici_status", "fici_data_indicacao"])
         messages.success(
             request,
-            f"Pronto: o motorista da multa do carro {multa.veiculo.placa} "
-            f"({multa.data_infracao:%d/%m/%Y}) ficou como indicado ao órgão, com a data de hoje.",
+            f"Pronto: anotado que você já informou ao órgão quem dirigia o carro "
+            f"{multa.veiculo.placa} na multa de {multa.data_infracao:%d/%m/%Y} "
+            "(data da indicação: hoje).",
         )
     return _voltar_para_lista(request)
 
