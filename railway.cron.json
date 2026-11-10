@@ -1,0 +1,8 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "python manage.py rotina_diaria",
+    "cronSchedule": "5 3 * * *",
+    "restartPolicyType": "NEVER"
+  }
+}

@@ -336,7 +336,8 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
     def clean_ano(self):
         """Fabricação/modelo ("20/21" ou "2020/2021"); o modelo é o mesmo ano ou o seguinte."""
         ano = re.sub(r"\s+", "", self.cleaned_data.get("ano") or "")
-        if not ano or ano == self.instance.ano:  # cadastro antigo fora do padrão segue editável
+        # cadastro antigo fora do padrão segue editável (comparado do mesmo jeito, sem espaços)
+        if not ano or ano == re.sub(r"\s+", "", self.instance.ano or ""):
             return ano
         casou = _ANO_VEICULO.match(ano)
         if casou:
@@ -355,8 +356,10 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
     def clean_renavam(self):
         """Só números (9 a 11 dígitos); pontos, traços e espaços são tirados."""
         renavam = re.sub(r"[\s.\-]", "", self.cleaned_data.get("renavam") or "")
-        if renavam and renavam != self.instance.renavam and not re.fullmatch(r"\d{9,11}", renavam):
-            raise ValidationError("Renavam tem só números (11 dígitos).")
+        # cadastro antigo fora do padrão segue editável (comparado do mesmo jeito, sem pontos)
+        antigo = re.sub(r"[\s.\-]", "", self.instance.renavam or "")
+        if renavam and renavam != antigo and not re.fullmatch(r"\d{9,11}", renavam):
+            raise ValidationError("Renavam tem de 9 a 11 números — confira no documento do carro.")
         return renavam
 
     def clean_data_aquisicao(self):

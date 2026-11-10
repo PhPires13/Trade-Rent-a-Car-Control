@@ -79,9 +79,14 @@ def meses_de_protecao(veiculo, hoje):
     Mesmo recorte do relatório mensal: cada mês em que o carro esteve na frota
     paga uma mensalidade; depois de vendido, não paga mais. Critério único:
     sem data de compra = sem proteção a lançar (o cadastro exige a data
-    quando há mensalidade; a ficha avisa "proteção não calculada").
+    quando há mensalidade; a ficha avisa "proteção não calculada"). O mesmo vale
+    para carro vendido sem data da venda (o Admin passa a exigir a data).
     """
     if not veiculo.data_aquisicao:
+        return 0
+    if veiculo.status == Veiculo.Status.VENDIDO and not veiculo.data_venda:
+        # vendido sem data (dado antigo/Admin): o relatório mensal já não conta
+        # esse carro; somar "até hoje" aqui faria a ficha não bater com ele
         return 0
     fim = min(veiculo.data_venda, hoje) if veiculo.data_venda else hoje
     meses = (

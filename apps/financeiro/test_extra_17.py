@@ -328,7 +328,8 @@ def test_ler_data_aceita_formatos_comuns(texto):
 
 
 def test_ler_data_sem_ano_usa_o_ano_corrente():
-    assert ler_data("27/10") == date(HOJE.year, 10, 27)
+    # dia e mês de hoje: o ano mais perto é o corrente (a regra completa em config/test_etapa18.py)
+    assert ler_data(HOJE.strftime("%d/%m")) == HOJE
 
 
 def test_ler_data_invalida_da_exemplo():

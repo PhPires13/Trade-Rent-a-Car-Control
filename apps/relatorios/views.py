@@ -1,25 +1,19 @@
 from django.shortcuts import render
 from django.utils import timezone
 
-from apps.financeiro.periodos import ano_mes
+from apps.financeiro.periodos import (
+    ANO_MINIMO,
+    MESES,
+    ano_mes,
+    navegacao_de_meses,
+    nome_do_mes,
+    vizinho,
+)
 from apps.financeiro.views import COLUNAS_PAGAMENTOS, linhas_base_das, linhas_pagamentos_das
+from apps.formatos import brl
 
 from . import exportar, services
 
-MESES = (
-    "Janeiro",
-    "Fevereiro",
-    "Março",
-    "Abril",
-    "Maio",
-    "Junho",
-    "Julho",
-    "Agosto",
-    "Setembro",
-    "Outubro",
-    "Novembro",
-    "Dezembro",
-)
 #: nível do ranking de venda (apps.frota.desmobilizacao.NIVEIS) em português
 RECOMENDACOES = {
     "manter": "Manter",
@@ -27,19 +21,6 @@ RECOMENDACOES = {
     "preparar": "Preparar venda",
     "vender": "Vender",
 }
-ANO_MINIMO = 2000  # antes disso não há dado; ano absurdo na URL cai no mês atual
-
-
-def _vizinho(ano, mes, passo):
-    """(ano, mês) um mês antes (passo=-1) ou depois (passo=1), virando o ano."""
-    indice = ano * 12 + (mes - 1) + passo
-    return indice // 12, indice % 12 + 1
-
-
-def _mes_para_tela(ano, mes):
-    """Link ?mes= e nome por extenso ("Outubro de 2026") — as setas de mês
-    funcionam em qualquer navegador, ao contrário do <input type=month>."""
-    return {"param": f"{ano}-{mes:02d}", "nome": MESES[mes - 1], "ano": ano}
 
 
 def _mes_pedido(request, hoje):
@@ -56,8 +37,8 @@ def _mes_pedido(request, hoje):
 
 
 def _opcoes_de_mes(ano, mes, hoje, quantidade=None):
-    """Meses da caixinha de escolha: do mês atual até o primeiro mês com dado
-    (compra de carro ou pagamento mais antigo) — sem dezenas de meses vazios."""
+    """Meses da caixinha de escolha: do mês atual até o primeiro mês com algum
+    movimento (services.primeiro_mes_com_dado) — sem dezenas de meses vazios."""
     if quantidade is None:
         primeiro = services.primeiro_mes_com_dado() or hoje
         quantidade = (hoje.year - primeiro.year) * 12 + hoje.month - primeiro.month + 1
@@ -65,10 +46,10 @@ def _opcoes_de_mes(ano, mes, hoje, quantidade=None):
     opcoes = []
     a, m = hoje.year, hoje.month
     for _ in range(quantidade):
-        opcoes.append({"param": f"{a}-{m:02d}", "nome": f"{MESES[m - 1]} de {a}"})
-        a, m = _vizinho(a, m, -1)
+        opcoes.append({"param": f"{a}-{m:02d}", "nome": nome_do_mes(a, m)})
+        a, m = vizinho(a, m, -1)
     if not any(o["param"] == f"{ano}-{mes:02d}" for o in opcoes):
-        opcoes.append({"param": f"{ano}-{mes:02d}", "nome": f"{MESES[mes - 1]} de {ano}"})
+        opcoes.append({"param": f"{ano}-{mes:02d}", "nome": nome_do_mes(ano, mes)})
     return opcoes
 
 
@@ -86,18 +67,11 @@ def relatorios(request):
         "ano": ano,
         "mes": mes,
         "mes_str": f"{ano}-{mes:02d}",
-        "nome_mes": f"{MESES[mes - 1]} de {ano}",
         "hoje": hoje,
         "aviso_mes": aviso_mes,
         "opcoes_de_mes": _opcoes_de_mes(ano, mes, hoje),
-        "mes_anterior": _mes_para_tela(*_vizinho(ano, mes, -1)),
-        # mês que ainda não começou não tem o que mostrar — sem seta pra frente
-        "mes_seguinte": (
-            _mes_para_tela(*_vizinho(ano, mes, 1)) if (ano, mes) < (hoje.year, hoje.month) else None
-        ),
-        "mes_atual": None
-        if (ano, mes) == (hoje.year, hoje.month)
-        else _mes_para_tela(hoje.year, hoje.month),
+        # setas de mês e "voltar para o mês de hoje" — as mesmas da tela do DAS
+        **navegacao_de_meses(ano, mes, hoje),
         "receitas": receitas,
         "despesas": despesas,
         "resumo": services.resumo_do_mes(receitas, despesas),
@@ -262,17 +236,17 @@ def _planilha_recebiveis(ano, mes):
                 ]
             )
         if registro["credito"]:
-            # crédito guardado abate do que o cliente deve (valor negativo)
-            linhas.append(
-                [
-                    registro["cliente"].nome,
-                    "Crédito guardado do cliente (abate do que deve)",
-                    "",
-                    "",
-                    "",
-                    -float(registro["credito"]),
-                ]
-            )
+            # crédito guardado abate do que o cliente deve (valor negativo), mas
+            # só até zerar a dívida: a soma do cliente fecha com o "falta" da tela
+            # e nunca fica negativa; o que sobra de crédito vai só no texto
+            abate = min(registro["credito"], registro["total"])
+            descricao = "Crédito guardado do cliente (abate do que deve)"
+            if registro["credito"] > abate:
+                descricao += (
+                    f" — tem {brl(registro['credito'])} de crédito; "
+                    f"sobram {brl(registro['credito'] - abate)} depois de cobrir tudo"
+                )
+            linhas.append([registro["cliente"].nome, descricao, "", "", "", -float(abate)])
     colunas = ["Cliente", "Cobrança", "Vencimento", "Situação", "Status", "Saldo devedor (R$)"]
     return f"Recebíveis hoje {timezone.localdate():%d-%m-%Y}", colunas, linhas
 

@@ -82,13 +82,18 @@ def test_pagamentos_do_das_fecham_com_a_aba_das(usuario_logado, alocacao):
 
     wb = _abas(usuario_logado)
     linhas = list(wb["Pagamentos do DAS"].iter_rows(values_only=True))
-    corpo = linhas[1:-2]
+    # pagamentos = linhas com data; os totais são achados pelo texto
+    corpo = [linha for linha in linhas[1:] if linha[0]]
     assert [(linha[3], linha[4], linha[5], linha[6]) for linha in corpo] == [
         ("Aluguel semana 1", recebimento.get_forma_display(), 650.0, "Sim"),
         ('=HIPERLINK("x")', "Desconto na caução", 120.0, "Não"),
     ]
-    total, no_das = linhas[-2][5], linhas[-1][5]
+    por_texto = {linha[3]: linha[5] for linha in linhas[1:] if not linha[0]}
+    total = por_texto["Total (locação + pagamentos diversos)"]
+    no_das = por_texto["Dos quais entram na base do DAS"]
     assert (total, no_das) == (770.0, 650.0)
+    # o desconto na caução não é dinheiro novo: o caixa do mês é só o aluguel
+    assert por_texto["Total que entrou no caixa"] == 650.0
 
     das = {linha[0]: linha[1] for linha in wb["DAS"].iter_rows(min_row=2, values_only=True)}
     assert das["Receita de locação (fatura)"] == no_das

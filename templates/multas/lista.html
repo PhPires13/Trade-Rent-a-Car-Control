@@ -7,7 +7,7 @@
   <h1 class="text-2xl font-bold">Multas e autuações</h1>
   <div class="flex flex-wrap items-center gap-3 text-sm">
     <a href="{% url 'multas:orgaos' %}" class="alvo-toque underline">Órgãos</a>
-    <a href="{% url 'multas:gerar_nd' %}" class="alvo-toque underline">Gerar ND de multas</a>
+    <a href="{% url 'multas:gerar_nd' %}" class="alvo-toque underline">Gerar nota de débito (ND) das multas</a>
     <a href="{% url 'multas:nova' %}"
        class="alvo-toque rounded bg-marca-amarelo px-3 py-1.5 font-semibold text-marca-preto hover:brightness-95">+ Nova multa</a>
   </div>
@@ -96,6 +96,9 @@
         {% include "multas/_acao_fici.html" with grande=True %}
       {% elif multa.pagamento == "pendente" and multa.valor %}
         {% include "multas/_acao_paga.html" with grande=True %}
+      {% elif multa.pagamento == "pendente" and multa.valor is None %}
+        {# sem valor não dá para marcar paga: o celular ficava sem ação nenhuma #}
+        <a href="{% url 'multas:editar' multa.pk %}?volta={{ volta|urlencode }}" class="flex min-h-[44px] w-full items-center justify-center rounded bg-marca-amarelo px-4 py-3 text-base font-semibold text-marca-preto hover:brightness-95">Informar o valor</a>
       {% endif %}
       <details class="text-sm">
         <summary class="flex min-h-[44px] cursor-pointer select-none items-center justify-center rounded border border-gray-200 text-gray-700">Mais opções ▾</summary>

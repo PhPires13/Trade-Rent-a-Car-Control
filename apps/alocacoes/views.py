@@ -1022,6 +1022,15 @@ def troca_nova(request, alocacao_id):
             for mensagens in erro.message_dict.values():
                 for mensagem in mensagens:
                     form.add_error(None, mensagem)
+        except IntegrityError:
+            # dois envios ao mesmo tempo (toque duplo, duas abas): o outro já gravou a
+            # troca, ou o substituto foi para outro cliente nesse meio-tempo
+            messages.info(
+                request,
+                "Esta troca já tinha sido registrada (ou o carro acabou de ser usado em outra "
+                "troca) — confira a ficha do cliente.",
+            )
+            return _ficha(alocacao)
     candidatos = form.fields["veiculo_substituto"].queryset
     return render(
         request,
@@ -1131,8 +1140,14 @@ def contrato(request, alocacao_id):
     alocacao = get_object_or_404(
         Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
     )
-    if alocacao.contrato_aberto_em is None:
+    # pré-carregamento do navegador (link só "visto", não aberto) não conta como impresso
+    pre_carga = (
+        "prefetch"
+        in (request.headers.get("Sec-Purpose", "") + request.headers.get("Purpose", "")).lower()
+    )
+    if alocacao.contrato_aberto_em is None and not pre_carga:
         # marca o passo "Imprimir o contrato" do cartão de próximos passos da entrega
+        # (abrir o contrato é o gesto de imprimir: decisão de manter simples)
         alocacao.contrato_aberto_em = timezone.localdate()
         alocacao.save(update_fields=["contrato_aberto_em"])
     return render(

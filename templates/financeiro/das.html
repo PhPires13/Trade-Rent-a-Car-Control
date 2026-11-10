@@ -51,33 +51,48 @@
       {% for rotulo, valor in resumo.diversos.items %}
       <tr>
         <td class="px-4 py-2 text-gray-600">Pagamentos diversos — {{ rotulo }} (ND, fora da base)</td>
-        <td class="px-4 py-2 text-right">{{ valor|brl }}</td>
+        <td class="whitespace-nowrap px-4 py-2 text-right">{{ valor|brl }}</td>
       </tr>
       {% endfor %}
       <tr>
         <td class="px-4 py-2 text-gray-600">Total de pagamentos diversos</td>
-        <td class="px-4 py-2 text-right font-semibold">{{ resumo.total_diversos|brl }}</td>
+        <td class="whitespace-nowrap px-4 py-2 text-right font-semibold">{{ resumo.total_diversos|brl }}</td>
       </tr>
       <tr>
         <td class="px-4 py-2 text-gray-600">Caução recebida no mês (fora da base)</td>
-        <td class="px-4 py-2 text-right">{{ resumo.caucao_recebida|brl }}</td>
+        <td class="whitespace-nowrap px-4 py-2 text-right">{{ resumo.caucao_recebida|brl }}</td>
       </tr>
       <tr>
         <td class="px-4 py-2 text-gray-600">Adiantamentos recebidos no mês — sobra de pagamento que virou crédito do cliente (fora da base)
           <div class="text-xs text-gray-500">Entra na base do DAS só no mês em que o crédito for usado para pagar o aluguel.</div></td>
-        <td class="px-4 py-2 text-right">{{ resumo.adiantamentos|brl }}</td>
+        <td class="whitespace-nowrap px-4 py-2 text-right">{{ resumo.adiantamentos|brl }}</td>
       </tr>
       {% if resumo.pago_com_credito %}
       <tr>
         <td class="px-4 py-2 text-gray-600">Dos valores acima, pagos com crédito do cliente
           <div class="text-xs text-gray-500">Não é dinheiro novo: esse dinheiro pode ter entrado no banco num mês anterior, como adiantamento.</div></td>
-        <td class="px-4 py-2 text-right">{{ resumo.pago_com_credito|brl }}</td>
+        <td class="whitespace-nowrap px-4 py-2 text-right">− {{ resumo.pago_com_credito|brl }}</td>
+      </tr>
+      {% endif %}
+      {# as linhas abaixo também saem do "entrou no caixa": cada parcela que não é dinheiro novo tem a sua linha #}
+      {% if resumo.descontado_da_caucao %}
+      <tr data-desconto-caucao>
+        <td class="px-4 py-2 text-gray-600">Dos valores acima, pagos com desconto na caução
+          <div class="text-xs text-gray-500">Não é dinheiro novo: a caução já tinha entrado no banco quando o cliente depositou.</div></td>
+        <td class="whitespace-nowrap px-4 py-2 text-right">− {{ resumo.descontado_da_caucao|brl }}</td>
+      </tr>
+      {% endif %}
+      {% if resumo.reforco_de_credito %}
+      <tr data-reforco-credito>
+        <td class="px-4 py-2 text-gray-600">Da caução recebida, reforço feito com crédito do cliente
+          <div class="text-xs text-gray-500">Não é dinheiro novo: foi a sobra de um pagamento feito com o crédito guardado.</div></td>
+        <td class="whitespace-nowrap px-4 py-2 text-right">− {{ resumo.reforco_de_credito|brl }}</td>
       </tr>
       {% endif %}
       <tr class="bg-gray-50">
         <td class="px-4 py-2 font-semibold">Total que entrou no caixa no mês
           <div class="text-xs font-normal text-gray-500">Para conferir com o extrato do banco (Pix, dinheiro, transferência). Não conta o uso de crédito nem o desconto na caução.</div></td>
-        <td class="px-4 py-2 text-right font-semibold">{{ resumo.entrou_no_caixa|brl }}</td>
+        <td class="whitespace-nowrap px-4 py-2 text-right font-semibold">{{ resumo.entrou_no_caixa|brl }}</td>
       </tr>
     </tbody>
   </table>

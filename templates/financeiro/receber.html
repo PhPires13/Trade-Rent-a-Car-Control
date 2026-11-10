@@ -276,7 +276,7 @@
     </div>
   </div>
 
-  {# data antes do mês passado: o DAS daquele mês já foi para a contabilidade #}
+  {# data antes do dia 1º deste mês: o DAS daquele mês pode já ter ido para a contabilidade #}
   <label x-show="mesPassado" x-cloak class="mb-4 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
     <input type="checkbox" name="confirmar_mes_passado" value="1" class="mt-1 h-4 w-4"
            {% if post.confirmar_mes_passado == "1" %}checked{% endif %}>
@@ -327,6 +327,10 @@
               <input type="text" name="encargo_{{ cobranca.pk }}" id="encargo_{{ cobranca.pk }}" value="{{ cobranca.encargo_digitado }}"
                      inputmode="decimal" autocomplete="off" x-bind:disabled="!incluir" {% if not cobranca.encargo_incluido %}disabled{% endif %}
                      x-on:input="distribuir()" class="w-20 rounded border border-gray-300 px-1 py-0.5 text-xs">
+            </span>
+            {# o encargo é calculado sobre o que falta pagar: depois de um pagamento parcial, a sugestão diminui #}
+            <span x-show="!incluir" class="basis-full text-amber-800" data-dica-encargo>
+              Atrasada há {{ cobranca.dias_atraso }} dia{{ cobranca.dias_atraso|pluralize }}. Quer cobrar o encargo agora? Depois deste pagamento a sugestão fica menor (ela é sobre o que falta pagar).
             </span>
           </div>
           {% endif %}

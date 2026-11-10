@@ -27,10 +27,12 @@
 {% endif %}
 
 <nav class="nao-imprime mb-6 flex flex-wrap items-center gap-2" aria-label="Escolher o mês">
+  {% if mes_anterior %}
   <a href="?mes={{ mes_anterior.param }}"
      class="flex-1 rounded border border-gray-300 bg-white px-4 py-3 text-center font-medium hover:bg-gray-50 sm:flex-none sm:py-2">
     ◀ mês anterior <span class="text-sm text-gray-500">({{ mes_anterior.nome }})</span>
   </a>
+  {% endif %}
   {% if mes_seguinte %}
   <a href="?mes={{ mes_seguinte.param }}"
      class="flex-1 rounded border border-gray-300 bg-white px-4 py-3 text-center font-medium hover:bg-gray-50 sm:flex-none sm:py-2">
@@ -101,7 +103,7 @@
     ⬇ Baixar o mês para a contabilidade
   </a>
   <p class="text-sm text-gray-700">
-    Um arquivo só do Excel, com uma aba para cada parte: receitas, despesas, DAS, recebíveis e frota.
+    Um arquivo só do Excel, com uma aba para cada parte: receitas, despesas, DAS, recebíveis, frota e os pagamentos do DAS.
     É o que se manda para a contabilidade. Os botões “Baixar planilha” de cada quadro baixam só aquela parte.
   </p>
 </div>

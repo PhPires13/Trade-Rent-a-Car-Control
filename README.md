@@ -38,4 +38,12 @@ uv run ruff format .
 ## Deploy (Railway)
 
 O `Procfile` roda migrações + collectstatic + gunicorn. Variáveis necessárias no serviço:
-`SECRET_KEY`, `DEBUG=False`, `ALLOWED_HOSTS`, `DATABASE_URL` (Postgres do Neon ou Railway), `CSRF_TRUSTED_ORIGINS`.
+`SECRET_KEY`, `DEBUG=False`, `ALLOWED_HOSTS`, `DATABASE_URL` (Postgres do Neon ou Railway), `CSRF_TRUSTED_ORIGINS`
+(o bloco "Produção" do `.env.example` traz os exemplos).
+
+- **Serviço web**: usa o `Procfile` e o `railway.json` (sonda de saúde em `/saude/`, que responde "ok" sem login).
+- **Serviço da rotina diária**: 2º serviço do mesmo repositório, com as mesmas variáveis, apontando em
+  *Settings > Config-as-code* para `railway.cron.json` (`python manage.py rotina_diaria` às `5 3 * * *` UTC =
+  00:05 de Brasília). Sem esse arquivo o serviço herda o `Procfile`, sobe o site e nunca termina — a rotina não roda.
+- **Primeiro acesso**: depois do 1º deploy, `railway run python manage.py createsuperuser`.
+- **Erros**: com `DEBUG=False` o erro 500 aparece no log do serviço (stderr), com o traceback.

@@ -5,7 +5,7 @@ os campos mostram o valor no mesmo formato ("58.000,00"), nunca "58000.00".
 """
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from django import forms
@@ -17,7 +17,8 @@ from apps.formatos import numero_br
 
 _MILHAR = re.compile(r"^[1-9]\d{0,2}(\.\d{3})+$")
 # "12,000" (vírgula + exatamente 3 dígitos): doze reais ou doze mil? Não dá para saber.
-_VIRGULA_AMBIGUA = re.compile(r"^-?\d{1,3},\d{3}$")
+# Começando em zero ("0,500") não há milhar possível: é R$ 0,50, sem ambiguidade.
+_VIRGULA_AMBIGUA = re.compile(r"^-?[1-9]\d{0,2},\d{3}$")
 
 
 def id_valido(texto):
@@ -66,8 +67,28 @@ def data_plausivel(data):
 #: pessoa digita "27/10/2026", "27-10-2026" ou "27.10.2026"
 FORMATOS_DE_DATA = ["%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d.%m.%Y"]
 
-#: "27/10" sem ano: completa com o ano corrente
+#: "27/10" sem ano: completa com o ano que deixa a data mais perto de hoje
 _DIA_E_MES = re.compile(r"^(\d{1,2})[/.-](\d{1,2})$")
+
+
+def _completar_ano(dia, mes):
+    """Ano de "28/12": digitado em 2 de janeiro, é o dezembro que passou.
+
+    Com o ano corrente fixo, o recebimento de 28/12 lançado no começo de janeiro
+    ia parar quase um ano no futuro (e no DAS do mês errado). Fica o ano, entre o
+    anterior, o corrente e o seguinte, que põe a data mais perto de hoje.
+    """
+    hoje = timezone.localdate()
+    candidatas = []
+    for ano in (hoje.year - 1, hoje.year, hoje.year + 1):
+        try:
+            candidatas.append(date(ano, mes, dia))
+        except ValueError:  # 31/02, 29/02 fora do ano bissexto: o strptime acusa depois
+            continue
+    # até ~6 meses para trás ou para a frente; "29/02" em ano comum não pula para 2028
+    perto = [data for data in candidatas if abs((data - hoje).days) <= 184]
+    return min(perto, key=lambda data: abs((data - hoje).days)) if perto else None
+
 
 MENSAGEM_ANO = "Confira o ano (ex.: 2026)."
 
@@ -82,13 +103,15 @@ def ler_data(texto, rotulo="Data"):
     """Data do POST cru (fora de formulário Django) com as mesmas regras dos formulários.
 
     Aceita AAAA-MM-DD, DD/MM/AAAA (também com "-" ou "."), DD/MM/AA e DD/MM
-    (ano corrente); recusa ano fora de 2000..hoje+10.
+    (o ano que deixa a data mais perto de hoje); recusa ano fora de 2000..hoje+10.
     Erro vira ValidationError com mensagem para a pessoa (nunca erro 500).
     """
     texto = str(texto or "").strip()
     sem_ano = _DIA_E_MES.match(texto)
     if sem_ano:
-        texto = f"{sem_ano[1]}/{sem_ano[2]}/{timezone.localdate().year}"
+        completa = _completar_ano(int(sem_ano[1]), int(sem_ano[2]))
+        ano = completa.year if completa else timezone.localdate().year
+        texto = f"{sem_ano[1]}/{sem_ano[2]}/{ano}"
     for formato in FORMATOS_DE_DATA:
         try:
             dia = datetime.strptime(texto, formato).date()
@@ -130,7 +153,9 @@ def dinheiro_br(texto):
     numero = Decimal(texto)
     if not numero.is_finite():  # "nan"/"inf" passariam e quebrariam o banco e as telas
         raise InvalidOperation(texto)
-    return numero
+    centavos = numero.quantize(Decimal("0.01")) if numero.as_tuple().exponent < -2 else numero
+    # "0,500" é R$ 0,50: zeros a mais no fim não são casa decimal de verdade
+    return centavos if centavos == numero else numero
 
 
 def exibir_dinheiro(valor):

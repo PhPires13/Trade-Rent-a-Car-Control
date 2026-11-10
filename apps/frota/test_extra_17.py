@@ -171,7 +171,9 @@ def test_ano_antigo_fora_do_padrao_continua_editavel(veiculo):
 def test_cadastro_recusa_renavam_invalido(db, renavam):
     form = _form(renavam=renavam)
     assert not form.is_valid()
-    assert form.errors["renavam"] == ["Renavam tem só números (11 dígitos)."]
+    assert form.errors["renavam"] == [
+        "Renavam tem de 9 a 11 números — confira no documento do carro."
+    ]
 
 
 def test_cadastro_limpa_pontos_do_renavam(db):

@@ -213,7 +213,15 @@ class Alocacao(models.Model):
         depois) não é devida — se ainda não tem pagamento, é cancelada. O
         acerto de caução é feito na tela da caução (docs.md §4.4).
         """
-        if self.status != self.Status.ATIVA:
+        # duas abas (ou dois envios ao mesmo tempo): trava a linha e confere no banco —
+        # senão o 2º envio refazia o acerto das semanas e devolvia o crédito em dobro
+        no_banco = (
+            Alocacao.objects.select_for_update()
+            .filter(pk=self.pk)
+            .values_list("status", flat=True)
+            .first()
+        )
+        if self.status != self.Status.ATIVA or no_banco != self.Status.ATIVA:
             raise ValidationError("Alocação já encerrada.")
         trocas = self.trocas.aggregate(
             abertas=models.Count("pk", filter=models.Q(data_devolucao__isnull=True)),
@@ -515,7 +523,14 @@ class TrocaTemporaria(models.Model):
 
     @transaction.atomic
     def devolver(self, data_devolucao, km_devolucao):
-        if self.data_devolucao:
+        # mesma trava do encerramento: o 2º envio não devolve o substituto de novo
+        no_banco = (
+            TrocaTemporaria.objects.select_for_update()
+            .filter(pk=self.pk)
+            .values_list("data_devolucao", flat=True)
+            .first()
+        )
+        if self.data_devolucao or no_banco:
             raise ValidationError("Substituto já devolvido.")
         if data_devolucao < self.data_retirada:
             raise ValidationError(

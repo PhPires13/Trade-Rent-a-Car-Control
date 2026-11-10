@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 
 from django.db import models
@@ -8,6 +9,19 @@ from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente
 
 DIAS_CARENCIA_AUXILIO = 7  # decisão nº 10: auxílio quando conserto de colisão passa de 7 dias
+
+#: "BO", "B.O.", "BO nº", "BO:" digitados no começo do número do boletim.
+#: O "n" só sai quando é abreviação de número ("nº", "n.", "no." ou "no " separado):
+#: um "N" grudado no número ("BO N2026-1234", "BO-NO123") faz parte dele.
+_PREFIXO_BO = re.compile(
+    r"^\s*b\s*\.?\s*o(?![a-z])\.?[\s:\-–#]*(?:(?:n\s*[º°]\.?|no?\.|no(?=[\s:\-]))[\s:\-]*)?",
+    re.IGNORECASE,
+)
+
+
+def numero_do_bo(texto):
+    """Nº do boletim sem o "BO" digitado no começo (a tela já mostra "BO" antes)."""
+    return _PREFIXO_BO.sub("", texto or "").strip()
 
 
 class Sinistro(models.Model):
@@ -112,9 +126,7 @@ class Sinistro(models.Model):
         Os registros antigos foram gravados antes da limpeza no formulário e
         apareciam como "BO BO 2026-123456".
         """
-        from .views import _PREFIXO_BO
-
-        return _PREFIXO_BO.sub("", self.boletim_ocorrencia or "").strip()
+        return numero_do_bo(self.boletim_ocorrencia)
 
     @property
     def dias_parado(self):

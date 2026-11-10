@@ -29,7 +29,9 @@ class ArquivoInput(forms.ClearableFileInput):
             remover = format_html(
                 '<label for="{}" class="inline-flex min-h-11 items-center gap-2 rounded border '
                 'border-gray-300 px-3 py-2">'
-                '<input type="checkbox" name="{}" id="{}" style="width:auto"> Remover</label>',
+                # tamanho fixo: a regra "form input {width:100%}" da tela não estica a caixa
+                '<input type="checkbox" name="{}" id="{}" '
+                'style="width:1.25rem;height:1.25rem;flex-shrink:0"> Remover</label>',
                 checkbox_id,
                 self.clear_checkbox_name(name),
                 checkbox_id,

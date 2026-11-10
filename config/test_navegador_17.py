@@ -126,6 +126,7 @@ def cliente_csrf(db):
 
 def test_csrf_no_login_deslogado_volta_ao_login_com_aviso(cliente_csrf):
     url = reverse("login") + "?next=/frota/"
+    cliente_csrf.get(url)  # o navegador já tem o cookie; só o token da página está velho
     resposta = cliente_csrf.post(url, {"username": "x", "password": "y"})
     assert resposta.status_code == 302
     assert resposta["Location"] == url
@@ -137,6 +138,7 @@ def test_csrf_no_login_deslogado_volta_ao_login_com_aviso(cliente_csrf):
 def test_csrf_no_login_ja_logado_vai_ao_painel(cliente_csrf, django_user_model):
     django_user_model.objects.create_user(username="dono", password="senha-forte-123")
     cliente_csrf.login(username="dono", password="senha-forte-123")
+    cliente_csrf.get(reverse("painel"))  # cookie CSRF presente, token da página velho
     resposta = cliente_csrf.post(reverse("login"), {"username": "dono", "password": "x"})
     assert resposta.status_code == 302
     assert resposta["Location"] == reverse("painel")

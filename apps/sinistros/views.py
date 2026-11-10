@@ -1,4 +1,3 @@
-import re
 from datetime import date
 from uuid import uuid4
 
@@ -22,7 +21,7 @@ from apps.formatos import brl
 from apps.frota.models import Veiculo, normalizar_placa
 
 from . import services
-from .models import DIAS_CARENCIA_AUXILIO, AuxilioMotorista, Sinistro
+from .models import DIAS_CARENCIA_AUXILIO, AuxilioMotorista, Sinistro, numero_do_bo
 
 # input type="date" só entende AAAA-MM-DD; no formato pt-BR (01/07/2026) a data
 # some da tela ao editar um sinistro já salvo.
@@ -30,11 +29,6 @@ _DATA = {"type": "date"}
 
 #: franquia e auxílio são dinheiro pago/recebido: negativo viraria crédito falso
 SEM_NEGATIVO = MinValueValidator(0, message="O valor não pode ser negativo.")
-
-#: "BO", "B.O.", "BO nº", "BO:" digitados no começo do número do boletim
-_PREFIXO_BO = re.compile(
-    r"^\s*b\s*\.?\s*o(?![a-z])\.?[\s:\-–#]*(n[º°o]?\.?\s*[:\-]?\s*)?", re.IGNORECASE
-)
 
 
 class SinistroForm(FormularioBR, forms.ModelForm):
@@ -162,7 +156,7 @@ class SinistroForm(FormularioBR, forms.ModelForm):
 
     def clean_boletim_ocorrencia(self):
         # a tela já mostra "BO" antes do número: "BO 123" digitado virava "BO BO 123"
-        return _PREFIXO_BO.sub("", self.cleaned_data.get("boletim_ocorrencia") or "").strip()
+        return numero_do_bo(self.cleaned_data.get("boletim_ocorrencia"))
 
     def clean_data(self):
         dia = self.cleaned_data["data"]
@@ -416,9 +410,10 @@ def _aplicar_roubo(request, sinistro):
     except ValidationError as erro:
         messages.warning(
             request,
-            "O sinistro foi salvo, mas a locação não foi encerrada sozinha: "
+            # também vem do botão "Aplicar o roubo": nada foi salvo nessa hora
+            "A locação não foi encerrada sozinha e o carro não ficou Inativo: "
             + "; ".join(erro.messages)
-            + ". Depois de ajustar, use o botão “Aplicar o roubo” na edição do sinistro.",
+            + ". Depois de ajustar, use o botão “Aplicar o roubo” na lista de sinistros.",
         )
         return
     placa = sinistro.veiculo.placa

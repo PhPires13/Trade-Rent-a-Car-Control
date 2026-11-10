@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_not_required
 from django.db.models import Count, OuterRef, Q, Subquery
+from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -301,10 +302,12 @@ def painel(request):
     ]
     locacao = Q(uso=Veiculo.Uso.LOCACAO)
     # carro do contrato que está na oficina com substituto na rua segue "Alocado":
-    # sem tirar ele, o mesmo cliente contava duas vezes na ocupação
-    com_substituto = Alocacao.objects.filter(
-        status=Alocacao.Status.ATIVA, trocas__data_devolucao__isnull=True
-    ).values("veiculo_id")
+    # sem tirar ele, o mesmo cliente contava duas vezes na ocupação. O filtro parte
+    # da troca: partindo da alocação, o LEFT JOIN casava "sem troca nenhuma" com
+    # "troca sem devolução" e tirava da conta todo carro alugado (ocupação 0%)
+    com_substituto = TrocaTemporaria.objects.filter(
+        alocacao__status=Alocacao.Status.ATIVA, data_devolucao__isnull=True
+    ).values("alocacao__veiculo_id")
     contagem = veiculos.aggregate(
         total=Count("pk"),
         locacao=Count("pk", filter=locacao),
@@ -424,6 +427,13 @@ class Entrar(auth_views.LoginView):
         if destino and urlsplit(destino).path.rstrip("/") in ignorar:
             return ""
         return destino
+
+
+@login_not_required
+@never_cache
+def saude(request):
+    """Sonda de saúde do Railway: 200 "ok" sem login, para o deploy entrar no ar."""
+    return HttpResponse("ok", content_type="text/plain")
 
 
 @login_not_required

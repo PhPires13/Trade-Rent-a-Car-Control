@@ -9,7 +9,7 @@
   <div class="flex flex-wrap items-center gap-3 text-sm">
     <a href="{% url 'manutencao:preventivas' %}" class="py-1 underline">← Manutenção da frota</a>
     <a href="{% url 'manutencao:registrar' veiculo.pk %}"
-       class="rounded bg-marca-amarelo px-3 py-2 font-semibold text-marca-preto hover:brightness-95">+ Registrar manutenção</a>
+       class="rounded bg-marca-amarelo px-3 py-2 font-semibold text-marca-preto hover:brightness-95">{% if veiculo.status == "vendido" %}+ Gasto de antes da venda{% else %}+ Registrar manutenção{% endif %}</a>
   </div>
 </div>
 

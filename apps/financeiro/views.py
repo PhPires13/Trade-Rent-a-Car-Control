@@ -315,15 +315,32 @@ def aplicar_encargo(request, cobranca_id):
     return _voltar_ao_painel(request, cobranca)
 
 
+def _cobranca_travada(cobranca):
+    """A cobrança relida com a linha travada (dentro de uma transação).
+
+    As ações do painel conferem o status e gravam: sem a trava, um pagamento
+    lançado noutra aba no mesmo instante passava pela conferência velha.
+    Trava o cliente antes da cobrança — a mesma ordem do Receber e do desconto
+    na caução: em ordem trocada, duas ações ao mesmo tempo se esperariam para
+    sempre (o PostgreSQL derruba uma delas com erro).
+    """
+    Cliente.objects.select_for_update().filter(pk=cobranca.cliente_id).first()
+    return Cobranca.objects.select_for_update().select_related("cliente").get(pk=cobranca.pk)
+
+
 def marcar_judicial(request, cobranca_id):
     cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
     if request.method == "POST":
-        if cobranca.status not in Cobranca.STATUS_EM_ABERTO:
-            # paga/cancelada/já judicial: não reabrir dívida encerrada por clique repetido
-            _erro_no_painel(request, "Só cobrança em aberto pode ir para cobrança judicial.")
-            return _voltar_ao_painel(request, cobranca)
-        cobranca.status = Cobranca.Status.JUDICIAL
-        cobranca.save(update_fields=["status"])
+        with transaction.atomic():
+            cobranca = _cobranca_travada(cobranca)
+            if cobranca.status not in Cobranca.STATUS_EM_ABERTO:
+                # paga/cancelada/já judicial: não reabrir dívida encerrada por clique repetido
+                _erro_no_painel(request, "Só cobrança em aberto pode ir para cobrança judicial.")
+                return _voltar_ao_painel(request, cobranca)
+            cobranca.status = Cobranca.Status.JUDICIAL
+            cobranca.save(update_fields=["status"])
+            # judicial deixa o cliente inadimplente na hora (antes, só na rotina do dia seguinte)
+            services.atualizar_inadimplencia(cobranca.cliente)
         messages.success(request, f"'{cobranca.descricao}' marcada como cobrança judicial.")
     return _voltar_ao_painel(request, cobranca)
 
@@ -332,18 +349,20 @@ def reabrir_judicial(request, cobranca_id):
     """Volta uma cobrança judicial ao fluxo normal — clique errado tem volta."""
     cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
     if request.method == "POST":
-        if cobranca.status != Cobranca.Status.JUDICIAL:
-            _erro_no_painel(request, "Esta cobrança não está em cobrança judicial.")
-        else:
+        with transaction.atomic():
+            cobranca = _cobranca_travada(cobranca)
+            if cobranca.status != Cobranca.Status.JUDICIAL:
+                _erro_no_painel(request, "Esta cobrança não está em cobrança judicial.")
+                return _voltar_ao_painel(request, cobranca)
             cobranca.status = Cobranca.Status.PENDENTE
             cobranca.save(update_fields=["status"])
             cobranca.atualizar_status()  # recalcula: pago/parcial/atrasado/pendente
             services.atualizar_inadimplencia(cobranca.cliente)
-            messages.success(
-                request,
-                f"'{cobranca.descricao}' saiu da cobrança judicial "
-                f"(status: {cobranca.get_status_display()}).",
-            )
+        messages.success(
+            request,
+            f"'{cobranca.descricao}' saiu da cobrança judicial "
+            f"(status: {cobranca.get_status_display()}).",
+        )
     return _voltar_ao_painel(request, cobranca)
 
 
@@ -351,25 +370,33 @@ def cancelar(request, cobranca_id):
     """Cancela uma cobrança automática que o dono decidiu não cobrar (ex.: excedente de km)."""
     cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
     if request.method == "POST":
-        if cobranca.origem not in ORIGENS_CANCELAVEIS:
-            _erro_no_painel(
-                request,
-                "Só cobranças de excedente, encargo, nota de débito ou avulsas podem ser "
-                "canceladas.",
-            )
-        elif cobranca.status == Cobranca.Status.JUDICIAL:
-            _erro_no_painel(request, "Cobrança em cobrança judicial não pode ser cancelada.")
-        elif cobranca.total_quitado > ZERO:
-            _erro_no_painel(request, "Cobrança com pagamento aplicado não pode ser cancelada.")
-        elif cobranca.status == Cobranca.Status.CANCELADA:
-            messages.info(request, f"Esta cobrança já estava cancelada: {cobranca.descricao}.")
-        elif cobranca.nota_debito_id:
-            _cancelar_nota_debito(request, cobranca)
-        else:
-            cobranca.status = Cobranca.Status.CANCELADA
-            cobranca.save(update_fields=["status"])
-            messages.success(request, f"Cancelada (não será cobrada): {cobranca.descricao}.")
+        with transaction.atomic():
+            cobranca = _cobranca_travada(cobranca)
+            _cancelar(request, cobranca)
     return _voltar_ao_painel(request, cobranca)
+
+
+def _cancelar(request, cobranca):
+    """As conferências e o cancelamento em si (a cobrança já vem travada)."""
+    if cobranca.origem not in ORIGENS_CANCELAVEIS:
+        _erro_no_painel(
+            request,
+            "Só cobranças de excedente, encargo, nota de débito ou avulsas podem ser canceladas.",
+        )
+    elif cobranca.status == Cobranca.Status.JUDICIAL:
+        _erro_no_painel(request, "Cobrança em cobrança judicial não pode ser cancelada.")
+    elif cobranca.total_quitado > ZERO:
+        _erro_no_painel(request, "Cobrança com pagamento aplicado não pode ser cancelada.")
+    elif cobranca.status == Cobranca.Status.CANCELADA:
+        messages.info(request, f"Esta cobrança já estava cancelada: {cobranca.descricao}.")
+    elif cobranca.nota_debito_id:
+        _cancelar_nota_debito(request, cobranca)
+    else:
+        cobranca.status = Cobranca.Status.CANCELADA
+        cobranca.save(update_fields=["status"])
+        # era a única dívida atrasada: o cliente volta a Ativo na hora, sem esperar a rotina
+        services.atualizar_inadimplencia(cobranca.cliente)
+        messages.success(request, f"Cancelada (não será cobrada): {cobranca.descricao}.")
 
 
 @transaction.atomic
@@ -640,6 +667,9 @@ def receber(request):
                 raise services.RecebimentoRepetido(repetido)
             aplicacoes = _ler_aplicacoes(post, cliente, cobrancas_abertas)
             with transaction.atomic():
+                # cliente travado antes do encargo (que trava o aluguel): a mesma
+                # ordem das outras ações, para duas abas não se esperarem para sempre
+                Cliente.objects.select_for_update().filter(pk=cliente.pk).first()
                 nos_encargos, encargos = _criar_encargos_do_post(
                     post, cobrancas_abertas, _encargos_sugeridos(cobrancas_abertas, hoje), hoje
                 )
@@ -697,6 +727,7 @@ def receber(request):
     for cobranca in cobrancas_abertas:
         # encargo por atraso que dá para cobrar junto (aluguel atrasado)
         cobranca.encargo_sugerido = sugeridos.get(cobranca.pk)
+        cobranca.dias_atraso = (hoje - cobranca.vencimento).days
         cobranca.encargo_digitado = (post.get(f"encargo_{cobranca.pk}", "") if post else "") or (
             exibir_dinheiro(sugeridos[cobranca.pk]) if cobranca.pk in sugeridos else ""
         )
@@ -902,7 +933,15 @@ def nd_nova(request):
                         "ignorado e nada foi cobrado em dobro.",
                     )
                     return redirect("financeiro:nds")
-                cliente = get_object_or_404(Cliente, pk=post["cliente"])
+                # cliente apagado noutra aba: aviso na tela, sem perder os itens digitados
+                cliente_id = post.get("cliente", "")
+                cliente = (
+                    Cliente.objects.filter(pk=cliente_id).first()
+                    if _id_valido(cliente_id)
+                    else None
+                )
+                if cliente is None:
+                    raise ValidationError("Não deu para emitir: escolha o cliente da nota.")
                 descricoes = post.getlist("item_descricao")
                 valores = post.getlist("item_valor")
                 itens = []
@@ -1189,24 +1228,40 @@ def _linhas_pagamentos(pagamentos):
     return linhas
 
 
-def linhas_base_das(ano, mes):
+#: o que já está nas linhas de cima mas não é dinheiro novo no banco — sai do
+#: "Total que entrou no caixa" (rótulo, chave do resumo_fiscal)
+NAO_E_DINHEIRO_NOVO = [
+    ("Dos valores acima, pagos com crédito do cliente", "pago_com_credito"),
+    ("Dos valores acima, pagos com desconto na caução", "descontado_da_caucao"),
+    ("Da caução recebida, reforço feito com crédito do cliente", "reforco_de_credito"),
+]
+
+
+def linhas_base_das(ano, mes, resumo=None):
     """Linhas da 1ª aba do DAS (totais) — as mesmas em Financeiro › DAS e em
-    Relatórios, para a contabilidade receber a mesma planilha das duas telas."""
-    r = services.resumo_fiscal(ano, mes)
+    Relatórios, para a contabilidade receber a mesma planilha das duas telas.
+
+    As linhas de "não é dinheiro novo" entram com valor negativo: somando a
+    coluna (sem a linha da base), chega-se ao "Total que entrou no caixa"."""
+    r = resumo or services.resumo_fiscal(ano, mes)
     linhas = [["Receita de locação (fatura)", r["locacao"], "Sim"]]
     for rotulo, valor in r["diversos"].items():
         linhas.append([f"Pagamentos diversos — {rotulo} (ND)", valor, "Não"])
     linhas.append(["Caução recebida (não é receita — é do cliente)", r["caucao_recebida"], "Não"])
     linhas.append(["Adiantamentos recebidos (crédito do cliente)", r["adiantamentos"], "Não"])
-    linhas.append(["Pagos com crédito do cliente (já contados acima)", r["pago_com_credito"], "-"])
+    for rotulo, chave in NAO_E_DINHEIRO_NOVO:
+        if r[chave] > ZERO:
+            linhas.append([f"{rotulo} (não é dinheiro novo)", -r[chave], "-"])
     linhas.append(["Total que entrou no caixa", r["entrou_no_caixa"], "-"])
     return linhas
 
 
-def linhas_pagamentos_das(ano, mes):
+def linhas_pagamentos_das(ano, mes, resumo=None):
     """Linhas da 2ª aba do DAS: cada pagamento que compõe o DAS e, embaixo, o
     dinheiro do mês que fica fora do DAS (sobra que virou crédito e caução
-    recebida), para a aba fechar com o "Total que entrou no caixa" da 1ª."""
+    recebida) e o que não é dinheiro novo (crédito usado, desconto na caução),
+    para a aba fechar com o "Total que entrou no caixa" da 1ª."""
+    r = resumo or services.resumo_fiscal(ano, mes)
     linhas = _linhas_pagamentos(services.pagamentos_do_mes(ano, mes))
     fora = services.entradas_fora_do_das(ano, mes)
     if fora:
@@ -1223,6 +1278,15 @@ def linhas_pagamentos_das(ano, mes):
             ]
             for p in fora
         ]
+    # o reforço de caução feito com crédito já ficou fora da lista acima
+    ajustes = [
+        (rotulo, r[chave])
+        for rotulo, chave in NAO_E_DINHEIRO_NOVO
+        if chave != "reforco_de_credito" and r[chave] > ZERO
+    ]
+    for rotulo, valor in ajustes:
+        linhas.append(["", "", "", f"{rotulo} (não é dinheiro novo)", "", -valor, ""])
+    linhas.append(["", "", "", "Total que entrou no caixa", "", r["entrou_no_caixa"], ""])
     return linhas
 
 
@@ -1299,8 +1363,8 @@ def das(request):
         return _planilha_das(
             formato,
             f"das-{ano}-{mes:02d}",
-            linhas_base_das(ano, mes),
-            linhas_pagamentos_das(ano, mes),
+            linhas_base_das(ano, mes, resumo),
+            linhas_pagamentos_das(ano, mes, resumo),
         )
     return render(
         request,

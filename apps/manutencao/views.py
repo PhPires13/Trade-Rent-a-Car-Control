@@ -152,8 +152,13 @@ def texto_carro_vendido(veiculo):
     )
 
 
-def _erros_de_data(veiculo, dados, nova):
-    """Erros da data da manutenção: futuro, antes da compra (com gasto) e carro vendido."""
+def _erros_de_data(veiculo, dados, original=None):
+    """Erros da data da manutenção: futuro, antes da compra (com gasto) e carro vendido.
+
+    `original`: a manutenção antes da edição (None na nova). Na edição do carro
+    vendido só acusa a data que mudou: reabrir a oficina ou pôr a saída depois
+    da venda é recusado, mas o que já estava gravado não trava acertar o custo.
+    """
     data = dados.get("data")
     if veiculo is None or data is None:
         return {}
@@ -169,11 +174,31 @@ def _erros_de_data(veiculo, dados, nova):
         erros["data"] = (
             f"O carro foi comprado em {veiculo.data_aquisicao:%d/%m/%Y} — confira a data."
         )
-    if nova and veiculo.status == Veiculo.Status.VENDIDO:
-        if veiculo.data_venda is None or data > veiculo.data_venda:
-            erros["data"] = texto_carro_vendido(veiculo)
-        elif dados.get("data_entrada") and not dados.get("data_saida"):
-            erros["data_saida"] = "O carro já foi vendido: informe quando ele saiu da oficina."
+    if veiculo.status != Veiculo.Status.VENDIDO:
+        return erros
+    venda = veiculo.data_venda
+    da_venda = {}
+    if original is None and (venda is None or data > venda):
+        da_venda["data"] = texto_carro_vendido(veiculo)
+    elif dados.get("data_entrada") and not dados.get("data_saida"):
+        da_venda["data_saida"] = "O carro já foi vendido: informe quando ele saiu da oficina."
+    elif venda is not None:
+        # gasto de antes da venda: a ida à oficina também é de antes dela
+        if data > venda:
+            da_venda["data"] = f"O carro foi vendido em {venda:%d/%m/%Y}: confira a data."
+        for campo, texto in (("data_entrada", "a entrada na"), ("data_saida", "a saída da")):
+            if dados.get(campo) and dados[campo] > venda:
+                da_venda[campo] = (
+                    f"O carro foi vendido em {venda:%d/%m/%Y}: {texto} oficina não pode ser "
+                    f"depois disso."
+                )
+    if original is not None:
+        da_venda = {
+            campo: erro
+            for campo, erro in da_venda.items()
+            if dados.get(campo) != getattr(original, campo)
+        }
+    erros.update(da_venda)
     return erros
 
 
@@ -339,7 +364,8 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
             self._conferir_cliente_da_cobranca(dados)
         if "custo_real" not in self.errors and (erro := _pago_sem_custo(dados)):
             self.add_error("custo_real", erro)
-        for campo, erro in _erros_de_data(self.veiculo, dados, not self.instance.pk).items():
+        original = self.instance if self.instance.pk else None
+        for campo, erro in _erros_de_data(self.veiculo, dados, original).items():
             if campo not in self.errors:
                 self.add_error(campo, erro)
         return dados

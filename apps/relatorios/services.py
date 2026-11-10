@@ -17,14 +17,16 @@ from apps.financeiro.models import (
     MovimentacaoCaucao,
     Recebimento,
 )
-from apps.financeiro.services import entradas_fora_do_das, resumo_fiscal  # noqa: F401
+from apps.financeiro.services import resumo_fiscal
 from apps.frota.desmobilizacao import (
     ipvas_pagos,
     manutencoes_que_sao_despesa,
     multas_que_sao_despesa,
     ranking_da_frota,
 )
-from apps.frota.models import Veiculo
+from apps.frota.models import PagamentoIpva, Veiculo
+from apps.manutencao.models import Manutencao
+from apps.multas.models import Multa
 from apps.sinistros.models import AuxilioMotorista, Sinistro
 
 # Relatório da contabilidade só com carros de locação: os carros pessoais dos
@@ -347,13 +349,28 @@ def recebiveis_em_aberto(hoje=None):
 
 
 def primeiro_mes_com_dado():
-    """Data mais antiga com movimento (compra de carro, início de aluguel ou
-    pagamento), ou None. O aluguel cobre carro cadastrado sem data de compra."""
-    datas = [
-        Veiculo.objects.aggregate(d=Min("data_aquisicao"))["d"],
-        Alocacao.objects.aggregate(d=Min("data_inicio"))["d"],
-        Recebimento.objects.aggregate(d=Min("data"))["d"],
+    """Data mais antiga com qualquer movimento que aparece no relatório, ou None.
+
+    Olha todas as fontes de receitas e despesas do mês (não só compra de carro
+    e pagamento): uma despesa ou cobrança antiga, de antes do 1º aluguel, também
+    precisa aparecer na caixinha "Ir para". Carro pessoal ("Fora de locação")
+    não entra no relatório: a compra antiga dele não abre anos de meses vazios.
+    """
+    fontes = [
+        (_veiculos_da_locadora(), "data_aquisicao"),
+        (_veiculos_da_locadora(), "data_venda"),
+        (Alocacao.objects, "data_inicio"),
+        (Recebimento.objects, "data"),
+        (Cobranca.objects, "vencimento"),
+        (MovimentacaoCaucao.objects, "data"),
+        (Manutencao.objects.filter(veiculo__uso=LOCACAO), "data"),
+        (Multa.objects.filter(veiculo__uso=LOCACAO), "data_infracao"),
+        (Sinistro.objects.filter(veiculo__uso=LOCACAO), "data"),
+        (Sinistro.objects.filter(veiculo__uso=LOCACAO), "data_evento"),
+        (AuxilioMotorista.objects.filter(sinistro__veiculo__uso=LOCACAO), "data_recebimento"),
+        (PagamentoIpva.objects.filter(veiculo__uso=LOCACAO), "pago_em"),
     ]
+    datas = [qs.aggregate(d=Min(campo))["d"] for qs, campo in fontes]
     datas = [d for d in datas if d]
     return min(datas) if datas else None
 

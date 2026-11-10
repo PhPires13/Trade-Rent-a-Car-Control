@@ -98,7 +98,7 @@ def test_total_bate_com_a_barra_do_grafico(cenario):
     [(2026, 10, -1, (2026, 9)), (2026, 1, -1, (2025, 12)), (2026, 12, 1, (2027, 1))],
 )
 def test_mes_vizinho_vira_o_ano(ano, mes, passo, esperado):
-    assert views._vizinho(ano, mes, passo) == esperado
+    assert views.vizinho(ano, mes, passo) == esperado
 
 
 def test_titulo_com_nome_do_mes_e_setas(usuario_logado, cenario):

@@ -4,6 +4,9 @@
 {% block aviso_texto %}
 <p>Sua sessão expirou ou a página ficou aberta muito tempo, e por segurança o envio não foi aceito.</p>
 <p class="text-sm text-gray-600">Entre de novo e repita o que estava fazendo — o último envio não foi salvo.</p>
+{% if sem_cookie %}
+<p class="rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900">Se isso continuar acontecendo, o navegador pode estar bloqueando os cookies (ou é uma janela anônima com cookies bloqueados). Libere os cookies para este site — sem eles o sistema não consegue manter você conectado.</p>
+{% endif %}
 {% endblock %}
 {% block aviso_acao %}
 <a href="{% url 'painel' %}"

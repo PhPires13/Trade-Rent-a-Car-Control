@@ -70,8 +70,14 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
     _travar_cliente(cliente)
     # relê do banco depois da trava: dois "Gerar ND" ao mesmo tempo (clique duplo)
     # viam as duas a multa "A cobrar" e ela entrava em duas NDs
-    pks = [multa.pk for multa in multas]
+    pks = {multa.pk for multa in multas}
     multas = list(Multa.objects.select_related("veiculo").filter(pk__in=pks).order_by("pk"))
+    if len(multas) != len(pks):
+        # excluída em outra aba entre abrir a tela e clicar: sem isso saía uma ND
+        # sem a multa (ou de R$ 0,00, sem itens) e sem aviso nenhum
+        raise ValidationError(
+            "Uma das multas escolhidas foi alterada ou excluída. Abra a tela de novo."
+        )
     for multa in multas:
         if multa.cliente_id != cliente.pk:
             raise ValidationError(f"{multa} não é do cliente {cliente.nome}.")

@@ -12,7 +12,13 @@ import logging
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.financeiro.services import FalhaEmAlguns, gerar_cobrancas_semanais, marcar_atrasos
+from apps.financeiro.services import (
+    FalhaEmAlguns,
+    gerar_cobrancas_semanais,
+    marcar_atrasos,
+    recebimentos_incoerentes,
+)
+from apps.formatos import brl
 from apps.km.excedente import gerar_excedentes_pendentes
 
 logger = logging.getLogger(__name__)
@@ -51,6 +57,23 @@ class Command(BaseCommand):
                 self.stdout.write(f"{nome}: {len(resultado)} criada(s).")
                 for cobranca in resultado:
                     self.stdout.write(f"  - {cobranca}")
+        self._conferir_recebimentos()
         if falhas:
             raise CommandError(f"Rotina diária com falha em: {', '.join(falhas)}.")
         self.stdout.write(self.style.SUCCESS("Rotina diária concluída."))
+
+    def _conferir_recebimentos(self):
+        """Só avisa (não falha): recebimento cujo valor não fecha com o destino do dinheiro."""
+        try:
+            incoerentes = recebimentos_incoerentes()
+        except Exception:  # noqa: BLE001 — a conferência nunca derruba a rotina
+            logger.exception("Rotina diária: a conferência dos recebimentos falhou.")
+            return
+        for recebimento, diferenca in incoerentes:
+            self.stderr.write(
+                self.style.WARNING(
+                    f"conferir o recebimento nº {recebimento.pk} ({recebimento}): o que ele "
+                    "pagou nas cobranças + o que guardou (crédito/caução) não fecha com o "
+                    f"valor — diferença de {brl(diferenca)}."
+                )
+            )

@@ -11,6 +11,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from apps.alocacoes.models import Alocacao
+from apps.financeiro import services as servicos_financeiro
 from apps.financeiro.models import (
     AplicacaoRecebimento,
     Caucao,
@@ -250,7 +251,9 @@ def test_entradas_fora_do_das_sem_consulta_por_linha(alocacao, django_assert_max
             valor=Decimal("5.00"),
             data=date(2026, 9, dia),
         )
-    with django_assert_max_num_queries(2):
-        linhas = services.entradas_fora_do_das(2026, 9)
+    # número fixo de consultas (sobras, pagamentos com crédito e cauções),
+    # que não cresce com a quantidade de linhas
+    with django_assert_max_num_queries(3):
+        linhas = servicos_financeiro.entradas_fora_do_das(2026, 9)
     assert len(linhas) == 10
     assert sum(linha["valor"] for linha in linhas) == Decimal("75.00")

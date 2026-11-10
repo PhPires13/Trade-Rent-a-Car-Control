@@ -62,6 +62,10 @@
           {% if veiculo.mensalidade_protecao and not veiculo.data_aquisicao %}
           <td class="py-1.5 text-right text-amber-800">sem data de compra: proteção não calculada
             <a href="{% url 'frota:veiculo_editar' veiculo.pk %}#id_data_aquisicao" class="block text-xs underline">informar a data de compra</a></td>
+          {% elif veiculo.mensalidade_protecao and veiculo.status == "vendido" and not veiculo.data_venda %}
+          {# mesmo critério dos relatórios do mês: sem a data da venda, não dá para saber até quando pagou #}
+          <td class="py-1.5 text-right text-amber-800">sem data da venda: proteção não calculada
+            <a href="{% url 'admin:frota_veiculo_change' veiculo.pk %}#id_data_venda" class="block text-xs underline">informar a data da venda</a></td>
           {% else %}
           <td class="py-1.5 text-right text-red-700">− {{ f.despesa_protecao_estimada|brl }}</td>
           {% endif %}</tr>

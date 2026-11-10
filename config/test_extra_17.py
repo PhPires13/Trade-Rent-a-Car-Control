@@ -36,7 +36,7 @@ def test_valor_ambiguo_e_recusado_com_explicacao(texto):
         ("1.250,50", "1250.50"),
         ("12.000", "12000"),
         ("12,5", "12.5"),
-        ("1.250,000", "1250.000"),
+        ("1.250,000", "1250.00"),  # zeros a mais no fim saem (etapa 18)
         ("650.00", "650.00"),
     ],
 )

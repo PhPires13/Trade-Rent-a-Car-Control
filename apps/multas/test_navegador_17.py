@@ -51,7 +51,7 @@ def test_orgao_form_sem_tracinhos(db):
 def test_links_do_topo_tem_alvo_de_toque(usuario_logado):
     html = usuario_logado.get("/multas/").content.decode()
     assert 'class="alvo-toque underline">Órgãos' in html
-    assert 'class="alvo-toque underline">Gerar ND' in html
+    assert 'class="alvo-toque underline">Gerar nota de débito (ND)' in html
 
 
 def test_selo_sem_prazo_pode_quebrar_linha_no_celular(usuario_logado):

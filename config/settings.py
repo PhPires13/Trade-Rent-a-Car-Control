@@ -111,6 +111,14 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
 }
+# Reaproveita a conexão com o banco por 60 s: sem isso cada tela abria uma conexão
+# TLS nova com o Neon (dezenas a centenas de ms a mais, sentido no celular).
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+# O endereço "-pooler" do Neon é um PgBouncer em modo transação: cursor do lado do
+# servidor (.iterator()) pode cair em outra conexão no meio da leitura. A doc do
+# Django manda desligar nesse caso; no SQLite não muda nada.
+DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -183,9 +191,26 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Erros em produção vão para o log do Railway (stderr). Sem isto, com DEBUG=False o
+# Django só mandava o erro 500 por e-mail (não configurado) e nada ficava registrado.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"simples": {"format": "{asctime} {levelname} {name}: {message}", "style": "{"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "simples"}},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "INFO" if DEBUG else "ERROR"},
+        "apps": {"handlers": ["console"], "level": "INFO"},
+    },
+}
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = True
+    # a sonda de saúde do Railway chega por http direto no container, com este Host:
+    # sem a exceção ela levaria 301/400 e o deploy nunca ficaria no ar
+    SECURE_REDIRECT_EXEMPT = [r"^saude/$"]
+    ALLOWED_HOSTS = [*ALLOWED_HOSTS, "healthcheck.railway.app"]
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     # HSTS: depois da primeira visita o navegador só usa https, sem o salto em

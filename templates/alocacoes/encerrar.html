@@ -128,7 +128,7 @@
           {% if debitos > 0 %}
           <p class="mt-1 text-red-900"><strong>{% if debitos_vencidos == debitos %}{{ alocacao.cliente.nome }} deve {{ debitos|brl }} hoje.{% elif debitos_vencidos %}{{ alocacao.cliente.nome }} tem {{ debitos|brl }} em aberto — {{ debitos_vencidos|brl }} já venceu, o resto vence a partir de {{ proximo_vencimento|date:"d/m" }}.{% else %}{{ alocacao.cliente.nome }} tem {{ debitos|brl }} em aberto (vence {{ proximo_vencimento|date:"d/m" }}).{% endif %}</strong>
             Receba agora ou desconte da caução no próximo passo.</p>
-          <a href="{% url 'financeiro:receber' %}?cliente={{ alocacao.cliente.pk }}"
+          <a href="{% url 'financeiro:receber' %}?cliente={{ alocacao.cliente.pk }}&voltar={{ request.get_full_path|urlencode }}"
              class="mt-2 block rounded border border-red-300 bg-white px-4 py-3 text-center font-semibold text-red-800 hover:bg-red-50 sm:inline-block sm:py-2">Receber pagamento</a>
           {% else %}
           <p class="mt-1 text-gray-700">Sem débitos em aberto hoje.</p>
@@ -183,5 +183,7 @@
 
 <style>
   form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.5rem 0.6rem; }
+  /* caixa de confirmação com tamanho de toque (a regra acima esticava a caixa a 100%) */
+  form input[type="checkbox"] { width: 1.25rem; height: 1.25rem; padding: 0; }
 </style>
 {% endblock %}

@@ -61,7 +61,8 @@
 <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Dinheiro</h2>
 <div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
   <a href="{% url 'financeiro:cobrancas' %}" class="rounded-lg bg-white p-4 shadow hover:ring-2 hover:ring-marca-amarelo">
-    <div class="text-sm text-gray-500">Recebido nesta semana</div>
+    {# conta pelo vencimento (o que vence nesta semana e já foi pago), não pelo dia em que o dinheiro entrou #}
+    <div class="text-sm text-gray-500">Já pago do que vence nesta semana</div>
     <div class="text-2xl font-black">{{ semana_recebido|brl }}</div>
     <div class="text-xs text-gray-500">de {{ semana_total|brl }} previstos</div>
     {% if semana_a_lancar %}<div class="text-xs text-gray-500">inclui {{ semana_a_lancar|brl }} de aluguéis que ainda vão vencer nesta semana</div>{% endif %}
@@ -74,9 +75,9 @@
   </a>
   {# o total soma atraso, judicial e vencidas que a rotina ainda não marcou: "Quem deve" mostra todas #}
   <a href="{% url 'financeiro:quem_deve' %}" class="rounded-lg {% if atrasado_total %}bg-red-50 ring-1 ring-red-200{% else %}bg-white{% endif %} p-4 shadow hover:ring-2 hover:ring-red-300">
-    <div class="text-sm text-gray-500">Em atraso</div>
+    <div class="text-sm text-gray-500">Atrasado</div>
     <div class="text-2xl font-black {% if atrasado_total %}text-red-700{% else %}text-green-700{% endif %}">{{ atrasado_total|brl }}</div>
-    <div class="text-xs text-gray-500">{% if atrasado_total %}saldo vencido a cobrar →{% else %}ninguém em atraso{% endif %}</div>
+    <div class="text-xs text-gray-500">{% if atrasado_total %}saldo vencido a cobrar →{% else %}ninguém atrasado{% endif %}</div>
     {% if atrasado_judicial %}<div class="text-xs text-purple-800">inclui {{ atrasado_judicial|brl }} na Justiça</div>{% endif %}
   </a>
   <div class="rounded-lg bg-white p-4 shadow">

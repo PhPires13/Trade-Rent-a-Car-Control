@@ -514,7 +514,9 @@ def aplicar_encargo(cobranca, valor, hoje=None):
         raise ValidationError("O valor do encargo deve ser maior que zero.")
     if cobranca.origem != Cobranca.Origem.ALUGUEL:
         raise ValidationError("Encargo por atraso só pode ser cobrado sobre aluguel.")
-    # trava a cobrança: clique duplo no "Aplicar" não vira dois encargos
+    # trava a cobrança: clique duplo no "Aplicar" não vira dois encargos. O
+    # cliente vem antes — a mesma ordem do Receber e do "não cobrar"/judicial
+    Cliente.objects.select_for_update().filter(pk=cobranca.cliente_id).first()
     Cobranca.objects.select_for_update().filter(pk=cobranca.pk).first()
     # tela aberta há tempo: a semana pode ter sido paga (ou cancelada) noutra aba
     cobranca.refresh_from_db()
@@ -581,8 +583,8 @@ def registrar_recebimento(
     foi pago com crédito do dinheiro novo. O lançamento de crédito fica em
     `recebimento.recebimento_credito` (None sem crédito).
 
-    A data passa por validar_data_pagamento (nunca no futuro; mês retrasado
-    só com `mes_passado_confirmado`).
+    A data passa por validar_data_pagamento (nunca no futuro; antes do dia 1º
+    do mês atual só com `mes_passado_confirmado`).
     """
     valor = Decimal(valor)
     usar_credito = Decimal(usar_credito or ZERO)
@@ -770,7 +772,7 @@ def pode_desfazer(recebimento, hoje=None):
     """Desfazer só vale no mesmo dia do lançamento (decisão do dono, proposta UX nº 1).
 
     Assim nunca se mexe num mês já passado à contabilidade (DAS) e o erro
-    de digitação do dia se corrige sem a Retaguarda.
+    de digitação do dia se corrige pela própria tela (a Retaguarda não apaga recebimento).
     """
     hoje = hoje or timezone.localdate()
     lancado_em = getattr(recebimento, "lancado_em", None)
@@ -816,8 +818,9 @@ def desfazer_recebimento(recebimento, hoje=None):
     """
     if not pode_desfazer(recebimento, hoje):
         raise ValidationError(
-            "Só dá para desfazer no mesmo dia em que o pagamento foi lançado. "
-            "Para corrigir um lançamento de outro dia, use a Retaguarda."
+            "Só dá para desfazer no mesmo dia em que o pagamento foi lançado — "
+            "o de outro dia já pode estar no DAS. Se for mesmo um erro, peça ajuda "
+            "ao responsável pelo sistema."
         )
     cliente = Cliente.objects.select_for_update().get(pk=recebimento.cliente_id)
     if not Recebimento.objects.filter(pk=recebimento.pk).exists():
@@ -858,6 +861,38 @@ def desfazer_recebimento(recebimento, hoje=None):
             encargo.save(update_fields=["status"])
     atualizar_inadimplencia(cliente)
     return cobrancas
+
+
+def recebimentos_incoerentes():
+    """Recebimentos cujo valor não fecha com o destino do dinheiro.
+
+    Todo lançamento feito pelas telas cumpre: valor = aplicado nas cobranças +
+    sobra (crédito ou reforço de caução). O que não fecha é dado antigo ou
+    corrigido à mão (ex.: um Pix sem destino nenhum) — a rotina diária avisa,
+    para conferir antes que vire diferença no caixa. Lista de (recebimento, diferença).
+    """
+    reforcos = dict(
+        MovimentacaoCaucao.objects.filter(
+            tipo=MovimentacaoCaucao.Tipo.REFORCO, observacoes__startswith="Sobra do recebimento nº"
+        ).values_list("observacoes", "valor")
+    )
+    incoerentes = []
+    for recebimento in Recebimento.objects.select_related("cliente").prefetch_related(
+        "aplicacoes", "movimentos_credito"
+    ):
+        destino = sum((a.valor for a in recebimento.aplicacoes.all()), ZERO)
+        destino += sum(
+            (
+                m.valor
+                for m in recebimento.movimentos_credito.all()
+                if m.tipo == MovimentoCredito.Tipo.ENTRADA
+            ),
+            ZERO,
+        )
+        destino += reforcos.get(_marca_reforco(recebimento), ZERO)
+        if destino != recebimento.valor:
+            incoerentes.append((recebimento, recebimento.valor - destino))
+    return incoerentes
 
 
 def resumo_recebimento(recebimento):
@@ -1075,7 +1110,7 @@ def descontar_da_caucao(
 
     Trava cliente, caução e cobrança e relê os saldos: a tela pode estar velha
     (semana cancelada ao encerrar, ou paga noutra aba). O desconto entra no DAS
-    do mês da data: antes do mês passado, só com a mesma confirmação do Receber.
+    do mês da data: antes do dia 1º do mês atual, só com a mesma confirmação do Receber.
     """
     valor = Decimal(valor)
     if valor <= ZERO:
@@ -1251,6 +1286,23 @@ def desfazer_movimentacao_caucao(movimentacao, hoje=None):
     return movimentacao
 
 
+def _reforcos_feitos_com_credito(ano, mes):
+    """Reforços de caução do mês que vieram da sobra de um pagamento feito com crédito.
+
+    Entram em "caução recebida", mas não são dinheiro novo no banco (o crédito
+    já tinha entrado antes). Achados pela marca no texto (_marca_reforco).
+    """
+    marcas = [
+        _marca_reforco(r)
+        for r in Recebimento.objects.filter(
+            forma=Recebimento.Forma.CREDITO, data__year=ano, data__month=mes
+        ).only("pk")
+    ]
+    return MovimentacaoCaucao.objects.filter(
+        tipo=MovimentacaoCaucao.Tipo.REFORCO, observacoes__in=marcas
+    )
+
+
 def resumo_fiscal(ano, mes):
     """Base de cálculo do DAS do mês (decisão nº 11): só a receita de locação.
 
@@ -1314,19 +1366,8 @@ def resumo_fiscal(ano, mes):
     )["t"] or ZERO
     # sobra de pagamento feito com crédito que foi para a caução: está em
     # "caução recebida", mas não entrou dinheiro novo
-    marcas_credito = [
-        _marca_reforco(r)
-        for r in Recebimento.objects.filter(
-            forma=Recebimento.Forma.CREDITO, data__year=ano, data__month=mes
-        ).only("pk")
-    ]
     reforco_de_credito = (
-        MovimentacaoCaucao.objects.filter(
-            tipo=MovimentacaoCaucao.Tipo.REFORCO, observacoes__in=marcas_credito
-        ).aggregate(t=Sum("valor"))["t"]
-        or ZERO
-        if marcas_credito
-        else ZERO
+        _reforcos_feitos_com_credito(ano, mes).aggregate(t=Sum("valor"))["t"] or ZERO
     )
     total_diversos = sum(diversos.values(), ZERO)
     return {
@@ -1336,6 +1377,10 @@ def resumo_fiscal(ano, mes):
         "caucao_recebida": caucao_recebida,
         "adiantamentos": adiantamentos,
         "pago_com_credito": pago_com_credito,
+        # as duas parcelas abaixo também saem do "entrou no caixa": a tela e a
+        # planilha mostram cada uma numa linha, para a conta fechar com as linhas
+        "descontado_da_caucao": descontado_da_caucao,
+        "reforco_de_credito": reforco_de_credito,
         # o que deve bater com o banco/caixa: sem o uso de crédito nem o desconto
         # de caução (dinheiro que já tinha entrado antes)
         "entrou_no_caixa": locacao
@@ -1398,7 +1443,8 @@ def entradas_fora_do_das(ano, mes):
     """Dinheiro do mês que NÃO entra no DAS: sobra que virou crédito e caução recebida.
 
     Uma linha por movimento, no formato de pagamentos_do_mes — as somas batem
-    com "adiantamentos" e "caução recebida" de resumo_fiscal.
+    com "adiantamentos" e "caução recebida" de resumo_fiscal, menos o reforço
+    de caução feito com crédito (não é dinheiro novo: fica de fora daqui).
     """
     linhas = []
     sobras = (
@@ -1420,11 +1466,15 @@ def entradas_fora_do_das(ano, mes):
                 "valor": sobra.valor,
             }
         )
-    caucoes = MovimentacaoCaucao.objects.filter(
-        data__year=ano,
-        data__month=mes,
-        tipo__in=[MovimentacaoCaucao.Tipo.RECEBIMENTO, MovimentacaoCaucao.Tipo.REFORCO],
-    ).select_related("caucao__alocacao__cliente", "caucao__alocacao__veiculo")
+    caucoes = (
+        MovimentacaoCaucao.objects.filter(
+            data__year=ano,
+            data__month=mes,
+            tipo__in=[MovimentacaoCaucao.Tipo.RECEBIMENTO, MovimentacaoCaucao.Tipo.REFORCO],
+        )
+        .exclude(pk__in=_reforcos_feitos_com_credito(ano, mes).values("pk"))
+        .select_related("caucao__alocacao__cliente", "caucao__alocacao__veiculo")
+    )
     for movimento in caucoes:
         alocacao = movimento.caucao.alocacao
         linhas.append(

@@ -44,6 +44,21 @@ class VeiculoAdminForm(forms.ModelForm):
                 raise forms.ValidationError(motivo)
         return uso
 
+    def clean(self):
+        """Vendido sem data da venda: a ficha e os relatórios não sabem até quando contar."""
+        dados = super().clean()
+        vendido = dados.get("status") == Veiculo.Status.VENDIDO
+        if vendido and not dados.get("data_venda"):
+            self.add_error("data_venda", "Carro vendido precisa da data da venda.")
+        elif dados.get("status") and not vendido and dados.get("data_venda"):
+            # com a data, o relatório conta a venda e para de cobrar a proteção
+            self.add_error(
+                "data_venda",
+                "Só carro vendido tem data da venda — apague a data (e o valor da venda) "
+                "ou deixe o status Vendido.",
+            )
+        return dados
+
 
 @admin.register(Veiculo)
 class VeiculoAdmin(SimpleHistoryAdmin):

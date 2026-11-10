@@ -12,7 +12,8 @@ from urllib.parse import quote, urlsplit
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect, resolve_url
+from django.middleware.csrf import REASON_NO_CSRF_COOKIE
+from django.shortcuts import redirect, render, resolve_url
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import csrf
 
@@ -32,6 +33,10 @@ def falha_csrf(request, reason=""):
     mensagem em vez de "erro 403"); o resto vê a página 403_csrf.html."""
     if _e_fetch(request):
         return JsonResponse({"erro": PAGINA_VELHA}, status=403)
+    if reason == REASON_NO_CSRF_COOKIE:
+        # navegador bloqueando cookies: voltar ao login com aviso não adianta (o aviso
+        # também vai em cookie e se perde) e a pessoa ficaria presa sem explicação
+        return render(request, "403_csrf.html", {"sem_cookie": True}, status=403)
     if request.path == resolve_url(settings.LOGIN_URL):
         # tela de login velha (ou aberta em duas abas): "sessão expirou" confundia
         # quem só queria entrar. Logado vai ao Painel; senão, login novo com aviso.

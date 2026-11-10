@@ -1,6 +1,9 @@
+from django import forms
 from django.contrib import admin
+from django.contrib.admin.options import BaseModelAdmin
 from django.urls import include, path
 
+from apps.campos import validar_tamanho_arquivo
 from config import views
 
 # Retaguarda (/admin/) com a marca do sistema e em português
@@ -17,6 +20,24 @@ def _acoes_sem_tracos(self, request, default_choices=None):
 
 
 admin.ModelAdmin.get_action_choices = _acoes_sem_tracos
+
+_campo_do_django = BaseModelAdmin.formfield_for_dbfield
+
+
+def _campo_com_limite_de_arquivo(self, db_field, request, **kwargs):
+    """Na Retaguarda também vale o limite de 10 MB por arquivo (CNH, foto, CRLV).
+
+    Nas telas do sistema o FormularioBR já põe o limite; no Admin um PDF de 11 MB
+    passava direto para o disco. Vale para todo campo de arquivo de toda tela do
+    Admin, inclusive as linhas embutidas (inlines).
+    """
+    campo = _campo_do_django(self, db_field, request, **kwargs)
+    if isinstance(campo, forms.FileField) and validar_tamanho_arquivo not in campo.validators:
+        campo.validators.append(validar_tamanho_arquivo)
+    return campo
+
+
+BaseModelAdmin.formfield_for_dbfield = _campo_com_limite_de_arquivo
 
 
 class BloqueioDeLoginAdmin(admin.ModelAdmin):
@@ -84,6 +105,7 @@ urlpatterns = [
     path("buscar/", views.buscar, name="buscar"),
     path("entrar/", views.Entrar.as_view(), name="login"),
     path("sair/", views.sair, name="logout"),
+    path("saude/", views.saude, name="saude"),
     path("frota/", include("apps.frota.urls")),
     path("clientes/", include("apps.pessoas.urls")),
     path("alocacoes/", include("apps.alocacoes.urls")),

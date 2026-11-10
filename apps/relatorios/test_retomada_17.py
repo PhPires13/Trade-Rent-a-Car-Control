@@ -47,8 +47,10 @@ def test_arquivo_da_contabilidade_traz_os_pagamentos_do_das(usuario_logado, clie
     assert pagamento[1] == "Arlen"
     assert pagamento[3] == "Aluguel semana 1"
     assert pagamento[5] == 650.0
-    # total da aba bate com o total da aba DAS (locação + diversos)
-    assert linhas[-2][3].startswith("Total") and linhas[-2][5] == 650.0
+    # total da aba bate com o total da aba DAS (locação + diversos); a linha é
+    # achada pelo texto — embaixo dela vêm as linhas do caixa (Financeiro › DAS)
+    [total] = [linha for linha in linhas if str(linha[3]).startswith("Total (locação")]
+    assert total[5] == 650.0
 
 
 def test_pagamento_de_outro_mes_nao_entra_na_aba(usuario_logado, cliente):
@@ -57,8 +59,9 @@ def test_pagamento_de_outro_mes_nao_entra_na_aba(usuario_logado, cliente):
     linhas = list(
         load_workbook(io.BytesIO(resposta.content))["Pagamentos do DAS"].iter_rows(values_only=True)
     )
-    assert len(linhas) == 3  # cabeçalho + as duas linhas de total (zeradas)
-    assert linhas[-2][5] == 0
+    # só o cabeçalho e as linhas de total (zeradas): nenhum pagamento com data
+    assert not any(linha[0] for linha in linhas[1:])
+    assert all(linha[5] == 0 for linha in linhas[1:])
 
 
 def test_franquia_sem_data_do_evento_entra_no_mes_do_sinistro(veiculo):

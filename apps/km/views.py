@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 
 from django.contrib import messages
@@ -25,6 +26,8 @@ from .models import (
     primeiro_dia_do_mes,
     veiculos_com_leitura_pendente,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Anos aceitos no ?mes= — fora disso é endereço torto (9999-12 dava erro 500).
 ANO_MINIMO = 2000
@@ -68,10 +71,11 @@ def _volta_para_lista(mes):
     return redirect(f"{reverse('km:lista')}?mes={mes:%Y-%m}")
 
 
-def _clientes_das_leituras(registros):
-    """{registro.pk: cliente na data da leitura} em 2 queries — mesma regra de
-    cliente_vigente (docs.md §4.2: quem estava com o carro no dia, inclusive
-    como substituto), só que as trocas e alocações do período vêm de uma vez.
+def _vinculos_das_leituras(registros):
+    """{registro.pk: troca ou alocação de quem estava com o carro na data da
+    leitura (ou None)} em 2 queries — mesma regra de cliente_vigente (docs.md
+    §4.2: quem estava com o carro no dia, inclusive como substituto), só que as
+    trocas e alocações do período vêm de uma vez.
     """
     if not registros:
         return {}
@@ -97,21 +101,17 @@ def _clientes_das_leituras(registros):
     ):
         alocacoes.setdefault(alocacao.veiculo_id, []).append(alocacao)
 
-    clientes = {}
+    vinculos = {}
     for registro in registros:
         dia = registro.data_leitura
-        troca = next(
+        vinculos[registro.pk] = next(
             (
                 t
                 for t in trocas.get(registro.veiculo_id, ())
                 if t.data_retirada <= dia and (t.data_devolucao is None or t.data_devolucao >= dia)
             ),
             None,
-        )
-        if troca:
-            clientes[registro.pk] = troca.alocacao.cliente
-            continue
-        alocacao = next(
+        ) or next(
             (
                 a
                 for a in alocacoes.get(registro.veiculo_id, ())
@@ -119,8 +119,30 @@ def _clientes_das_leituras(registros):
             ),
             None,
         )
-        clientes[registro.pk] = alocacao.cliente if alocacao else None
-    return clientes
+    return vinculos
+
+
+def _cliente_do_vinculo(vinculo):
+    if isinstance(vinculo, TrocaTemporaria):
+        return vinculo.alocacao.cliente
+    return vinculo.cliente if vinculo is not None else None
+
+
+def _texto_desde_a_entrega(registro, vinculo):
+    """ "2.000 km desde a entrega (35.000 em 20/07)" — o KM rodado da 1ª leitura,
+    que não tem "KM anterior": a base é a entrega (ou a retirada do substituto)
+    ao cliente da data, a mesma do excedente. None quando não há essa base."""
+    if registro.km_anterior is not None or vinculo is None:
+        return None
+    if isinstance(vinculo, TrocaTemporaria):
+        km, data, rotulo = vinculo.km_retirada, vinculo.data_retirada, "retirada do substituto"
+    else:
+        km, data, rotulo = vinculo.km_entrega, vinculo.data_inicio, "entrega"
+    if km is None or km > registro.km:
+        return None
+    # entrega de outro ano (contrato antigo, carga de dados): sem o ano a data engana
+    quando = f"{data:%d/%m}" if data.year == registro.data_leitura.year else f"{data:%d/%m/%Y}"
+    return f"{milhar(registro.km - km)} km desde a {rotulo} ({milhar(km)} em {quando})"
 
 
 def _pendentes_anotados(mes, veiculos=None):
@@ -186,48 +208,6 @@ def lista_mensal(request):
     return _pagina_da_lista(request, mes)
 
 
-def _entrega_da_primeira_leitura(registro):
-    """(km, data, rótulo) de quando o cliente da data pegou o carro — a base do
-    excedente na 1ª leitura, que não tem "KM anterior". None se não houver."""
-    if registro.km_anterior is not None:
-        return None
-    dia = registro.data_leitura
-    troca = (
-        TrocaTemporaria.objects.filter(
-            veiculo_substituto_id=registro.veiculo_id,
-            data_retirada__lte=dia,
-            km_retirada__isnull=False,
-        )
-        .filter(Q(data_devolucao__isnull=True) | Q(data_devolucao__gte=dia))
-        .order_by("-data_retirada")
-        .first()
-    )
-    if troca is not None:
-        base = (troca.km_retirada, troca.data_retirada, "retirada do substituto")
-    else:
-        alocacao = (
-            Alocacao.objects.filter(
-                veiculo_id=registro.veiculo_id, data_inicio__lte=dia, km_entrega__isnull=False
-            )
-            .filter(Q(data_termino__isnull=True) | Q(data_termino__gte=dia))
-            .order_by("-data_inicio")
-            .first()
-        )
-        if alocacao is None:
-            return None
-        base = (alocacao.km_entrega, alocacao.data_inicio, "entrega")
-    return base if base[0] <= registro.km else None
-
-
-def _texto_desde_a_entrega(registro):
-    """ "2.000 km desde a entrega (35.000 em 20/07)" — ou None."""
-    base = _entrega_da_primeira_leitura(registro)
-    if base is None:
-        return None
-    km, data, rotulo = base
-    return f"{milhar(registro.km - km)} km desde a {rotulo} ({milhar(km)} em {data:%d/%m})"
-
-
 def _pagina_da_lista(request, mes, estados=None):
     """`estados` ({veiculo.pk: {...}}) devolve a linha com o que foi digitado e o
     aviso de KM fora do normal, quando o registro não foi gravado.
@@ -238,9 +218,12 @@ def _pagina_da_lista(request, mes, estados=None):
         .prefetch_related("acertos_excedente__cobranca")
         .order_by("veiculo__placa")
     )
-    clientes = _clientes_das_leituras(registros)
+    vinculos = _vinculos_das_leituras(registros)
     for registro in registros:
-        registro.cliente = clientes[registro.pk]
+        vinculo = vinculos[registro.pk]
+        registro.cliente = _cliente_do_vinculo(vinculo)
+        # 1ª leitura sem "KM anterior": o KM rodado sai da entrega (base do excedente)
+        registro.desde_entrega = _texto_desde_a_entrega(registro, vinculo)
     pendentes = _anotar_maior_km(list(_pendentes_anotados(mes)), mes)
     for veiculo in pendentes:
         veiculo.estado = (estados or {}).get(veiculo.pk)
@@ -357,10 +340,23 @@ def registrar(request, veiculo_id):
         anterior = registro.registro_anterior()
         desde = f"a leitura de {anterior.data_leitura:%d/%m/%Y}" if anterior else "a compra"
         sucesso += f" (rodou {milhar(registro.km_utilizado)} km desde {desde})"
-    elif desde_entrega := _texto_desde_a_entrega(registro):
+    elif desde_entrega := _texto_desde_a_entrega(
+        registro, _vinculos_das_leituras([registro])[registro.pk]
+    ):
         sucesso += f" (rodou {desde_entrega})"
     avisos = [_aviso_reencadeamento(registro)]
-    for cobranca in gerar_cobrancas_excedente(registro):
+    try:
+        # a leitura já está gravada: erro no excedente não vira tela de erro
+        with transaction.atomic():
+            cobrancas = gerar_cobrancas_excedente(registro)
+    except Exception:  # noqa: BLE001
+        logger.exception("Excedente de km: falhou na leitura %s.", registro.pk)
+        cobrancas = []
+        avisos.append(
+            "A leitura foi gravada, mas a cobrança de excedente de km não saiu agora. "
+            "Confira o contrato do cliente (franquia e valor do km) e avise quem cuida do sistema."
+        )
+    for cobranca in cobrancas:
         avisos.append(
             f"Franquia estourada — cobrança de excedente de {brl(cobranca.valor)} "
             f"gerada para {cobranca.cliente.nome} (cancele no Financeiro se não for cobrar)."

@@ -199,7 +199,9 @@ class MultaForm(FormularioBR, forms.ModelForm):
     def _conferir_vendedor(self, dados):
         """ "Vendedor anterior" só vale para infração de antes da compra do carro (§4.9).
 
-        Depois da compra, a multa ficava sem ser cobrada de ninguém.
+        Depois da compra, a multa ficava sem ser cobrada de ninguém. No próprio dia
+        da compra a escolha fica com quem cadastra: a infração pode ter sido antes
+        da entrega do carro.
         """
         veiculo, dia = dados.get("veiculo"), dados.get("data_infracao")
         if (
@@ -207,13 +209,13 @@ class MultaForm(FormularioBR, forms.ModelForm):
             and veiculo
             and dia
             and veiculo.data_aquisicao
-            and dia >= veiculo.data_aquisicao
+            and dia > veiculo.data_aquisicao
             and (not self.instance.pk or "responsavel" in self.changed_data)
         ):
             self.add_error(
                 "responsavel",
-                f"O carro foi comprado em {veiculo.data_aquisicao:%d/%m/%Y}, antes da "
-                "infração: a multa não é do vendedor anterior. Escolha Cliente ou Empresa.",
+                f"O carro foi comprado em {veiculo.data_aquisicao:%d/%m/%Y}, antes do dia "
+                "da infração: a multa não é do vendedor anterior. Escolha Cliente ou Empresa.",
             )
 
     def _conferir_condutor_do_cliente(self, dados):
@@ -272,9 +274,15 @@ class MultaForm(FormularioBR, forms.ModelForm):
             if "responsavel" not in self.changed_data:
                 aquisicao = multa.veiculo.data_aquisicao
                 antes_da_compra = bool(aquisicao and multa.data_infracao < aquisicao)
+                # no dia da compra vale o que já estava escolhido (ver _conferir_vendedor)
+                no_dia_da_compra = bool(aquisicao and multa.data_infracao == aquisicao)
                 if antes_da_compra and multa.responsavel == Multa.Responsavel.CLIENTE:
                     multa.responsavel = Multa.Responsavel.VENDEDOR  # dono anterior (§4.9)
-                elif not antes_da_compra and multa.responsavel == Multa.Responsavel.VENDEDOR:
+                elif (
+                    not antes_da_compra
+                    and not no_dia_da_compra
+                    and multa.responsavel == Multa.Responsavel.VENDEDOR
+                ):
                     multa.responsavel = Multa.Responsavel.CLIENTE
         if commit:
             multa.save()

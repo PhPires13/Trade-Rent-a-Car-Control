@@ -306,11 +306,19 @@ def gerar_nd(request):
     vencimento = _vencimento_nd(cliente, request) if cliente else None
     token = request.POST.get("token", "") if request.method == "POST" else ""
     if request.method == "POST" and cliente:
-        marcadas = [m.pk for m in a_cobrar if str(m.pk) in request.POST.getlist("multa")]
+        enviadas = {pk for pk in request.POST.getlist("multa") if id_valido(pk)}
+        marcadas = [m.pk for m in a_cobrar if str(m.pk) in enviadas]
         # recarrega sem o prefetch: o serviço reconfere `repasse` no banco, dentro da
         # transação — com os itens em memória, dois envios seguidos gerariam ND em dobro
         selecionadas = list(cliente.multas.select_related("veiculo").filter(pk__in=marcadas))
         try:
+            if len(marcadas) != len(enviadas):
+                # marcada na tela, mas excluída, editada ou já cobrada em outra aba:
+                # antes a ND saía sem ela, sem aviso, com total diferente do da tela
+                raise ValidationError(
+                    "Uma das multas marcadas foi alterada, excluída ou já entrou em outra "
+                    "nota de débito. Confira a lista abaixo e emita de novo."
+                )
             if vencimento["data"] is None:
                 raise ValidationError("Vencimento inválido — use uma data a partir de hoje.")
             # mesmo código único da ND manual: o clique duplo não emite duas NDs
@@ -325,7 +333,9 @@ def gerar_nd(request):
                 nd = services.gerar_nd_de_multas(
                     cliente, selecionadas, timezone.localdate(), vencimento=vencimento["data"]
                 )
-            messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")
+            messages.success(
+                request, f"Nota de débito (ND) {nd.numero:03d} emitida ({brl(nd.total)})."
+            )
             return redirect("financeiro:nds")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
