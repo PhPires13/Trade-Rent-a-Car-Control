@@ -1,7 +1,9 @@
+from django import forms
 from django.contrib import admin, messages
 from simple_history.admin import SimpleHistoryAdmin
 
 from apps.formatos import brl
+from apps.km.forms import CampoKm
 
 from .models import Alocacao, TrocaTemporaria
 
@@ -30,8 +32,22 @@ class CicloDeVidaTravado(SimpleHistoryAdmin):
         return True
 
 
+class AlocacaoAdminForm(forms.ModelForm):
+    """Franquia "5.000" vira 5000 km (o campo numérico padrão gravava 5)."""
+
+    franquia_km_mensal = CampoKm(
+        label="Franquia mensal (km)", required=False, help_text="Somente quando limitado"
+    )
+
+    def clean_franquia_km_mensal(self):
+        from .views import _franquia_razoavel  # import local evita ciclo de import
+
+        return _franquia_razoavel(self)
+
+
 @admin.register(Alocacao)
 class AlocacaoAdmin(CicloDeVidaTravado):
+    form = AlocacaoAdminForm
     list_display = [
         "veiculo",
         "cliente",

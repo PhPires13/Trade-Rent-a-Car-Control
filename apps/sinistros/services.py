@@ -14,6 +14,10 @@ from apps.frota.models import Veiculo
 
 from .models import Sinistro
 
+#: cobrança da franquia que o botão "Cancelar esta cobrança" ainda cancela (sem
+#: pagamento nem cobrança judicial — "parcial" já tem dinheiro aplicado)
+FRANQUIA_CANCELAVEL = (Cobranca.Status.PENDENTE, Cobranca.Status.ATRASADO)
+
 
 @transaction.atomic
 def cobrar_franquia(sinistro, hoje=None):
@@ -58,6 +62,49 @@ def cobrar_franquia(sinistro, hoje=None):
     return cobranca
 
 
+@transaction.atomic
+def cancelar_cobranca_franquia(sinistro):
+    """Cancela a cobrança da franquia para corrigir o sinistro (valor, motorista...).
+
+    O Financeiro só cancela excedente, encargo, ND e avulsas; a franquia é
+    cancelada daqui, com as mesmas travas: sem pagamento aplicado e fora da
+    cobrança judicial. Depois disso o sinistro fica livre para editar e o botão
+    "Cobrar do cliente" cria a cobrança nova. Devolve a cobrança cancelada.
+    """
+    from apps.financeiro.services import atualizar_inadimplencia
+    from apps.pessoas.models import Cliente
+
+    sinistro = Sinistro.objects.select_for_update().get(pk=sinistro.pk)
+    if not sinistro.cobranca_franquia_id:
+        raise ValidationError("A franquia deste sinistro ainda não foi cobrada.")
+    # mesma ordem de trava do Financeiro (cliente, depois a cobrança)
+    cliente_id = Cobranca.objects.values_list("cliente_id", flat=True).get(
+        pk=sinistro.cobranca_franquia_id
+    )
+    Cliente.objects.select_for_update().filter(pk=cliente_id).first()
+    cobranca = (
+        Cobranca.objects.select_for_update()
+        .select_related("cliente")
+        .get(pk=sinistro.cobranca_franquia_id)
+    )
+    if cobranca.status == Cobranca.Status.CANCELADA:
+        raise ValidationError("A cobrança da franquia já estava cancelada.")
+    if cobranca.status == Cobranca.Status.JUDICIAL:
+        raise ValidationError(
+            "A cobrança da franquia está em cobrança judicial: não dá para cancelar."
+        )
+    if cobranca.total_quitado > 0:
+        raise ValidationError(
+            "A cobrança da franquia já tem pagamento aplicado: não dá para cancelar. "
+            "Desfaça o pagamento no Financeiro antes, se foi engano."
+        )
+    cobranca.status = Cobranca.Status.CANCELADA
+    cobranca.save(update_fields=["status"])
+    # era a única dívida atrasada: o cliente volta a Ativo na hora
+    atualizar_inadimplencia(cobranca.cliente)
+    return cobranca
+
+
 @dataclass
 class ResultadoRoubo:
     """O que o registro do roubo mudou, para os avisos da tela."""
@@ -68,6 +115,8 @@ class ResultadoRoubo:
     troca: TrocaTemporaria | None = None
     #: locação que continua porque o motorista está com um substituto
     locacao_continua: Alocacao | None = None
+    #: locação já encerrada (antes de registrar o roubo) numa data depois do roubo
+    encerrada_depois: Alocacao | None = None
 
 
 @transaction.atomic
@@ -119,6 +168,20 @@ def registrar_roubo(sinistro):
         alocacao.encerrar(sinistro.data, km)
         resultado.alocacao = alocacao
         veiculo.refresh_from_db()
+    else:
+        # quem encerra a locação primeiro e registra o roubo depois: o aluguel
+        # continuou cobrado do roubo até o fim que foi digitado
+        resultado.encerrada_depois = (
+            Alocacao.objects.filter(
+                veiculo=veiculo,
+                status=Alocacao.Status.ENCERRADA,
+                data_inicio__lte=sinistro.data,
+                data_termino__gt=sinistro.data,
+            )
+            .select_related("cliente")
+            .order_by("-data_inicio")
+            .first()
+        )
     if veiculo.status != Veiculo.Status.VENDIDO:
         veiculo.status = Veiculo.Status.INATIVO
         veiculo.save(update_fields=["status"])

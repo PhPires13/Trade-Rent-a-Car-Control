@@ -6,9 +6,10 @@
         class="mt-2 rounded border border-gray-200 bg-gray-50 p-3 text-left text-sm">
     {% csrf_token %}<input type="hidden" name="volta" value="{{ volta }}">
     <p class="mb-2 font-medium">Quem pagou a multa de {{ multa.valor|brl }}?</p>
-    <div class="flex gap-2">
+    <div class="flex flex-wrap gap-2">
       <button name="pago_por" value="Empresa" class="flex-1 rounded bg-marca-preto px-3 py-2.5 font-semibold text-white">Empresa</button>
       <button name="pago_por" value="Cliente" class="flex-1 rounded bg-marca-preto px-3 py-2.5 font-semibold text-white">Cliente</button>
+      {% if multa.responsavel == "vendedor" %}<button name="pago_por" value="Vendedor anterior" class="flex-1 rounded bg-marca-preto px-3 py-2.5 font-semibold text-white">Vendedor anterior</button>{% endif %}
     </div>
   </form>
 </div>

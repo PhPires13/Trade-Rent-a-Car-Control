@@ -309,4 +309,5 @@ def test_tela_de_venda_limita_data_e_km(usuario_logado, veiculo):
     html = usuario_logado.get(f"/frota/veiculo/{veiculo.pk}/vender/").content.decode()
     assert f'max="{HOJE:%Y-%m-%d}"' in html
     assert 'min="2025-01-10"' in html
-    assert 'min="50000"' in html
+    # KM é texto com teclado numérico (aceita "50.500"); o servidor confere o mínimo
+    assert 'name="km" inputmode="numeric"' in html

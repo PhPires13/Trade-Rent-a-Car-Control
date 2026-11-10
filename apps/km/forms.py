@@ -15,6 +15,8 @@ CLASSE_CAMPO = "w-full rounded border border-gray-300 px-3 py-3 text-lg sm:py-2 
 KM_MAXIMO = 1_999_999
 #: "48900", "48.900" ou "48 900" — ponto/espaço só como separador de milhar.
 _KM = re.compile(r"^\d{1,3}([. ]\d{3})+$|^\d+$")
+#: "km" / "KM" / "Km" no fim do número digitado.
+_SUFIXO_KM = re.compile(r"\s*km\.?$", re.IGNORECASE)
 
 
 def km_digitado(texto):
@@ -24,6 +26,10 @@ def km_digitado(texto):
     número torto não passar como outro.
     """
     texto = (texto or "").strip().replace(" ", " ")
+    # "35.500 km" (como aparece no painel e no sistema) vale, igual ao "R$" no dinheiro
+    texto = _SUFIXO_KM.sub("", texto)
+    if not texto:
+        raise ValidationError("Informe o KM do painel.")
     if not _KM.match(texto):
         raise ValidationError("Digite o KM só com números (ex.: 48900 ou 48.900).")
     km = int(texto.replace(".", "").replace(" ", ""))

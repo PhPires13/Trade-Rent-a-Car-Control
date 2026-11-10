@@ -116,6 +116,10 @@
       <span x-text="clientes[cliente] && clientes[cliente].divida"></span>
       Para alocar mesmo assim, você vai precisar confirmar.
     </p>
+    <p x-show="clientes[cliente] && clientes[cliente].cnh" x-cloak role="alert" data-aviso-cnh
+       class="mt-1 rounded border-l-4 border-red-400 bg-red-50 px-2 py-1.5 text-sm text-red-900">
+      <span x-text="clientes[cliente] && clientes[cliente].cnh"></span>
+    </p>
     {% elif field.name == "valor_semanal" %}
     <p x-show="sugeridoValor" x-cloak class="mt-1 rounded bg-blue-50 px-2 py-1 text-xs text-blue-900">
       Preço da categoria <strong x-text="veiculos[veiculo] && veiculos[veiculo].categoria"></strong> — pode mudar.

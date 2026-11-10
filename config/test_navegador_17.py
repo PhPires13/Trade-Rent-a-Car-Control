@@ -188,7 +188,7 @@ def test_menu_lancar_tem_devolucao_de_carro(usuario_logado):
     html = usuario_logado.get(reverse("painel")).content.decode()
     menu = html.split('id="menu-lancar"', 1)[1].split("</nav>", 1)[0]
     assert reverse("alocacoes:lista") in menu
-    assert "Devolução de carro" in menu
+    assert "Devolução do carro" in menu
 
 
 def test_painel_usa_alvo_de_toque_nos_links_de_acao():

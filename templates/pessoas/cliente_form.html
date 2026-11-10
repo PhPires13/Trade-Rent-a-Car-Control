@@ -33,19 +33,28 @@
     {% if field.name == "cnh_verso" %}
       {% if cnh_leitura %}
       <div class="mt-2 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm" id="leitor-cnh">
+        {% if cliente %}
+        {# cadastro existente: nada é trocado sozinho — só os campos vazios; o resto pede "Aplicar" #}
+        <span class="text-xs text-gray-700">
+          📷 CNH renovada? Escolha a foto nova e toque em “Ler dados da CNH”. Só os campos vazios são
+          preenchidos; o que for diferente do cadastro aparece abaixo para você decidir.
+        </span>
+        {% else %}
         <span class="text-xs text-gray-700">
           📷 <strong>Comece por aqui:</strong> escolha a foto ou o PDF da CNH e nome, CPF, número,
           categoria e validade são preenchidos sozinhos — confira e ajuste antes de salvar.
         </span>
+        {% endif %}
         <button type="button" id="botao-ler-cnh"
                 class="mt-2 block rounded bg-marca-preto px-3 py-1.5 font-semibold text-white hover:brightness-125">
-          Ler dados da CNH de novo
+          {% if cliente %}Ler dados da CNH{% else %}Ler dados da CNH de novo{% endif %}
         </button>
         <p id="status-cnh" class="mt-2 hidden text-xs"></p>
+        <div id="diferencas-cnh" class="mt-2 hidden rounded border border-orange-300 bg-orange-50 p-2 text-xs text-orange-900"></div>
       </div>
       {% else %}
-      <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500"
-         title="Técnico: configurar a variável ANTHROPIC_API_KEY no servidor">
+      {# técnico: a leitura liga com a variável ANTHROPIC_API_KEY no servidor (.env.example) — fora da tela, que é para leigos #}
+      <p class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-500">
         A leitura automática da CNH ainda não está ativada — guarde as fotos aqui e preencha os
         campos à mão. Para ativar a leitura, fale com quem cuida do sistema.
       </p>
@@ -68,6 +77,54 @@
     const status = document.getElementById("status-cnh");
     const campos = { nome: "id_nome", cpf: "id_cpf_cnpj", cnh_numero: "id_cnh_numero",
                      cnh_categoria: "id_cnh_categoria", cnh_validade: "id_cnh_validade" };
+    // editando um cliente: a leitura não troca sozinha o que já está cadastrado
+    const editando = {{ cliente|yesno:"true,false" }};
+    const caixaDiferencas = document.getElementById("diferencas-cnh");
+
+    function mostrarDiferencas(diferencas) {
+      caixaDiferencas.replaceChildren();
+      if (!diferencas.length) { caixaDiferencas.classList.add("hidden"); return; }
+      const titulo = document.createElement("p");
+      titulo.className = "font-semibold";
+      titulo.textContent = "A CNH lida tem dados diferentes do cadastro:";
+      caixaDiferencas.append(titulo);
+      const lista = document.createElement("ul");
+      lista.className = "mt-1 list-inside list-disc";
+      for (const d of diferencas) {
+        const item = document.createElement("li");
+        item.textContent = d.rotulo + ": " + legivel(d.antes) + " → " + legivel(d.depois);
+        lista.append(item);
+      }
+      caixaDiferencas.append(lista);
+      const aplicar = document.createElement("button");
+      aplicar.type = "button";
+      aplicar.className = "mt-2 rounded bg-marca-preto px-3 py-1.5 font-semibold text-white";
+      aplicar.textContent = "Aplicar estas mudanças";
+      aplicar.addEventListener("click", function () {
+        for (const d of diferencas) d.campo.value = d.depois;
+        caixaDiferencas.classList.add("hidden");
+        avisar("Mudanças aplicadas — confira antes de salvar.", false);
+      });
+      caixaDiferencas.append(aplicar);
+      caixaDiferencas.classList.remove("hidden");
+    }
+
+    // "JOAO DA SILVA" = "João da Silva" e "123.456.789-00" = "12345678900": não é diferença
+    function comparavel(texto) {
+      return String(texto).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^0-9a-z]/gi, "").toLowerCase();
+    }
+
+    // data AAAA-MM-DD aparece como DD/MM/AAAA
+    function legivel(texto) {
+      const data = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(texto).trim());
+      return data ? data[3] + "/" + data[2] + "/" + data[1] : texto;
+    }
+
+    function rotuloDo(campo) {
+      const label = document.querySelector('label[for="' + campo.id + '"]');
+      return label ? label.textContent.trim() : campo.name;
+    }
 
     function avisar(texto, erro) {
       status.textContent = texto;
@@ -100,12 +157,25 @@
           return;
         }
         let preenchidos = 0;
+        const diferencas = [];
         for (const [chave, idCampo] of Object.entries(campos)) {
           const valor = corpo.dados[chave];
           const campo = document.getElementById(idCampo);
-          if (valor && campo) { campo.value = valor; preenchidos++; }
+          if (!valor || !campo) continue;
+          const atual = campo.value.trim();
+          if (editando && atual && comparavel(atual) !== comparavel(valor)) {
+            diferencas.push({ campo: campo, rotulo: rotuloDo(campo), antes: atual, depois: valor });
+          } else if (!atual || !editando) {
+            campo.value = valor; preenchidos++;
+          }
         }
-        avisar("Dados preenchidos (" + preenchidos + " campos) — confira antes de salvar.", false);
+        mostrarDiferencas(diferencas);
+        if (diferencas.length) {
+          avisar((preenchidos ? preenchidos + " campo(s) vazio(s) preenchido(s). " : "") +
+                 "Nada do cadastro foi trocado — veja as diferenças abaixo.", false);
+        } else {
+          avisar("Dados preenchidos (" + preenchidos + " campos) — confira antes de salvar.", false);
+        }
       } catch (e) {
         avisar("Falha de conexão ao ler a CNH — tente de novo.", true);
       } finally {
@@ -114,8 +184,9 @@
     }
 
     botao.addEventListener("click", lerCnh);
-    // Lê sozinho assim que a CNH é escolhida — o botão fica para reler/corrigir.
-    for (const id of ["id_cnh_frente", "id_cnh_verso"]) {
+    // Cadastro novo: lê sozinho assim que a CNH é escolhida — o botão fica para
+    // reler/corrigir. Editando, só lê pelo botão (quem só troca a foto não perde nada).
+    for (const id of editando ? [] : ["id_cnh_frente", "id_cnh_verso"]) {
       const campo = document.getElementById(id);
       if (campo) campo.addEventListener("change", function () {
         if (campo.files.length) lerCnh();

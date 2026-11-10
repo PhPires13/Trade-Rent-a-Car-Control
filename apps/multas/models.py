@@ -202,9 +202,10 @@ class Multa(models.Model):
             # infração de antes da compra do carro: é do dono anterior (docs.md §4.9)
             self.responsavel = self.Responsavel.VENDEDOR
         if self.cliente_id is None and self.veiculo_id and self.data_infracao:
-            from apps.alocacoes.services import cliente_vigente
+            # carro parado durante uma troca: o cliente dirigia o substituto
+            from .services import cliente_dirigindo
 
-            self.cliente = cliente_vigente(self.veiculo, self.data_infracao)
+            self.cliente = cliente_dirigindo(self.veiculo, self.data_infracao)
         super().save(*args, **kwargs)
 
     def clean(self):
@@ -285,6 +286,27 @@ class Multa(models.Model):
 
     #: valor de `pago_por` gravado pelo botão "Cliente" de "Marcar paga"
     PAGO_POR_CLIENTE = "Cliente"
+    #: idem, botão "Vendedor anterior" (só nas multas de antes da compra do carro)
+    PAGO_POR_VENDEDOR = "Vendedor anterior"
+
+    @property
+    def tem_nic(self):
+        """A multa NIC desta já foi registrada (lê do select_related quando houver)."""
+        return hasattr(self, "multa_nic")
+
+    @property
+    def pode_registrar_nic(self):
+        """Prazo perdido marcado à mão (Editar) e a NIC ainda não registrada.
+
+        O "Registrar NIC" com o prazo vencido e a indicação pendente a lista
+        decide pela data (precisa de `hoje`).
+        """
+        return (
+            self.fici_status == self.Fici.PRAZO_PERDIDO
+            and not self.anulada
+            and not self.multa_origem_nic_id
+            and not self.tem_nic
+        )
 
     @property
     def paga_pelo_cliente(self):

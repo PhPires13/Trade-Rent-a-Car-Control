@@ -29,6 +29,17 @@ ANO_MINIMO = 2000
 DIA_PRAZO_DAS = 20
 
 
+def mes_do_texto(texto):
+    """(ano, mês) de "AAAA-MM", ou None se não for um mês de verdade."""
+    try:
+        ano, mes = str(texto).split("-")
+        ano, mes = int(ano), int(mes)
+        date(ano, mes, 1)  # rejeita mês fora de 1–12 e ano implausível
+        return ano, mes
+    except (ValueError, AttributeError, OverflowError):
+        return None
+
+
 def ano_mes(request, padrao=None):
     """(ano, mês) do parâmetro ?mes=AAAA-MM; entrada inválida cai no mês padrão.
 
@@ -36,16 +47,13 @@ def ano_mes(request, padrao=None):
     para a Luciana, um link errado deve mostrar o mês atual, não quebrar.
     `padrao`: (ano, mês) usado sem ?mes= ou com valor inválido (mês atual se None).
     """
-    try:
-        ano, mes = request.GET.get("mes", "").split("-")
-        ano, mes = int(ano), int(mes)
-        date(ano, mes, 1)  # rejeita mês fora de 1–12 e ano implausível
-        return ano, mes
-    except (ValueError, AttributeError, OverflowError):
-        if padrao is not None:
-            return padrao
-        hoje = timezone.localdate()
-        return hoje.year, hoje.month
+    pedido = mes_do_texto(request.GET.get("mes", ""))
+    if pedido is not None:
+        return pedido
+    if padrao is not None:
+        return padrao
+    hoje = timezone.localdate()
+    return hoje.year, hoje.month
 
 
 def vizinho(ano, mes, passo):

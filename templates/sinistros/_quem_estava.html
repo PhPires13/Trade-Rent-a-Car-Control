@@ -5,6 +5,10 @@
   <p class="rounded border-l-4 border-marca-amarelo bg-yellow-50 px-3 py-2 text-sm">
     Em {{ dia|date:"d/m/Y" }} o carro {{ veiculo.placa }} estava com: <strong>{{ cliente.nome }}</strong>
   </p>
+{% elif troca %}
+  <p class="rounded border-l-4 border-gray-400 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+    Em {{ dia|date:"d/m/Y" }} o carro {{ veiculo.placa }} estava na oficina: {{ troca.alocacao.cliente.nome }} estava com o substituto {{ troca.veiculo_substituto.placa }}. O sinistro fica sem motorista — escolha abaixo se for o caso.
+  </p>
 {% else %}
   <p class="rounded border-l-4 border-gray-400 bg-gray-50 px-3 py-2 text-sm text-gray-700">
     Em {{ dia|date:"d/m/Y" }} o carro {{ veiculo.placa }} não estava alugado para ninguém.

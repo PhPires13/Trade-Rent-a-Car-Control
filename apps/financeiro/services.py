@@ -31,6 +31,7 @@ from .models import (
     NotaDebito,
     Recebimento,
 )
+from .signals import sem_recalculo_automatico
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +259,12 @@ def gerar_cobrancas_semanais(hoje=None, alocacao=None):
     for uma in alocacoes:
         try:
             with transaction.atomic():
-                criadas.extend(_gerar_semanas_da_alocacao(uma, hoje))
+                novas = _gerar_semanas_da_alocacao(uma, hoje)
+                # alocação nova com início no passado: o cliente já fica inadimplente
+                # na mesma hora (a rotina da noite faz isso para a frota toda)
+                if alocacao is not None and novas:
+                    atualizar_inadimplencia(uma.cliente, hoje)
+                criadas.extend(novas)
         except Exception:  # noqa: BLE001 — uma alocação ruim não para as outras
             logger.exception("Cobranças semanais: falhou na alocação %s (%s).", uma.pk, uma.veiculo)
             falhas.append(f"alocação {uma.pk} ({uma.veiculo.placa})")
@@ -292,6 +298,11 @@ def _gerar_semanas_da_alocacao(alocacao, hoje):
                     "valor": _valor_do_periodo(alocacao, inicio, fim),
                     "periodo_inicio": inicio,
                     "periodo_fim": fim,
+                    # semana já vencida (alocação com início no passado, ou dia
+                    # recuperado pela rotina) nasce atrasada — não "Pendente" até a noite
+                    "status": Cobranca.Status.ATRASADO
+                    if vencimento < hoje
+                    else Cobranca.Status.PENDENTE,
                 },
             )
             if criada:
@@ -314,6 +325,9 @@ def reajustar_aluguel_pela_troca(troca, hoje=None):
     if troca.valor_semanal_ajustado is None:
         return []
     alocacao = troca.alocacao
+    # trava o cliente antes de comparar com o que já foi pago: um pagamento ao
+    # mesmo tempo espera (a mesma 1ª trava do Receber e da caução)
+    Cliente.objects.select_for_update().filter(pk=alocacao.cliente_id).first()
     abertas = Cobranca.com_quitacao_anotada(
         Cobranca.objects.filter(
             alocacao=alocacao,
@@ -375,6 +389,8 @@ def refazer_alugueis_em_aberto(alocacao, hoje=None):
     estão) e nunca abaixo do que já foi pago — mesma regra do reajuste da
     troca. Devolve as cobranças alteradas.
     """
+    # cliente travado antes de ler o que já foi pago (como no reajuste da troca)
+    Cliente.objects.select_for_update().filter(pk=alocacao.cliente_id).first()
     devidas = Cobranca.com_quitacao_anotada(
         Cobranca.objects.filter(
             alocacao=alocacao,
@@ -407,9 +423,15 @@ def marcar_atrasos(hoje=None):
     """Atualiza cobranças atrasadas e a inadimplência dos clientes (decisões nº 14 e 17)."""
     hoje = hoje or timezone.localdate()
     limite = hoje - timedelta(days=DIAS_PARA_INADIMPLENCIA)
-    abertas = Cobranca.objects.filter(status__in=Cobranca.STATUS_EM_ABERTO)
+    # o total pago vem anotado (uma consulta para todas); só a cobrança que muda
+    # de status é relida e gravada — um pagamento lançado enquanto a rotina roda
+    # não é desfeito por um saldo velho
+    abertas = Cobranca.com_quitacao_anotada(
+        Cobranca.objects.filter(status__in=Cobranca.STATUS_EM_ABERTO)
+    )
     for cobranca in abertas:
-        cobranca.atualizar_status(hoje)
+        if cobranca.novo_status(cobranca.total_quitado, hoje) != cobranca.status:
+            cobranca.atualizar_status(hoje)
     devedores = set(
         Cobranca.objects.filter(_filtro_devedor(limite)).values_list("cliente_id", flat=True)
     )
@@ -566,6 +588,7 @@ def registrar_recebimento(
     usar_credito=ZERO,
     mes_passado_confirmado=True,
     hoje=None,
+    caucao_acima_confirmado=False,
 ):
     """Lança um pagamento e distribui nas cobranças, com travas (docs.md §4.3).
 
@@ -580,8 +603,14 @@ def registrar_recebimento(
     usar_credito: parte do crédito guardado que entra junto com o dinheiro
     novo (ex.: 50 de crédito + Pix de 600 = semana de 650). Vira um lançamento
     à parte, forma "crédito", nas cobranças mais antigas — o DAS separa o que
-    foi pago com crédito do dinheiro novo. O lançamento de crédito fica em
-    `recebimento.recebimento_credito` (None sem crédito).
+    foi pago com crédito do dinheiro novo. Só se usa do crédito o que o
+    dinheiro novo não cobre (Pix de 600 + crédito de 150 numa semana de 650 →
+    usa 50 do crédito, e os outros 100 continuam crédito). O lançamento de
+    crédito fica em `recebimento.recebimento_credito` (None sem crédito).
+
+    Sobra para a caução que a deixa acima do combinado só com
+    `caucao_acima_confirmado` — a mesma trava do depósito (um zero a mais no
+    valor recebido viraria "caução" em silêncio).
 
     A data passa por validar_data_pagamento (nunca no futuro; antes do dia 1º
     do mês atual só com `mes_passado_confirmado`).
@@ -619,11 +648,12 @@ def registrar_recebimento(
         if pedido > saldo_credito:
             raise ValidationError(f"Crédito insuficiente (saldo {brl(saldo_credito)}).")
     # saldo relido com a cobrança travada: o saldo que a tela carregou pode já
-    # ter sido pago por outro lançamento (não confiar no valor anotado)
-    frescas = {
-        c.pk: c
-        for c in Cobranca.objects.select_for_update().filter(pk__in=[c.pk for c, _ in aplicacoes])
-    }
+    # ter sido pago por outro lançamento (não confiar no valor anotado da tela).
+    # Primeiro trava; a leitura vem num comando seguinte, que já enxerga o que
+    # foi gravado antes da trava — e traz o total pago somado numa consulta só
+    ids = [c.pk for c, _ in aplicacoes]
+    list(Cobranca.objects.select_for_update().filter(pk__in=ids).values_list("pk", flat=True))
+    frescas = {c.pk: c for c in Cobranca.com_quitacao_anotada(Cobranca.objects.filter(pk__in=ids))}
     conferidas = []
     for cobranca, valor_aplicado in aplicacoes:
         atual = frescas.get(cobranca.pk)
@@ -642,8 +672,10 @@ def registrar_recebimento(
             )
         conferidas.append((atual, valor_aplicado))
 
-    # crédito usado junto: cobre as cobranças mais antigas primeiro
-    credito_usado = min(usar_credito, total)
+    # crédito usado junto: só o que o dinheiro novo não cobre (o recibo mostra o
+    # crédito realmente necessário, sem transformar parte do Pix em crédito);
+    # ele cobre as cobranças mais antigas primeiro
+    credito_usado = min(usar_credito, max(total - valor, ZERO))
     pelo_credito, pelo_dinheiro = [], []
     resta = credito_usado
     for cobranca, valor_aplicado in sorted(
@@ -671,6 +703,18 @@ def registrar_recebimento(
             caucao = _caucao_ativa(cliente)
             if not caucao:
                 raise ValidationError("Cliente sem caução ativa — sobra deve ir para crédito.")
+            caucao = _caucao_travada(caucao)
+            combinado = caucao.alocacao.caucao_valor or ZERO
+            if (
+                combinado > ZERO
+                and caucao.saldo + sobra > combinado
+                and not caucao_acima_confirmado
+            ):
+                raise ValidationError(
+                    f"Com a sobra de {brl(sobra)} a caução fica em {brl(caucao.saldo + sobra)}, "
+                    f"acima do combinado ({brl(combinado)}). Confira o valor recebido; se "
+                    'estiver certo, marque "Confirmo: caução acima do combinado".'
+                )
             MovimentacaoCaucao.objects.create(
                 caucao=caucao,
                 tipo=MovimentacaoCaucao.Tipo.REFORCO,
@@ -731,9 +775,13 @@ def _marca_reforco(recebimento):
     return f"Sobra do recebimento nº {recebimento.pk}"
 
 
+def marca_encargo_prefixo():
+    return "Cobrado junto com o recebimento nº "
+
+
 def marca_encargo(recebimento):
     """Texto que liga o encargo cobrado junto no Receber ao lançamento (para o desfazer)."""
-    return f"Cobrado junto com o recebimento nº {recebimento.pk}"
+    return f"{marca_encargo_prefixo()}{recebimento.pk}"
 
 
 def _reforco_do_recebimento(recebimento):
@@ -785,8 +833,8 @@ def pode_desfazer(recebimento, hoje=None):
 def _era_judicial(cobranca):
     """A cobrança quitada estava em cobrança judicial antes de virar PAGO?
 
-    Lido do histórico ANTES de apagar as aplicações — o sinal de exclusão
-    (signals.py) já recalcula o status e grava uma versão nova.
+    Lido do histórico ANTES de apagar as aplicações — o status muda logo
+    depois (_devolver_saldo) e grava uma versão nova.
     """
     if cobranca.status != Cobranca.Status.PAGO:
         return False
@@ -849,7 +897,8 @@ def desfazer_recebimento(recebimento, hoje=None):
     if reforco:
         reforco.delete()
     marca = marca_encargo(recebimento)
-    recebimento.delete()  # as aplicações vão junto (CASCADE)
+    with sem_recalculo_automatico():  # cada cobrança é recalculada logo abaixo
+        recebimento.delete()  # as aplicações vão junto (CASCADE)
     for cobranca in cobrancas:
         _devolver_saldo(cobranca, judicial=cobranca.pk in judiciais)
     # encargo criado junto com este lançamento (Receber) sai junto, se ficou sem pagamento
@@ -1008,11 +1057,24 @@ def descricao_da_nd(numero, descricoes):
     return texto if len(texto) <= maximo else texto[: maximo - 1] + "…"
 
 
+#: vencimento de ND mais longe que isso da emissão pede confirmação (ano errado)
+DIAS_VENCIMENTO_DISTANTE = 60
+
+
 @transaction.atomic
-def emitir_nota_debito(cliente, data_emissao, itens, vencimento=None, observacoes=""):
+def emitir_nota_debito(
+    cliente,
+    data_emissao,
+    itens,
+    vencimento=None,
+    observacoes="",
+    vencimento_distante_confirmado=False,
+):
     """Emite ND com numeração automática e cria a cobrança única (docs.md §4.3).
 
     Sem vencimento informado, vence no próximo dia de pagamento do cliente.
+    Emissão nunca no futuro (ano digitado errado sumia a dívida do "Quem deve"
+    por um ano); vencimento a mais de 60 dias da emissão só com confirmação.
     """
     itens = [(descricao, Decimal(valor)) for descricao, valor in itens if Decimal(valor) > ZERO]
     if not itens:
@@ -1022,6 +1084,20 @@ def emitir_nota_debito(cliente, data_emissao, itens, vencimento=None, observacoe
     for rotulo, dia in (("da data de emissão", data_emissao), ("do vencimento", vencimento)):
         if dia is not None and not ANO_MINIMO_PAGAMENTO <= dia.year <= hoje.year + 1:
             raise ValidationError(f"Confira o ano {rotulo} ({dia:%d/%m/%Y}).")
+    if data_emissao > hoje:
+        raise ValidationError(
+            f"A data de emissão ({data_emissao:%d/%m/%Y}) não pode ser no futuro (confira o ano)."
+        )
+    if (
+        vencimento is not None
+        and (vencimento - data_emissao).days > DIAS_VENCIMENTO_DISTANTE
+        and not vencimento_distante_confirmado
+    ):
+        raise ValidationError(
+            f"O vencimento ({vencimento:%d/%m/%Y}) fica a {(vencimento - data_emissao).days} "
+            "dias da emissão. Confira o ano do vencimento; se estiver certo, marque "
+            '"Confirmo: vencimento distante".'
+        )
     if vencimento is None:
         vencimento = proximo_dia_pagamento(cliente, data_emissao)
     elif vencimento < data_emissao:
@@ -1253,7 +1329,7 @@ def anotar_lancamento_caucao(queryset):
 def desfazer_movimentacao_caucao(movimentacao, hoje=None):
     """Apaga uma movimentação de caução lançada hoje (valor ou tipo errado).
 
-    Desconto desfeito devolve o saldo à cobrança (signals) e recalcula a
+    Desconto desfeito devolve o saldo à cobrança (_devolver_saldo) e recalcula a
     inadimplência; depósito desfeito não pode deixar a caução negativa.
     """
     if not pode_desfazer_movimentacao(movimentacao, hoje):
@@ -1261,6 +1337,14 @@ def desfazer_movimentacao_caucao(movimentacao, hoje=None):
             "Só dá para desfazer no mesmo dia em que a movimentação foi lançada. "
             "Para corrigir uma de outro dia, lance o acerto (ex.: uma devolução)."
         )
+    # cliente antes da caução: a mesma ordem do desconto e do depósito (em ordem
+    # trocada, duas ações ao mesmo tempo se esperariam para sempre no PostgreSQL)
+    cliente_id = (
+        Caucao.objects.filter(pk=movimentacao.caucao_id)
+        .values_list("alocacao__cliente_id", flat=True)
+        .first()
+    )
+    Cliente.objects.select_for_update().filter(pk=cliente_id).first()
     caucao = _caucao_travada(movimentacao.caucao)
     movimentacao = MovimentacaoCaucao.objects.filter(pk=movimentacao.pk).first()
     if movimentacao is None:
@@ -1279,7 +1363,8 @@ def desfazer_movimentacao_caucao(movimentacao, hoje=None):
     # do recebimento) — lido do histórico antes de apagar
     cobranca = movimentacao.cobranca if movimentacao.cobranca_id else None
     judicial = cobranca is not None and _era_judicial(cobranca)
-    movimentacao.delete()  # signal: o desconto desfeito devolve o saldo à cobrança
+    with sem_recalculo_automatico():  # o saldo volta à cobrança logo abaixo
+        movimentacao.delete()
     if cobranca is not None:
         _devolver_saldo(cobranca, judicial=judicial)
     atualizar_inadimplencia(cliente)

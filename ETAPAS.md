@@ -275,6 +275,38 @@ Acompanhamento do plano de implementação definido no [docs-tecnico.md](docs-te
 4. Regressão no navegador (computador e celular) com o servidor sandbox reiniciado.
 5. "km desde a entrega" na lista de KM, calculado em lote.
 
+### Etapa 18 — Fechamento das rodadas 17/17c (suíte verde, navegador, financeiro, conferência)
+- Branch wip-etapa18 estabilizada: 2250 testes passando, ruff/format limpos, sem migração pendente. A suíte caiu de ~7 min para ~26 s (hash de senha rápido só nos testes).
+- 8 testadores no navegador (sandbox) → 93 achados, corrigidos por área com revisor adversarial em cada uma (financeiro, alocações/pessoas, frota, km/manutenção, multas/sinistros, relatórios, global). Destaques:
+  - CRÍTICO: botão "Confirmar recebimento" do Receber ficava sempre desativado no navegador (Alpine com "" no disabled) — corrigido e com teste que roda o x-data real.
+  - Receber com token de envio único (reenviar o mesmo formulário não lança de novo).
+  - Alocação com início no passado: semanas vencidas já nascem "Atrasado" e o cliente fica inadimplente na hora.
+  - Caução usada com contrato ativo mostra "falta repor R$ X" e sugere o reforço.
+  - Franquia mensal e intervalos do plano digitados com milhar ("3.000", "15.000") gravavam 3/15 km — agora usam o campo de KM e recusam valores baixos demais.
+  - Encerrar contrato com o carro principal na oficina (cliente devolve o substituto e o contrato acaba junto).
+  - Venda de carro: data anterior ao último lançamento é recusada; KM fora do normal pede confirmação. IPVA "pago em" fora do período do carro é recusado.
+  - Manutenção com data passada confere o KM com as anotações antes/depois.
+  - Franquia de sinistro já cobrada pode ser cancelada pelo sinistro; multa/sinistro com o carro na oficina durante troca não vai para o cliente; AIT repetido comparado sem pontuação.
+  - Sessão: aviso "sua sessão expirou — o que você digitou NÃO foi salvo"; sessão de 30 dias renovada pelo uso; camada de toque de 44px não rouba mais o toque do vizinho no celular.
+- Financeiro refatorado (com revisor): rotina diária 96→43 consultas (70→4 sem mudança), Receber de 30 cobranças 278→129, travas no banco (migração financeiro 0005: valores > 0, uma multa em uma ND só, só desconto de caução quita cobrança), ordem de travas Cliente → Cobrança.
+- Conferência final do diff desde 46ebf80 (4 revisores): corrigidos deadlock entre Encerrar e Receber (trava do cliente antes da alocação), ND de multas com valor negativo virando erro 500, clique duplo no "Gerar ND" com aviso errado, Relatórios 54→43 consultas e Receber sem consultas extras da caução.
+- Teste de fumaça: 139 URLs (com e sem dados, ids inexistentes, parâmetros inválidos, admin inteiro) — zero erros 500.
+
+**Pendências (para a próxima rodada):**
+1. A refatoração das áreas fora do financeiro não rodou (erro no roteiro da rodada) — propostas em refatoracao.json.
+2. Sobras entre áreas:
+   - Painel: '·' solto antes da placa com crédito (templates/painel.html:36).
+   - Ficha do carro: "Aluguéis recebidos" soma encargo e excedente (filtrar origem ALUGUEL).
+   - Alocações: refazer_semanas_da_troca e _cancelar_semanas_nao_usadas sem a trava do cliente / sem_recalculo_automatico.
+   - km/correcao.refazer_excedente e marcar_atrasos sem trava da cobrança; refazer_excedente não recalcula a inadimplência.
+   - Troca: ?motivo= não pré-preenche; atalho "Dar carro substituto" na ficha do carro.
+   - Desmobilização: tabela de vendidos larga no celular.
+   - Órgão autuador repetido com mensagem padrão do Django; busca global ainda diz "nº da multa".
+   - Retaguarda: números sem formatação em alguns list_display; __str__ de Alocação/Sinistro/Multa com carro apagado.
+   - Franquia rateada em dobro nos dias de troca (km/excedente.py) — conferir.
+3. A confirmar com os donos: AIT gravado sem pontuação (mostra diferente do impresso); "Desfazer recebimento" do auxílio; teto do auxílio em 2 salários mínimos; aviso de multa repetida sem AIT.
+4. Deploy: SECRET_KEY real e decidir SECURE_HSTS_INCLUDE_SUBDOMAINS/PRELOAD; rodar remove_stale_contenttypes.
+
 ## 🎉 MVP completo
 
 As 7 etapas do plano (docs-tecnico.md §5) estão implementadas. Próximos passos fora do código:

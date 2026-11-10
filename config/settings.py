@@ -81,6 +81,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.LoginRequiredMiddleware",
     # sessão expirada num clique HTMX: vai para o login em vez de encaixar a tela de login na linha
     "config.middleware.HtmxLoginRedirectMiddleware",
+    # sessão renovada pelo uso (1x por dia): não vence no meio do trabalho
+    "config.middleware.SessaoRenovadaMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
@@ -153,6 +155,8 @@ AXES_COOLOFF_MESSAGE = (
 # fetch() com a página velha (token CSRF trocado) recebe JSON com o motivo
 CSRF_FAILURE_VIEW = "config.middleware.falha_csrf"
 LOGIN_URL = "login"
+# A sessão vale 30 dias desde o último dia de uso (config.middleware.SessaoRenovadaMiddleware).
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 30
 LOGIN_REDIRECT_URL = "painel"
 LOGOUT_REDIRECT_URL = "login"
 

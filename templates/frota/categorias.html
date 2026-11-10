@@ -30,8 +30,9 @@
              class="w-full rounded border border-gray-300 px-2 py-2"></label>
     <label class="block text-sm">
       <span class="mb-1 block font-medium">Observações</span>
-      <input name="observacoes" value="{{ categoria.observacoes }}"
-             class="w-full rounded border border-gray-300 px-2 py-2"></label>
+      {# textarea: num <input> o navegador junta as linhas ("Atende sábadoFalar com Zé") #}
+      <textarea name="observacoes" rows="2"
+                class="w-full rounded border border-gray-300 px-2 py-2">{{ categoria.observacoes }}</textarea></label>
     <div class="flex items-center justify-between gap-3 sm:block sm:text-center">
       <span class="text-sm text-gray-500 sm:mb-1 sm:block">{{ categoria.total_veiculos }} carro{{ categoria.total_veiculos|pluralize }}</span>
       <button class="min-h-[44px] whitespace-nowrap rounded bg-marca-preto px-4 py-2 text-sm font-semibold text-white hover:brightness-125">Salvar</button>

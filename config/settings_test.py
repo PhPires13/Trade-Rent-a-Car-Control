@@ -12,6 +12,10 @@ SECURE_SSL_REDIRECT = False
 # client.login() dos testes chama authenticate() sem request, e o backend do axes
 # exige request. Os testes que exercitam o bloqueio ligam com override_settings.
 AXES_ENABLED = False
+# Senha dos testes com hash rápido: o padrão (PBKDF2, ~0,17 s por senha) rodava
+# 2x em todo teste logado (criar usuário + entrar) e era ~90% do tempo da suíte.
+# Produção continua com o PBKDF2 do config/settings.py.
+PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},

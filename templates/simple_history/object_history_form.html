@@ -1,0 +1,15 @@
+{% extends "simple_history/object_history_form.html" %}
+{% load admin_urls %}
+{# Versão antiga na Retaguarda: o caminho no topo não chama o nome do registro antigo #}
+{# (dava erro 500 quando o carro ou o cliente dele foi apagado depois). #}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Início</a> &rsaquo;
+    <a href="{% url 'admin:app_list' app_label %}">{{ app_label|capfirst|escape }}</a> &rsaquo;
+    <a href="{{ changelist_url }}">{{ original_opts.verbose_name_plural|capfirst }}</a> &rsaquo;
+    <a href="{{ change_url }}">{{ original_opts.verbose_name|capfirst }} nº {{ object_id }}</a> &rsaquo;
+    <a href="{{ history_url }}">Histórico</a> &rsaquo;
+    Versão antiga
+  </div>
+{% endblock %}

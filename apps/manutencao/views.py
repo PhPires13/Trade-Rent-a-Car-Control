@@ -5,12 +5,13 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.html import format_html
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.views.decorators.http import require_POST
 
 from apps.alocacoes.km_aviso import suspeita_de_km
@@ -20,7 +21,7 @@ from apps.financeiro.models import Cobranca
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
-from apps.km.correcao import ajustar_km_atual
+from apps.km.correcao import ajustar_km_atual, anotacoes_em_volta
 from apps.km.forms import CampoKm
 
 from .models import IntervaloPersonalizado, ItemPreventiva, Manutencao
@@ -92,6 +93,25 @@ def _km_menor_que_o_atual(veiculo, km, data, instancia=None):
     )
 
 
+def _km_fora_das_anotacoes(km, data, antes, depois):
+    """Manutenção de data passada: o KM precisa caber entre o que o carro marcava
+    antes e depois dessa data (o odômetro não volta). None se cabe."""
+    if (antes is None or km >= antes[0]) and km <= depois[0]:
+        return None
+    partes = []
+    if antes is not None:
+        partes.append(f"em {antes[1]:%d/%m/%Y} o carro marcava {milhar(antes[0])} km ({antes[2]})")
+    partes.append(
+        f"em {depois[1]:%d/%m/%Y} {'marcava' if partes else 'o carro marcava'} "
+        f"{milhar(depois[0])} km ({depois[2]})"
+    )
+    regra = "o KM desse dia fica entre os dois" if antes is not None else "o odômetro não volta"
+    return (
+        f"Você digitou {milhar(km)} km para {data:%d/%m/%Y}, mas {' e '.join(partes)} — "
+        f"{regra}. Confira o número e a data; se estiver certo, marque “Confirmo o KM”."
+    )
+
+
 def suspeita_do_km_da_manutencao(veiculo, km, data, instancia=None):
     """Aviso quando o KM digitado foge do normal (D27); None se ok.
 
@@ -105,12 +125,17 @@ def suspeita_do_km_da_manutencao(veiculo, km, data, instancia=None):
         return None
     if instancia is not None and instancia.pk and instancia.km == km:
         return None  # editando sem mexer no KM: já foi aceito antes
+    antes, depois = anotacoes_em_volta(veiculo, data, ignorar=instancia)
+    if depois is not None:
+        # data passada ("Informar última troca", gasto lançado depois): compara com as
+        # anotações em volta da data, não com o KM de hoje
+        return _km_fora_das_anotacoes(km, data, antes, depois)
     if km < veiculo.km_atual:
         return _km_menor_que_o_atual(veiculo, km, data, instancia)
     if km == veiculo.km_atual:
         return None
     data_base = _ultima_anotacao_de_km(veiculo, ignorar=instancia)
-    if data_base is not None:
+    if data_base is not None and data_base <= data:
         return suspeita_de_km(km, data, veiculo.km_atual, data_base, "na última anotação de KM")
     if km - veiculo.km_atual <= SALTO_MAXIMO_SEM_LEITURA:
         return None
@@ -280,7 +305,14 @@ class ManutencaoForm(FormularioBR, forms.ModelForm):
         self.veiculo = veiculo
         self.km_suspeito = False
         self.fields["km"].validators.append(VALIDADOR_KM)
-        self.fields["item"].queryset = ItemPreventiva.objects.filter(ativo=True)
+        # o item fora de uso que esta manutenção já tem continua na lista: senão salvar
+        # sem mexer apagava o item e trocava o tipo para corretiva
+        self.fields["item"].queryset = ItemPreventiva.objects.filter(
+            Q(ativo=True) | Q(pk=self.instance.item_id)
+        )
+        self.fields["item"].label_from_instance = lambda item: (
+            item.nome if item.ativo else f"{item.nome} (fora de uso)"
+        )
         self.fields["pagamento_custo"].choices = [
             ("pendente", "Ainda não"),
             ("pago", "Sim, já pagou"),
@@ -426,21 +458,57 @@ class VoltouDaOficinaForm(FormularioBR, forms.ModelForm):
         return dados
 
 
+#: Intervalo de preventiva menor que isso é número digitado errado ("15" no lugar
+#: de 15.000) — gravado, deixaria a frota inteira "Vencida".
+INTERVALO_MINIMO_KM = 500
+
+
+def _campo_intervalo(label, required, help_text=""):
+    """Intervalo em km como texto: aceita "15.000" (o type=number gravava 15)."""
+    return CampoKm(
+        label=label,
+        required=required,
+        help_text=help_text,
+        widget=forms.TextInput(
+            attrs={"inputmode": "numeric", "autocomplete": "off", "placeholder": "ex.: 10.000"}
+        ),
+    )
+
+
+def _conferir_intervalo(intervalo):
+    """Recusa intervalo pequeno demais, sugerindo o número que a pessoa quis dizer."""
+    if intervalo is None or intervalo >= INTERVALO_MINIMO_KM:
+        return intervalo
+    sugestao = f" Você quis dizer {milhar(intervalo * 1000)}?" if intervalo >= 1 else ""
+    raise forms.ValidationError(
+        f"Intervalo de {milhar(intervalo)} km é curto demais — confira o número.{sugestao}"
+    )
+
+
+def texto_do_intervalo(intervalo):
+    """ "a cada 15.000 km" / "sem prazo fixo" — para as mensagens do plano."""
+    if not intervalo:
+        return "sem prazo fixo"
+    return f"a cada {milhar(intervalo)} km"
+
+
 class ItemPreventivaForm(FormularioBR, forms.ModelForm):
     """Item do plano — com intervalo vira preventiva por km, sem intervalo é esporádica."""
+
+    # campo declarado: o help_texts do Meta não vale para ele
+    intervalo_km_padrao = _campo_intervalo(
+        "Troca a cada (km)",
+        required=False,
+        help_text="Vazio = sem prazo fixo (suspensão, embreagem…).",
+    )
 
     class Meta:
         model = ItemPreventiva
         fields = ["nome", "intervalo_km_padrao", "ativo"]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # 0 seria descartado no cálculo (falsy) e mentiria na tela.
-        self.fields["intervalo_km_padrao"].validators.append(MinValueValidator(1))
-        self.fields["intervalo_km_padrao"].widget.attrs["min"] = 1
-
     def clean_intervalo_km_padrao(self):
-        intervalo = self.cleaned_data.get("intervalo_km_padrao")
+        # 0 seria descartado no cálculo (falsy) e mentiria na tela.
+        intervalo = _conferir_intervalo(self.cleaned_data.get("intervalo_km_padrao"))
         if intervalo is None and self.instance.pk and self.instance.intervalos.exists():
             raise forms.ValidationError(
                 "Este item tem intervalos personalizados por veículo — remova-os "
@@ -451,6 +519,8 @@ class ItemPreventivaForm(FormularioBR, forms.ModelForm):
 
 class IntervaloPersonalizadoForm(FormularioBR, forms.ModelForm):
     """Intervalo de km de um item para um veículo específico (docs.md §4.5)."""
+
+    intervalo_km = _campo_intervalo("Intervalo (km)", required=True)
 
     class Meta:
         model = IntervaloPersonalizado
@@ -468,8 +538,27 @@ class IntervaloPersonalizadoForm(FormularioBR, forms.ModelForm):
         self.fields["item"].queryset = ItemPreventiva.objects.filter(
             intervalo_km_padrao__isnull=False
         )
-        self.fields["intervalo_km"].validators.append(MinValueValidator(1))
-        self.fields["intervalo_km"].widget.attrs["min"] = 1
+
+    def clean_intervalo_km(self):
+        return _conferir_intervalo(self.cleaned_data.get("intervalo_km"))
+
+    def clean(self):
+        dados = super().clean()
+        veiculo, item = dados.get("veiculo"), dados.get("item")
+        if (
+            veiculo
+            and item
+            and IntervaloPersonalizado.objects.filter(veiculo=veiculo, item=item)
+            .exclude(pk=self.instance.pk)
+            .exists()
+        ):
+            # o erro no campo também pula a checagem do banco (texto padrão do Django)
+            self.add_error(
+                "item",
+                f"O {veiculo.placa} já tem um intervalo próprio para {item.nome} — remova o "
+                f"da lista acima para trocar.",
+            )
+        return dados
 
 
 def _pk_do_post(request, chave):
@@ -494,8 +583,12 @@ def plano(request):
             item = get_object_or_404(ItemPreventiva, pk=_pk_do_post(request, "item_id"))
             form = ItemPreventivaForm(request.POST, instance=item)
             if form.is_valid():
-                form.save()
-                messages.success(request, f"Item {item.nome} atualizado.")
+                item = form.save()
+                messages.success(
+                    request,
+                    f"Item {item.nome} atualizado: {texto_do_intervalo(item.intervalo_km_padrao)}"
+                    f"{'' if item.ativo else ' (fora de uso)'}.",
+                )
             else:
                 messages.error(request, _mensagem_de_erros(form))
             return redirect("manutencao:plano")
@@ -503,13 +596,22 @@ def plano(request):
             form_item = ItemPreventivaForm(request.POST)
             if form_item.is_valid():
                 item = form_item.save()
-                messages.success(request, f"Item {item.nome} incluído no plano.")
+                messages.success(
+                    request,
+                    f"Item {item.nome} incluído no plano: "
+                    f"{texto_do_intervalo(item.intervalo_km_padrao)}.",
+                )
                 return redirect("manutencao:plano")
         elif acao == "novo_intervalo":
             form_intervalo = IntervaloPersonalizadoForm(request.POST)
             if form_intervalo.is_valid():
                 intervalo = form_intervalo.save()
-                messages.success(request, f"Intervalo personalizado: {intervalo}.")
+                messages.success(
+                    request,
+                    f"Pronto: {intervalo.item.nome} do {intervalo.veiculo.placa} agora é "
+                    f"{texto_do_intervalo(intervalo.intervalo_km)} (padrão do plano: "
+                    f"{milhar(intervalo.item.intervalo_km_padrao)} km).",
+                )
                 return redirect("manutencao:plano")
         elif acao == "remover_intervalo":
             intervalo = get_object_or_404(
@@ -623,11 +725,46 @@ def _carro_voltou(request, manutencao):
         messages.info(request, _texto_carro_liberado(veiculo))
 
 
-def _carro_foi_para_oficina(request, manutencao):
+def _sugerir_substituto(request, veiculo):
+    """Carro alugado foi para a oficina: lembra de dar um substituto ao cliente.
+
+    Sem a troca temporária o cliente fica sem carro e a semana segue cobrada cheia.
+    """
+    from apps.alocacoes.models import Alocacao
+
+    alocacao = (
+        Alocacao.objects.filter(veiculo=veiculo, status=Alocacao.Status.ATIVA)
+        .select_related("cliente")
+        .first()
+    )
+    if alocacao is None or alocacao.troca_ativa is not None:
+        return
+    cliente = alocacao.cliente
+    endereco = (
+        reverse("alocacoes:troca_nova", args=[alocacao.pk])
+        + "?"
+        + urlencode({"voltar": reverse("pessoas:detalhe", args=[cliente.pk])})
+    )
+    messages.warning(
+        request,
+        format_html(
+            '{} está alugado para {}. Se ficou sem carro, <a href="{}" class="font-semibold '
+            'underline">dê um carro substituto para {} →</a>',
+            veiculo.placa,
+            cliente.nome,
+            endereco,
+            cliente.nome,
+        ),
+    )
+
+
+def _carro_foi_para_oficina(request, manutencao, acabou_de_entrar=True):
     """Carro livre que entra na oficina sai das listas de aluguel e troca.
 
     Só o carro "Disponível" muda para "Em manutenção"; o alugado continua
-    "Alocado" e ganha só o selo "Na oficina". Volta sozinho no "Carro voltou".
+    "Alocado" e ganha só o selo "Na oficina" — e a tela sugere o carro substituto
+    (`acabou_de_entrar`: só na hora em que a ida à oficina foi aberta). Volta
+    sozinho no "Carro voltou".
     """
     if not manutencao.data_entrada or manutencao.data_saida:
         return
@@ -638,6 +775,8 @@ def _carro_foi_para_oficina(request, manutencao):
         messages.info(
             request, f"{veiculo.placa} ficou “Em manutenção” e não aparece para alugar até voltar."
         )
+    elif acabou_de_entrar:
+        _sugerir_substituto(request, veiculo)
 
 
 def registrar(request, veiculo_id):
@@ -654,12 +793,22 @@ def registrar(request, veiculo_id):
             inicial["item"] = item.pk
             inicial["descricao"] = item.nome
     sinistro_id = request.GET.get("sinistro", "")
-    if id_valido(sinistro_id) and veiculo.sinistros.filter(pk=sinistro_id).exists():
-        inicial.update(sinistro=int(sinistro_id), data_entrada=timezone.localdate())
+    sinistro = veiculo.sinistros.filter(pk=sinistro_id).first() if id_valido(sinistro_id) else None
+    if sinistro is not None:
+        inicial.update(sinistro=sinistro.pk, data_entrada=timezone.localdate())
+        if sinistro.acionou_protecao:
+            # o conserto pago pela Auto Truck não é despesa da empresa (só a franquia,
+            # que já entra pelo sinistro) — "Particular" contava o dinheiro duas vezes
+            inicial["origem_custo"] = Manutencao.OrigemCusto.PROTECAO
     # Cada formulário leva um código único (como a ND e a multa): clique duplo,
     # internet lenta ou "Voltar" não gravam a mesma manutenção duas vezes.
     token = request.POST.get("token", "") if request.method == "POST" else ""
     form = ManutencaoForm(request.POST or None, veiculo=veiculo, initial=inicial)
+    if sinistro is not None and sinistro.acionou_protecao:
+        form.fields["origem_custo"].help_text = (
+            "Conserto pelo evento da proteção: não conte o valor pago pela Auto Truck como "
+            "custo da empresa. Use “Particular” só para o que a empresa pagou por fora."
+        )
     if request.method == "GET" and veiculo.status == Veiculo.Status.VENDIDO:
         messages.warning(request, texto_carro_vendido(veiculo))
     if request.method == "POST" and form.is_valid():
@@ -712,7 +861,7 @@ def editar(request, manutencao_id):
         if aviso_km:
             messages.info(request, aviso_km)
         _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
-        _carro_foi_para_oficina(request, manutencao)
+        _carro_foi_para_oficina(request, manutencao, acabou_de_entrar=not estava_aberta)
         segue_aberta = manutencao.data_entrada and not manutencao.data_saida
         if estava_aberta and not segue_aberta:
             # saída informada — ou a entrada apagada por engano: o carro não fica preso

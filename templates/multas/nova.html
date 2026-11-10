@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block titulo %}{% if multa %}Editar multa{% else %}Nova multa{% endif %} — Trade Rent a Car{% endblock %}
+{% block titulo %}{% if multa %}Editar multa — {{ multa.veiculo.placa }} {{ multa.data_infracao|date:"d/m/Y" }}{% else %}Nova multa{% endif %} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 {% if multa %}
@@ -22,7 +22,9 @@
       x-data="{ tipo: '{{ form.tipo_condutor.value|default:'cliente'|escapejs }}', resp: '{{ form.responsavel.value|default:'cliente'|escapejs }}', mexeuResp: false }">
   {% csrf_token %}
   {% include "_erros_form.html" %}
-  {% if multa %}<input type="hidden" name="volta" value="{{ volta }}">{% else %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
+  {% if multa %}<input type="hidden" name="volta" value="{{ volta }}">
+  {# vira "1" quando a pessoa mexe em "Cliente que paga" (onchange do select) #}
+  <input type="hidden" name="cliente_escolhido" id="cliente_escolhido" value="{% if form.data.cliente_escolhido == '1' %}1{% endif %}">{% else %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
 
   {% if multa %}
   <fieldset class="rounded-lg border-l-4 border-marca-amarelo bg-white p-5 shadow">
@@ -47,7 +49,8 @@
       <div id="quem-estava" class="rounded bg-gray-50 px-3 py-2 text-sm sm:col-span-2" aria-live="polite"
            hx-get="{% url 'multas:quem_estava' %}"
            hx-trigger="load, change from:#id_veiculo, change from:#id_data_infracao, change from:#id_cliente"
-           hx-include="#id_veiculo, #id_data_infracao, #id_cliente, #id_condutor_autorizado">
+           hx-include="#id_veiculo, #id_data_infracao, #id_cliente, #id_condutor_autorizado{% if multa %}, #cliente_escolhido{% endif %}"
+           {% if multa %}hx-vals='{"multa": "{{ multa.pk }}"}'{% endif %}>
         <p class="text-gray-500">Escolha o carro e a data da infração para ver com quem o carro estava.</p>
       </div>
       {% include "multas/_campo.html" with field=form.orgao %}

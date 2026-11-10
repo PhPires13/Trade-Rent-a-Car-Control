@@ -9,10 +9,16 @@ from django import forms
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.busca import so_letras_e_digitos
 from apps.campos import FormularioBR
 from apps.pessoas.models import CondutorAutorizado
 
 from .models import Multa, OrgaoAutuador
+
+
+def normalizar_ait(texto):
+    """AIT só com letras maiúsculas e números ("ab-123 4" → "AB1234"), como na busca."""
+    return so_letras_e_digitos(texto)
 
 
 def condutores_do_cliente(cliente, atual=None):
@@ -97,6 +103,14 @@ class MultaForm(FormularioBR, forms.ModelForm):
             "if (!mexeuResp) resp = $event.target.value === 'empresa' ? 'empresa' "
             ": (resp === 'empresa' ? 'cliente' : resp)"
         )
+        if self.instance.responsavel != Multa.Responsavel.CONDUTOR:
+            # "Condutor identificado" fazia o mesmo que "Cliente" (a ND vai para o
+            # cliente): fica só nas multas antigas que já o usam
+            self.fields["responsavel"].choices = [
+                opcao
+                for opcao in self.fields["responsavel"].choices
+                if opcao[0] != Multa.Responsavel.CONDUTOR
+            ]
         self.fields["responsavel"].widget.attrs["x-model"] = "resp"
         self.fields["responsavel"].widget.attrs["x-on:change"] = "mexeuResp = true"
         if not self.instance.pk and not self.is_bound:
@@ -129,18 +143,39 @@ class MultaForm(FormularioBR, forms.ModelForm):
         return pontos
 
     def clean_ait(self):
-        return (self.cleaned_data.get("ait") or "").strip()
+        # "LEIGO-2", "leigo 2" e "LEIGO2" são o mesmo auto: grava só letras e números
+        return normalizar_ait(self.cleaned_data.get("ait"))
 
     def _conferir_ait_repetido(self, dados):
-        """Mesmo AIT no mesmo órgão já cadastrado: seria cobrado duas vezes do cliente."""
+        """Mesmo AIT já cadastrado: a multa seria cobrada duas vezes do cliente.
+
+        Compara sem hífen/espaço/pontos. Vale no mesmo órgão, com o órgão em
+        branco em qualquer uma das duas, ou no mesmo carro (o órgão esquecido
+        ou trocado não pode deixar passar a mesma multa).
+        """
         ait = dados.get("ait")
-        if not ait or "ait" in self._errors:
+        if not ait or "ait" in self._errors or not self._novo_ou_mudou("ait", "orgao", "veiculo"):
             return
-        repetida = (
-            Multa.objects.filter(ait__iexact=ait, orgao=dados.get("orgao"))
+        orgao, veiculo = dados.get("orgao"), dados.get("veiculo")
+        candidatas = (
+            Multa.objects.exclude(ait="")
             .exclude(pk=self.instance.pk)
             .select_related("veiculo")
-            .first()
+            .order_by("pk")
+        )
+        repetida = next(
+            (
+                multa
+                for multa in candidatas
+                if normalizar_ait(multa.ait) == ait
+                and (
+                    orgao is None
+                    or multa.orgao_id is None
+                    or multa.orgao_id == orgao.pk
+                    or (veiculo is not None and multa.veiculo_id == veiculo.pk)
+                )
+            ),
+            None,
         )
         if repetida is not None:
             self.add_error(
@@ -229,9 +264,9 @@ class MultaForm(FormularioBR, forms.ModelForm):
         if not self.instance.pk and condutor and condutor.cliente_id and veiculo and dia:
             # cadastro: o condutor tem de ser do cliente escolhido (ou de quem estava
             # com o carro) — senão a ND sai para um e o nome indicado é de outro
-            from apps.alocacoes.services import cliente_vigente
+            from .services import cliente_dirigindo
 
-            dono = dados.get("cliente") or cliente_vigente(veiculo, dia)
+            dono = dados.get("cliente") or cliente_dirigindo(veiculo, dia)
             if dono is None or dono.pk != condutor.cliente_id:
                 quem = f"com {dono.nome}" if dono else "sem cliente"
                 self.add_error(
@@ -243,19 +278,33 @@ class MultaForm(FormularioBR, forms.ModelForm):
         if not (self.instance.pk and condutor and condutor.cliente_id and veiculo and dia):
             return
         mudou = set(self.changed_data)
-        if not {"veiculo", "data_infracao"} & mudou or "cliente" in mudou:
-            return
+        if not {"veiculo", "data_infracao"} & mudou or self._cliente_escolhido_a_mao():
+            return  # cliente escolhido à mão (limpo = recalculado pela data, conferido abaixo)
         if self.instance.itens_nd.exists() or self.instance.multa_origem_nic_id:
             return  # nesses casos o cliente não é recalculado (ver save)
-        from apps.alocacoes.services import cliente_vigente
+        from .services import cliente_dirigindo
 
-        novo = cliente_vigente(veiculo, dia)
+        novo = cliente_dirigindo(veiculo, dia)
         if novo is not None and novo.pk != condutor.cliente_id:
             self.add_error(
                 "condutor_autorizado",
                 f"{condutor} é condutor de outro cliente; nessa data o carro estava com "
                 f"{novo.nome}. Confira quem dirigia.",
             )
+
+    #: campo escondido da edição, marcado quando a pessoa mexe em "Cliente que paga"
+    CAMPO_CLIENTE_ESCOLHIDO = "cliente_escolhido"
+
+    def _cliente_escolhido_a_mao(self):
+        """A pessoa escolheu o cliente (não é o salvo que só ficou lá).
+
+        Depois de mudar o carro/data, a tela limpa o "Cliente que paga"; escolher
+        de novo o mesmo cliente não aparece em changed_data — o campo escondido
+        diz que foi escolha dela, e o cliente não é recalculado pela data.
+        """
+        if not self.cleaned_data.get("cliente"):
+            return False
+        return "cliente" in self.changed_data or self.data.get(self.CAMPO_CLIENTE_ESCOLHIDO) == "1"
 
     def save(self, commit=True):
         multa = super().save(commit=False)
@@ -267,7 +316,7 @@ class MultaForm(FormularioBR, forms.ModelForm):
             # a NIC guarda o motorista da multa original, não o do dia em que chegou
             and not self.instance.multa_origem_nic_id
         ):
-            if "cliente" not in self.changed_data:
+            if not self._cliente_escolhido_a_mao():
                 # carro ou data corrigidos: o motorista é recalculado pela nova data
                 # (senão a ND sairia para quem estava com o carro no dia antigo)
                 multa.cliente = None
@@ -330,8 +379,20 @@ class MultaEdicaoForm(MultaForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        if self.instance.multa_origem_nic_id:
+            # a NIC é a própria multa por não indicar: não há condutor a indicar nela
+            self.fields["fici_status"].disabled = True
+            self.fields["fici_status"].help_text = "Esta é uma multa NIC: não há indicação."
+        # marca o campo escondido "cliente_escolhido" (nova.html) quando a pessoa mexe
+        # no cliente. Atributo onchange: roda antes do pedido do aviso (HTMX), que
+        # leva a marca e assim não limpa o cliente que ela acabou de escolher
+        self.fields["cliente"].widget.attrs["onchange"] = (
+            f"document.getElementById('{self.CAMPO_CLIENTE_ESCOLHIDO}').value = '1'"
+        )
         campo = self.fields["pago_por"]
         opcoes = list(self.OPCOES_PAGO_POR)
+        if self.instance.responsavel == Multa.Responsavel.VENDEDOR:
+            opcoes.append((Multa.PAGO_POR_VENDEDOR, "Vendedor anterior"))
         atual = (self.instance.pago_por or "").strip()
         conhecidos = {valor.lower(): valor for valor, _ in opcoes if valor}
         if atual.lower() in conhecidos:
@@ -350,6 +411,7 @@ class MultaEdicaoForm(MultaForm):
 
     def clean(self):
         dados = super().clean()
+        self._conferir_fici_com_nic(dados)
         if dados.get("pagamento") != Multa.Pagamento.PAGO:
             dados["pago_por"] = ""  # voltou para "a pagar": não fica "Paga (Empresa)" guardado
         item = self.instance.pk and self.instance.itens_nd.select_related("nota_debito").first()
@@ -362,6 +424,21 @@ class MultaEdicaoForm(MultaForm):
                         "cliente com o valor antigo. Ajuste ou cancele a nota de débito antes.",
                     )
         return dados
+
+    def _conferir_fici_com_nic(self, dados):
+        """Com a NIC registrada, o prazo já foi perdido: não volta a "Indicado"/"Pendente".
+
+        Ficariam ao mesmo tempo "motorista indicado" e uma NIC contra a empresa.
+        """
+        if "fici_status" not in self.changed_data or not self.instance.pk:
+            return
+        nic = Multa.objects.filter(multa_origem_nic=self.instance).first()
+        if nic is not None and dados.get("fici_status") != Multa.Fici.PRAZO_PERDIDO:
+            self.add_error(
+                "fici_status",
+                f"Esta multa já tem NIC registrada (multa de {nic.data_infracao:%d/%m/%Y}). "
+                "O prazo foi perdido — para desfazer, fale com quem cuida do sistema.",
+            )
 
 
 class OrgaoForm(FormularioBR, forms.ModelForm):
@@ -390,8 +467,10 @@ class OrgaoForm(FormularioBR, forms.ModelForm):
             "observacoes",
         ]
         widgets = {
-            "login": forms.TextInput(),
-            "senha": forms.PasswordInput(),
+            # o navegador não pode preencher sozinho com o login/senha do próprio
+            # sistema: salvar só o telefone trocaria as credenciais do órgão
+            "login": forms.TextInput(attrs={"autocomplete": "off"}),
+            "senha": forms.PasswordInput(attrs={"autocomplete": "new-password"}),
             "procedimento": forms.Textarea(attrs={"rows": 3}),
             "endereco": forms.Textarea(attrs={"rows": 3}),
             "observacoes": forms.Textarea(attrs={"rows": 3}),

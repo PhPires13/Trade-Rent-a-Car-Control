@@ -1,6 +1,6 @@
 {# Formulário de sinistro em blocos (novo e editar). Espera `form`, `volta` e `rotulo_botao`. #}
 <form method="post" class="form-sinistro max-w-2xl space-y-5"
-      x-data="{ protecao: {{ form.acionou_protecao.value|yesno:'true,false' }} }">
+      x-data="{ protecao: {{ form.acionou_protecao.value|yesno:'true,false' }}, custo: '{{ form.responsavel_custo.value|default:'empresa'|escapejs }}', mexeuCusto: {{ form.is_bound|yesno:'true,false' }} }">
   {% csrf_token %}
   <input type="hidden" name="volta" value="{{ volta }}">
   {% if not form.instance.pk %}<input type="hidden" name="token" value="{{ token }}">{% endif %}

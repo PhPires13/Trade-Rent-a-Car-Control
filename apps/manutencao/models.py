@@ -2,6 +2,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
+from apps.formatos import milhar
 from apps.frota.models import Veiculo
 
 
@@ -61,7 +62,7 @@ class IntervaloPersonalizado(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.veiculo.placa} — {self.item.nome}: {self.intervalo_km} km"
+        return f"{self.veiculo.placa} — {self.item.nome}: {milhar(self.intervalo_km)} km"
 
 
 class Manutencao(models.Model):

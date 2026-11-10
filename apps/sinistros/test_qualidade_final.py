@@ -116,7 +116,7 @@ def test_franquia_cobrada_trava_valor_quem_paga_e_protecao(cobrado, mudanca):
     form = SinistroForm(dados, instance=cobrado)
     assert not form.is_valid()
     assert "A franquia já foi cobrada de Bruno" in str(form.errors)
-    assert "Cancele a cobrança em Financeiro" in str(form.errors)
+    assert "Cancelar esta cobrança" in str(form.errors)
 
 
 def test_franquia_cobrada_trava_data_que_muda_o_motorista(cobrado):

@@ -41,6 +41,8 @@ def alocacao(cliente):
 
 
 def _queries(client, url):
+    # 1ª visita do dia renova a sessão (SessaoRenovadaMiddleware): fora da conta
+    client.get(url)
     with CaptureQueriesContext(connection) as contexto:
         assert client.get(url).status_code == 200
     return len(contexto.captured_queries)

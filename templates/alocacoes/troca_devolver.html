@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block titulo %}Devolver substituto — Trade Rent a Car{% endblock %}
+{% block titulo %}Devolver substituto — {{ troca.veiculo_substituto.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <a href="{{ voltar }}" class="text-sm text-gray-600 underline">← Voltar</a>
@@ -9,6 +9,7 @@
   <strong>{{ troca.alocacao.cliente.nome }}</strong> devolve o substituto
   <strong>{{ troca.veiculo_substituto.placa }}</strong> ({{ troca.veiculo_substituto.marca_modelo }})
   e volta a ficar com o carro dele, <strong>{{ troca.alocacao.veiculo.placa }}</strong>.
+  Se ele está devolvendo de vez, <a href="{{ url_encerrar }}" class="font-semibold underline">encerre o contrato</a> — o substituto é devolvido junto.
 </p>
 
 <div class="grid max-w-3xl gap-6 md:grid-cols-2">
@@ -53,16 +54,12 @@
         Confirmo: o cliente vai voltar para o {{ troca.alocacao.veiculo.placa }}
       </label>
       <p class="text-xs">Com a confirmação, o {{ troca.alocacao.veiculo.placa }} sai da oficina na data da devolução acima (os dias parado param de contar).</p>
+      <p class="mt-2 border-t border-orange-200 pt-2">O cliente está devolvendo de vez (não vai voltar para o {{ troca.alocacao.veiculo.placa }})?
+        <a href="{{ url_encerrar }}" class="inline-flex min-h-11 items-center font-semibold underline">Encerrar o contrato devolvendo o {{ troca.veiculo_substituto.placa }} →</a>
+        <span class="block text-xs">O {{ troca.alocacao.veiculo.placa }} continua na oficina, sem cliente.</span></p>
     </div>
     {% endif %}
-    {% if aviso_km %}
-          <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
-            <p>{{ aviso_km }}</p>
-            <label class="mt-2 flex min-h-11 items-center gap-2 font-semibold">
-              <input type="checkbox" name="confirmar_km" value="1" class="shrink-0"> Confirmo o KM
-            </label>
-          </div>
-          {% endif %}
+    {% if aviso_km %}{% include "alocacoes/_aviso_km_devolucao.html" %}{% endif %}
     <div class="flex items-center gap-3 pt-2">
       <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Registrar devolução</button>
       <a href="{{ voltar }}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>

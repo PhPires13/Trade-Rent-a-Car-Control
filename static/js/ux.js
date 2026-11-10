@@ -308,6 +308,68 @@
     }
   } catch (e) { /* sem storage: o foco fica no começo da página */ }
 
+  // Celular: cada link pequeno do conteúdo ganha (pelo CSS do base.html) uma camada
+  // invisível de 44px de altura para facilitar o toque. Com dois alvos empilhados a
+  // menos de 44px, a camada de um cobria o outro e o toque ia para o link errado
+  // (ex.: "usar" o crédito abria a ligação para o cliente da linha de baixo). Aqui a
+  // camada é encurtada até o meio do vão quando o vizinho também é link esticado, ou
+  // até a borda dele quando é botão, select, campo ou resumo de menu.
+  const LINK_ESTICADO = "main a:not([data-alvo-livre]):not(.dica-botao):not(.alvo-toque):not(.absolute):not(.fixed):not(.sticky)";
+  const ALVOS = "main a[href], main button, main summary, main select, main input:not([type=hidden]), main textarea, main label";
+  const META_TOQUE = 22; // metade dos 44px
+
+  function limitarAlvosDeToque() {
+    if (!window.matchMedia("(max-width: 639px)").matches) return;
+    const alvos = [];
+    document.querySelectorAll(ALVOS).forEach(function (el) {
+      if (!el.getClientRects().length) return; // escondido
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      alvos.push({ el: el, r: r, esticado: el.matches(LINK_ESTICADO) });
+    });
+    const ajustes = [];
+    alvos.forEach(function (a) {
+      if (!a.esticado) return;
+      const sobra = Math.max(0, META_TOQUE - a.r.height / 2);
+      let cima = sobra;
+      let baixo = sobra;
+      if (sobra) {
+        alvos.forEach(function (b) {
+          if (b === a || a.el.contains(b.el) || b.el.contains(a.el)) return;
+          if (b.r.right <= a.r.left || b.r.left >= a.r.right) return; // não está acima/abaixo
+          const parte = b.esticado ? 0.5 : 1; // dois esticados dividem o vão
+          if (b.r.bottom <= a.r.top) cima = Math.min(cima, (a.r.top - b.r.bottom) * parte);
+          else if (b.r.top >= a.r.bottom) baixo = Math.min(baixo, (b.r.top - a.r.bottom) * parte);
+        });
+      }
+      ajustes.push([a.el, cima < sobra ? cima : null, baixo < sobra ? baixo : null]);
+    });
+    // escreve tudo depois de medir (sem forçar o navegador a recalcular a cada link)
+    ajustes.forEach(function (x) {
+      if (x[1] === null) x[0].style.removeProperty("--alvo-cima");
+      else x[0].style.setProperty("--alvo-cima", x[1] + "px");
+      if (x[2] === null) x[0].style.removeProperty("--alvo-baixo");
+      else x[0].style.setProperty("--alvo-baixo", x[2] + "px");
+    });
+  }
+
+  let alvosAgendado = false;
+  function agendarAlvos() {
+    if (alvosAgendado) return;
+    alvosAgendado = true;
+    window.requestAnimationFrame(function () {
+      alvosAgendado = false;
+      limitarAlvosDeToque();
+    });
+  }
+  window.addEventListener("load", agendarAlvos);
+  window.addEventListener("resize", agendarAlvos);
+  document.addEventListener("toggle", agendarAlvos, true); // <details> ("Mais ▾") abriu/fechou
+  document.addEventListener("htmx:afterSettle", agendarAlvos);
+  // menus e blocos do Alpine que aparecem/somem mudam a altura da página
+  if (window.ResizeObserver) new ResizeObserver(agendarAlvos).observe(document.body);
+
   melhorar(document.body);
+  agendarAlvos();
   document.addEventListener("htmx:load", function (e) { melhorar(e.target); });
 })();

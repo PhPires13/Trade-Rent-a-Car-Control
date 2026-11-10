@@ -106,6 +106,50 @@ def origens_do_km(kms_por_carro):
     return {veiculo_id: achados.get(veiculo_id, ("cadastro", None)) for veiculo_id in kms_por_carro}
 
 
+def anotacoes_em_volta(veiculo, data, ignorar=None):
+    """(antes, depois) do KM do carro em volta de uma data, cada um (km, data, rótulo) ou None.
+
+    antes: o maior KM anotado até a data (o odômetro não pode estar abaixo dele);
+    depois: o menor KM anotado depois dela (não pode estar acima). O KM da compra
+    conta como anotação na data de aquisição. `ignorar`: lançamento que fica de
+    fora (a própria manutenção que está sendo editada).
+    """
+    antes = depois = None
+    for rotulo, modelo, campo_carro, campo_km, campo_data in _fontes_de_km():
+        consulta = modelo.objects.filter(
+            **{
+                campo_carro: veiculo.pk,
+                f"{campo_km}__isnull": False,
+                f"{campo_data}__isnull": False,
+            }
+        )
+        if ignorar is not None and ignorar.pk and isinstance(ignorar, modelo):
+            consulta = consulta.exclude(pk=ignorar.pk)
+        linha = (
+            consulta.filter(**{f"{campo_data}__lte": data})
+            .order_by(f"-{campo_km}")
+            .values_list(campo_km, campo_data)
+            .first()
+        )
+        if linha and (antes is None or linha[0] > antes[0]):
+            antes = (*linha, rotulo)
+        linha = (
+            consulta.filter(**{f"{campo_data}__gt": data})
+            .order_by(campo_km)
+            .values_list(campo_km, campo_data)
+            .first()
+        )
+        if linha and (depois is None or linha[0] < depois[0]):
+            depois = (*linha, rotulo)
+    compra = (veiculo.km_compra, veiculo.data_aquisicao, "compra")
+    if veiculo.km_compra is not None and veiculo.data_aquisicao is not None:
+        if veiculo.data_aquisicao <= data and (antes is None or compra[0] > antes[0]):
+            antes = compra
+        elif veiculo.data_aquisicao > data and (depois is None or compra[0] < depois[0]):
+            depois = compra
+    return antes, depois
+
+
 def origem_do_km(veiculo, km):
     """(rótulo, data) do lançamento mais recente que marcou este KM no carro.
 
@@ -206,24 +250,27 @@ def suspeita_do_km(registro):
         if registro.registro_seguinte() is not None:
             return None  # mês esquecido: o clean() já o limitou pela leitura de depois
         veiculo = registro.veiculo
-        # Na correção o KM atual pode ser justamente o da leitura errada — vale o de compra.
-        cadastro = veiculo.km_compra or 0
         if registro.pk is None:
-            cadastro = max(veiculo.km_atual, cadastro)
-        elif not veiculo.km_compra:
-            return None  # corrigindo a 1ª leitura de carro sem KM de compra: não há base
+            cadastro = max(veiculo.km_atual, veiculo.km_compra or 0)
+            base = f"o cadastro do carro está com {milhar(cadastro)} km"
+        else:
+            # Na correção o KM atual pode ser justamente o da leitura errada — vale o maior
+            # KM dos outros lançamentos até a data (entrega, compra...), não o de hoje.
+            antes, _depois = anotacoes_em_volta(veiculo, registro.data_leitura, ignorar=registro)
+            if antes is None and veiculo.km_compra and veiculo.data_aquisicao is None:
+                antes = (veiculo.km_compra, None, "compra")  # compra sem data: vem antes de tudo
+            if antes is None:
+                return None  # corrigindo a 1ª leitura de carro sem nenhuma outra anotação
+            cadastro = antes[0]
+            origem = texto_da_origem(antes[2], antes[1])
+            base = f"o carro já marcou {milhar(cadastro)} km ({origem})"
         if registro.km < cadastro:
-            return (
-                f"{digitado}, mas o cadastro do carro está com {milhar(cadastro)} km "
-                f"(o número é menor). Confirma?"
-            )
+            return f"{digitado}, mas {base} (o número é menor). Confirma?"
         if registro.km - cadastro > SALTO_MAXIMO_SEM_LEITURA or _salto_da_primeira_leitura(
             registro, cadastro
         ):
-            return (
-                f"{digitado}, mas o cadastro do carro está com {milhar(cadastro)} km — "
-                f"seriam {milhar(registro.km - cadastro)} km a mais. Confirma?"
-            )
+            a_mais = milhar(registro.km - cadastro)
+            return f"{digitado}, mas {base} — seriam {a_mais} km a mais. Confirma?"
         return None
 
     dias = (registro.data_leitura - anterior.data_leitura).days

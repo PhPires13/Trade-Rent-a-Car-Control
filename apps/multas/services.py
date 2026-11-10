@@ -17,6 +17,38 @@ from .models import Multa
 DIAS_ALERTA_FICI = 7
 
 
+def troca_do_carro_parado(veiculo, dia):
+    """Troca em que `veiculo` era o carro do cliente parado (oficina) em `dia`.
+
+    Entre o dia da retirada do substituto e o da devolução (sem contar os dois,
+    em que o cliente pode ter usado o carro dele), o cliente dirigia o
+    substituto — o carro original estava com a oficina ou o guincho.
+    """
+    from apps.alocacoes.models import TrocaTemporaria
+
+    return (
+        TrocaTemporaria.objects.filter(alocacao__veiculo=veiculo, data_retirada__lt=dia)
+        .filter(Q(data_devolucao__isnull=True) | Q(data_devolucao__gt=dia))
+        .select_related("alocacao__cliente", "veiculo_substituto")
+        .order_by("-data_retirada")
+        .first()
+    )
+
+
+def cliente_dirigindo(veiculo, dia):
+    """Quem estava dirigindo o carro no dia — para multa e sinistro.
+
+    Igual a `cliente_vigente`, mas com o carro parado durante uma troca não
+    há cliente: ele estava com o substituto. A multa do carro na oficina cai
+    em "Definir responsável" e o dono decide.
+    """
+    from apps.alocacoes.services import cliente_vigente
+
+    if veiculo is None or dia is None or troca_do_carro_parado(veiculo, dia):
+        return None
+    return cliente_vigente(veiculo, dia)
+
+
 @transaction.atomic
 def registrar_nic(multa, data_infracao=None, valor=None):
     """FICI perdido → multa NIC contra a empresa, vinculada à original (docs.md §4.7)."""
@@ -83,6 +115,9 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
             raise ValidationError(f"{multa} não é do cliente {cliente.nome}.")
         if multa.repasse != "A cobrar":
             raise ValidationError(f"{multa} não está 'a cobrar' (situação: {multa.repasse}).")
+        if multa.valor is None or multa.valor <= 0:
+            # negativo gravado pelo Admin: a ND sairia menor que o devido (e o banco recusa)
+            raise ValidationError(f"{multa}: o valor precisa ser maior que zero. Corrija a multa.")
     if vencimento is None:
         # mesma regra da ND do financeiro: vence no próximo dia de pagamento do
         # cliente — nunca no dia da emissão, senão amanhã ele já fica inadimplente
@@ -92,13 +127,7 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
     for multa in multas:
         ItemNotaDebito.objects.create(
             nota_debito=nd,
-            # só as partes que existem: multa sem código ficava "Multa  descrição"
-            descricao=" ".join(
-                parte.strip()
-                for parte in ("Multa", multa.codigo or "", multa.descricao or "")
-                if parte and parte.strip()
-            )
-            + f" ({multa.data_infracao:%d/%m/%Y})",
+            descricao=_descricao_item_nd(multa),
             valor=multa.valor,
             multa=multa,
         )
@@ -111,6 +140,22 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
         nota_debito=nd,
     )
     return nd
+
+
+def _descricao_item_nd(multa):
+    """Item da ND: "Multa AIT X — placa — descrição (data) · cód. Y".
+
+    O cliente confere a multa pela placa e pelo AIT (o número que a busca acha);
+    o código da infração fica só como detalhe. Só as partes que existem.
+    """
+    partes = [f"Multa AIT {multa.ait}" if multa.ait else "Multa", multa.veiculo.placa]
+    if multa.descricao.strip():
+        partes.append(multa.descricao.strip())
+    texto = " — ".join(partes) + f" ({multa.data_infracao:%d/%m/%Y})"
+    if multa.codigo.strip():
+        texto += f" · cód. {multa.codigo.strip()}"
+    limite = ItemNotaDebito._meta.get_field("descricao").max_length
+    return texto if len(texto) <= limite else texto[: limite - 1] + "…"
 
 
 def alertas_fici(hoje=None):
@@ -229,6 +274,10 @@ def historico(multa, limite=20):
     Lê os registros do simple_history e devolve só o que mudou de um para o
     outro, com o nome do campo e os valores em texto comum.
     """
+    from .forms import MultaEdicaoForm  # evita ciclo de import
+
+    # os mesmos nomes do formulário ("Indicação do motorista (FICI)"), não os técnicos
+    rotulos = MultaEdicaoForm.ROTULOS
     registros = list(multa.history.select_related("history_user")[: limite + 1])
     eventos = []
     for atual, anterior in zip(registros, registros[1:] + [None], strict=True):
@@ -240,7 +289,7 @@ def historico(multa, limite=20):
                 campo = Multa._meta.get_field(mudanca.field)
                 mudancas.append(
                     {
-                        "campo": str(campo.verbose_name).capitalize(),
+                        "campo": rotulos.get(campo.name) or str(campo.verbose_name).capitalize(),
                         "antes": _texto_do_valor(campo, anterior, mudanca.old),
                         "depois": _texto_do_valor(campo, atual, mudanca.new),
                     }

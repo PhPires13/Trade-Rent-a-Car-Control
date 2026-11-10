@@ -15,6 +15,12 @@
           Usuário ou senha incorretos. Confira e tente de novo — após 6 tentativas erradas o
           acesso fica bloqueado por 15 minutos.
         </p>
+      {% elif request.GET.expirou %}
+        {# formulário enviado com a sessão vencida (config/middleware.py) #}
+        <p class="mb-4 rounded bg-amber-900/40 px-3 py-2 text-sm text-amber-100" role="alert">
+          <strong>Sua sessão expirou — o que você digitou NÃO foi salvo.</strong>
+          Entre de novo e repita o lançamento.
+        </p>
       {% endif %}
       <form method="post">
         {% csrf_token %}

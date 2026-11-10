@@ -34,16 +34,25 @@ def _vistorias_do_carro_da_locacao(alocacao):
     return alocacao.vistorias.filter(Q(veiculo_id=alocacao.veiculo_id) | Q(veiculo__isnull=True))
 
 
+#: Depois disso o carro já está com o cliente há tempo: o cartão da entrega não aparece.
+DIAS_PASSOS_ENTREGA = 14
+
+
 def passos_da_entrega(alocacao):
     """Passos da entrega do carro, ou None quando o cartão não deve aparecer.
 
     O cartão some quando a alocação foi encerrada, quando a pessoa dispensou
-    ou quando tudo já foi feito.
+    ou quando tudo já foi feito. Também não aparece em contrato que já rodava
+    antes do sistema ("cobrar a partir de", D01) nem em alocação de mais de
+    DIAS_PASSOS_ENTREGA dias — senão a carga dos contratos em andamento abria
+    todas as fichas com o cartão amarelo.
     """
     if (
         alocacao is None
         or alocacao.status != Alocacao.Status.ATIVA
         or alocacao.passos_entrega_dispensados
+        or alocacao.cobrar_a_partir_de is not None
+        or alocacao.data_inicio < timezone.localdate() - timedelta(days=DIAS_PASSOS_ENTREGA)
     ):
         return None
     from apps.financeiro.models import Cobranca  # import local evita ciclo de import
@@ -177,11 +186,37 @@ def vistoria_de_devolucao(alocacao, vistorias=None):
 
 def situacao_da_devolucao(alocacao):
     """O que a tela de encerrar mostra em passos: vistorias, débitos e caução."""
-    from apps.financeiro.models import Cobranca  # import local evita ciclo de import
+    from apps.financeiro.models import Cobranca, NotaDebito  # import local evita ciclo
 
-    vistorias = list(_vistorias_do_carro_da_locacao(alocacao).order_by("-data", "-pk"))
+    troca = alocacao.troca_ativa
+    if troca:
+        # encerrar com o substituto: valem as vistorias dele, desde a retirada
+        vistorias = list(
+            alocacao.vistorias.filter(
+                veiculo_id=troca.veiculo_substituto_id, data__gte=troca.data_retirada
+            ).order_by("-data", "-pk")
+        )
+    else:
+        vistorias = list(_vistorias_do_carro_da_locacao(alocacao).order_by("-data", "-pk"))
     entrega = next((v for v in vistorias if v.tipo == Vistoria.Tipo.ENTRADA), None)
     devolucao = vistoria_de_devolucao(alocacao, vistorias)
+    # ND emitida para o cliente depois da vistoria de devolução (a da avaria):
+    # a tela troca o "cobrar avaria?" por "ND emitida" — sem risco de ND em dobro
+    notas_depois_da_vistoria = (
+        list(
+            NotaDebito.objects.filter(
+                cliente_id=alocacao.cliente_id, data_emissao__gte=devolucao.data
+            )
+            # ND só de multas não é a da avaria: o convite para cobrar continua
+            .filter(itens__multa__isnull=True)
+            .distinct()
+            .exclude(cobranca__status=Cobranca.Status.CANCELADA)
+            .prefetch_related("itens")
+            .order_by("numero")
+        )
+        if devolucao
+        else []
+    )
     hoje = timezone.localdate()
     # Vistoria de devolução antiga (o carro foi conferido e o motorista seguiu com
     # ele) não serve de data: sugere hoje e a pessoa confere.
@@ -226,6 +261,7 @@ def situacao_da_devolucao(alocacao):
         "debitos_vencidos": debitos_vencidos,
         "proximo_vencimento": proximo_vencimento,
         "semanas_a_cancelar": semanas_a_cancelar,
+        "notas_depois_da_vistoria": notas_depois_da_vistoria,
         "url_vistoria_devolucao": _url(
             "alocacoes:vistoria_nova",
             alocacao.pk,

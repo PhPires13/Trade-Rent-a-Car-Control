@@ -51,7 +51,7 @@
       {% if field.name == "km" and km_sugerido %}
       <p class="mt-1 text-xs text-gray-600">Preenchido com o KM que o sistema já tem — confira no painel.</p>
       {% endif %}
-      {% if field.name == "veiculo" and form.fields.veiculo.queryset.count > 1 %}
+      {% if field.name == "veiculo" and form.tem_troca_aberta %}
       <p class="mt-1 text-xs text-gray-500">Com carro substituto, vistorie o carro que está com o motorista.</p>
       {% endif %}
       {% if field.name == "tipo" %}

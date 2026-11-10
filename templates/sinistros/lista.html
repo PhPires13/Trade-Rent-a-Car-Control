@@ -50,6 +50,18 @@
       {% if sinistro.boletim_numero %}<span class="text-xs text-gray-600">· BO {{ sinistro.boletim_numero }}</span>{% endif %}
     </p>
     <div class="flex flex-wrap items-center gap-3 text-sm">
+      {% with cobranca=sinistro.cobranca_franquia %}
+      {% if cobranca and cobranca.status != "cancelada" %}
+        {# o Paulo vê sem abrir o sinistro se a franquia já foi cobrada e se foi paga #}
+        <span class="rounded px-2 py-0.5 {% if cobranca.status == 'pago' %}bg-green-100 text-green-700{% else %}bg-blue-100 text-blue-800{% endif %}">Franquia cobrada de {{ cobranca.cliente.nome }} — {{ cobranca.get_status_display|lower }}{% if cobranca.status != "pago" %}, vence {{ cobranca.vencimento|date:"d/m" }}{% endif %}</span>
+      {% endif %}
+      {% endwith %}
+      {% if sinistro.tipo == "roubo" and sinistro.data_recuperacao %}
+        <span class="rounded bg-green-100 px-2 py-0.5 font-semibold text-green-700">Recuperado em {{ sinistro.data_recuperacao|date:"d/m/Y" }}</span>
+      {% elif sinistro.tipo == "roubo" and sinistro.veiculo.status == "inativo" %}
+        <span class="rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">Carro roubado — aguardando</span>
+        <a href="{% url 'sinistros:editar' sinistro.pk %}?volta={{ aqui|urlencode }}#carro-roubado" class="alvo-toque font-semibold underline">Carro voltou? Registrar</a>
+      {% endif %}
       {% if sinistro.franquia_a_cobrar and sinistro.cliente %}
         <form method="post" action="{% url 'sinistros:cobrar_franquia' sinistro.pk %}" class="flex flex-wrap items-center gap-2"
               onsubmit="return confirm('Cobrar {{ sinistro.franquia_valor|brl|escapejs }} de {{ sinistro.cliente.nome|escapejs }}?')">
@@ -94,6 +106,7 @@
                    title="Deixe em branco para manter o valor solicitado" class="w-40 rounded border border-gray-300 px-2 py-2 text-sm sm:w-36 sm:px-1 sm:py-0.5 sm:text-xs">
             <label for="aux-data-{{ auxilio.pk }}" class="text-xs text-gray-600">Data em que o dinheiro entrou</label>
             <input id="aux-data-{{ auxilio.pk }}" type="date" name="data" value="{{ hoje|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required
+                   min="{% if auxilio.data_solicitacao %}{{ auxilio.data_solicitacao|date:'Y-m-d' }}{% else %}{{ sinistro.data|date:'Y-m-d' }}{% endif %}"
                    class="rounded border border-gray-300 px-2 py-2 text-sm sm:px-1 sm:py-0.5 sm:text-xs">
             <button class="rounded bg-marca-amarelo px-4 py-2 text-sm font-semibold text-marca-preto hover:brightness-95 sm:px-2 sm:py-0.5 sm:text-xs">Marcar recebido</button>
           </form>

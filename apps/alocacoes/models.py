@@ -214,9 +214,14 @@ class Alocacao(models.Model):
         acerto de caução é feito na tela da caução (docs.md §4.4).
         """
         # duas abas (ou dois envios ao mesmo tempo): trava a linha e confere no banco —
-        # senão o 2º envio refazia o acerto das semanas e devolvia o crédito em dobro
+        # senão o 2º envio refazia o acerto das semanas e devolvia o crédito em dobro.
+        # O cliente vem antes (a mesma ordem do Receber e da caução): um pagamento ao
+        # mesmo tempo espera, em vez de cair numa semana que este encerrar cancela.
+        # A alocação com "no_key": não barra o encargo criado noutra aba (aponta
+        # para ela) — com FOR UPDATE os dois se esperavam para sempre no PostgreSQL.
+        Cliente.objects.select_for_update().filter(pk=self.cliente_id).first()
         no_banco = (
-            Alocacao.objects.select_for_update()
+            Alocacao.objects.select_for_update(no_key=True)
             .filter(pk=self.pk)
             .values_list("status", flat=True)
             .first()

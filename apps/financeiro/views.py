@@ -33,7 +33,14 @@ from .models import (
     NotaDebito,
     Recebimento,
 )
-from .periodos import ANO_MINIMO, ano_mes, mes_padrao_do_das, navegacao_de_meses
+from .periodos import (
+    ANO_MINIMO,
+    ano_mes,
+    mes_do_texto,
+    mes_padrao_do_das,
+    navegacao_de_meses,
+    nome_do_mes,
+)
 
 COBRANCAS_POR_PAGINA = 50
 
@@ -354,9 +361,11 @@ def reabrir_judicial(request, cobranca_id):
             if cobranca.status != Cobranca.Status.JUDICIAL:
                 _erro_no_painel(request, "Esta cobrança não está em cobrança judicial.")
                 return _voltar_ao_painel(request, cobranca)
+            # volta ao fluxo normal: pago/parcial/atrasado/pendente, gravado uma vez
+            # só (antes passava por um "Pendente" falso no histórico)
             cobranca.status = Cobranca.Status.PENDENTE
+            cobranca.status = cobranca.novo_status(cobranca.total_quitado, timezone.localdate())
             cobranca.save(update_fields=["status"])
-            cobranca.atualizar_status()  # recalcula: pago/parcial/atrasado/pendente
             services.atualizar_inadimplencia(cobranca.cliente)
         messages.success(
             request,
@@ -626,6 +635,17 @@ def _criar_encargos_do_post(post, cobrancas_abertas, sugeridos, hoje):
     return aplicacoes, criados
 
 
+def _caucao_ativa_com_saldo(cliente):
+    """A caução do contrato ativo (a mesma de services._caucao_ativa) já com o
+    saldo somado e o contrato junto: uma consulta só (eram 5 a cada tela)."""
+    caucao = services._caucao_ativa(cliente)
+    if caucao is None:
+        return None
+    return Caucao.com_saldos_anotados(
+        Caucao.objects.filter(pk=caucao.pk).select_related("alocacao")
+    ).first()
+
+
 def receber(request):
     """Baixa de recebimento com travas de lançamento (docs.md §4.3).
 
@@ -650,60 +670,85 @@ def receber(request):
     post = None
     if request.method == "POST" and cliente:
         post = request.POST
+        token = post.get("token", "")
         try:
-            valor = _dinheiro(
-                post.get("valor", ""),
-                "Valor recebido inválido — digite só números, com vírgula "
-                "para os centavos (ex.: 1250,00).",
-            )
-            data = ler_data(post.get("data", ""), "Data do recebimento")
-            forma = post.get("forma", "pix")
-            usar_credito = ZERO
-            if post.get("usar_credito_junto") == "1" and forma != Recebimento.Forma.CREDITO:
-                usar_credito = max(MovimentoCredito.saldo_do_cliente(cliente), ZERO)
-            # toque duplo: o 2º envio acha a cobrança já paga — o aviso certo é o de repetido
-            repetido = services._recebimento_recente(cliente, data, valor)
-            if repetido:
-                raise services.RecebimentoRepetido(repetido)
-            aplicacoes = _ler_aplicacoes(post, cliente, cobrancas_abertas)
-            with transaction.atomic():
-                # cliente travado antes do encargo (que trava o aluguel): a mesma
-                # ordem das outras ações, para duas abas não se esperarem para sempre
-                Cliente.objects.select_for_update().filter(pk=cliente.pk).first()
-                nos_encargos, encargos = _criar_encargos_do_post(
-                    post, cobrancas_abertas, _encargos_sugeridos(cobrancas_abertas, hoje), hoje
+            with _envio_unico(request, "receber_tokens_usados", token) as repetido_token:
+                if repetido_token:
+                    # o mesmo formulário enviado de novo ("Voltar" depois do recibo e
+                    # Confirmar outra vez, mesmo minutos depois): não lança em dobro
+                    messages.warning(
+                        request,
+                        "Este pagamento já tinha sido lançado — o envio repetido foi ignorado "
+                        "e nada foi lançado em dobro.",
+                    )
+                    original = request.session.get("receber_recibos", {}).get(token)
+                    destino = f"{request.path}?cliente={cliente.pk}"
+                    if (
+                        original
+                        and Recebimento.objects.filter(pk=original, cliente=cliente).exists()
+                    ):
+                        destino += f"&recibo={original}"
+                    return redirect(destino)
+                valor = _dinheiro(
+                    post.get("valor", ""),
+                    "Valor recebido inválido — digite só números, com vírgula "
+                    "para os centavos (ex.: 1250,00).",
                 )
-                aplicacoes += nos_encargos
-                recebimento = services.registrar_recebimento(
-                    cliente=cliente,
-                    data=data,
-                    valor=valor,
-                    forma=forma,
-                    aplicacoes=aplicacoes,
-                    sobra_destino=post.get("sobra_destino", "credito"),
-                    observacoes=post.get("observacoes", ""),
-                    bloquear_repetido=True,
-                    usar_credito=usar_credito,
-                    mes_passado_confirmado=post.get("confirmar_mes_passado") == "1",
-                    hoje=hoje,
-                )
-                # o "desfazer" deste lançamento também cancela o encargo criado aqui
-                Cobranca.objects.filter(pk__in=[e.pk for e in encargos]).update(
-                    observacoes=services.marca_encargo(recebimento)
-                )
-            if recebimento.forma == Recebimento.Forma.CREDITO:
-                messages.success(request, f"Crédito de {brl(valor)} usado para {cliente.nome}.")
-            else:
-                messages.success(
-                    request, f"Recebimento de {brl(valor)} lançado para {cliente.nome}."
-                )
-            destino = f"{request.path}?cliente={cliente.pk}&recibo={recebimento.pk}"
-            if recebimento.recebimento_credito:
-                destino += f"&recibo_credito={recebimento.recebimento_credito.pk}"
-            # aberto do acerto da caução (?voltar=): o recibo mostra o botão de volta
-            if _voltar_seguro(request)[0]:
-                destino += "&" + urlencode({"voltar": _voltar_seguro(request)[0]})
-            return redirect(destino)
+                data = ler_data(post.get("data", ""), "Data do recebimento")
+                forma = post.get("forma", "pix")
+                usar_credito = ZERO
+                if post.get("usar_credito_junto") == "1" and forma != Recebimento.Forma.CREDITO:
+                    usar_credito = max(MovimentoCredito.saldo_do_cliente(cliente), ZERO)
+                # toque duplo: o 2º envio acha a cobrança já paga — o aviso certo é o de repetido
+                repetido = services._recebimento_recente(cliente, data, valor)
+                if repetido:
+                    raise services.RecebimentoRepetido(repetido)
+                aplicacoes = _ler_aplicacoes(post, cliente, cobrancas_abertas)
+                with transaction.atomic():
+                    # cliente travado antes do encargo (que trava o aluguel): a mesma
+                    # ordem das outras ações, para duas abas não se esperarem para sempre
+                    Cliente.objects.select_for_update().filter(pk=cliente.pk).first()
+                    nos_encargos, encargos = _criar_encargos_do_post(
+                        post, cobrancas_abertas, _encargos_sugeridos(cobrancas_abertas, hoje), hoje
+                    )
+                    aplicacoes += nos_encargos
+                    recebimento = services.registrar_recebimento(
+                        cliente=cliente,
+                        data=data,
+                        valor=valor,
+                        forma=forma,
+                        aplicacoes=aplicacoes,
+                        sobra_destino=post.get("sobra_destino", "credito"),
+                        observacoes=post.get("observacoes", ""),
+                        bloquear_repetido=True,
+                        usar_credito=usar_credito,
+                        mes_passado_confirmado=post.get("confirmar_mes_passado") == "1",
+                        hoje=hoje,
+                        caucao_acima_confirmado=post.get("confirmar_caucao_acima") == "1",
+                    )
+                    # o "desfazer" deste lançamento também cancela o encargo criado aqui
+                    Cobranca.objects.filter(pk__in=[e.pk for e in encargos]).update(
+                        observacoes=services.marca_encargo(recebimento)
+                    )
+                if recebimento.forma == Recebimento.Forma.CREDITO:
+                    messages.success(request, f"Crédito de {brl(valor)} usado para {cliente.nome}.")
+                else:
+                    messages.success(
+                        request, f"Recebimento de {brl(valor)} lançado para {cliente.nome}."
+                    )
+                # o token lembra qual recibo ele gerou: o reenvio cai no mesmo recibo
+                if token:
+                    recibos = dict(list(request.session.get("receber_recibos", {}).items())[-19:])
+                    recibos[token] = recebimento.pk
+                    request.session["receber_recibos"] = recibos
+                destino = f"{request.path}?cliente={cliente.pk}&recibo={recebimento.pk}"
+                if recebimento.recebimento_credito:
+                    destino += f"&recibo_credito={recebimento.recebimento_credito.pk}"
+                # aberto do acerto da caução (?voltar=): o recibo mostra o botão de volta
+                voltar, _rotulo = _voltar_seguro(request)
+                if voltar:
+                    destino += "&" + urlencode({"voltar": voltar})
+                return redirect(destino)
         except services.RecebimentoRepetido as repetido:
             # toque duplo: mostra o resumo do lançamento que já valeu
             messages.warning(request, repetido.messages[0])
@@ -740,6 +785,7 @@ def receber(request):
     # "Vencido" só é o que venceu ANTES de hoje; o que vence hoje ainda não atrasou
     atrasado = sum((c.saldo for c in cobrancas_abertas if c.vencimento < hoje), ZERO)
     resumo = _resumo_do_recibo(request, cliente)
+    caucao_ativa = _caucao_ativa_com_saldo(cliente) if cliente else None
     return render(
         request,
         "financeiro/receber.html",
@@ -758,7 +804,14 @@ def receber(request):
             # crédito não é forma de pagamento: tem botão próprio na tela
             "formas": [f for f in Recebimento.Forma.choices if f[0] != Recebimento.Forma.CREDITO],
             # reforço de caução só para quem tem caução de contrato ativo
-            "tem_caucao": bool(cliente and services._caucao_ativa(cliente) is not None),
+            "tem_caucao": caucao_ativa is not None,
+            # sobra que deixa a caução acima do combinado pede confirmação (como o depósito)
+            "caucao_saldo": caucao_ativa.saldo if caucao_ativa else ZERO,
+            "caucao_combinado": (caucao_ativa.alocacao.caucao_valor or ZERO)
+            if caucao_ativa
+            else ZERO,
+            # um por formulário: "Voltar" depois do recibo e Confirmar de novo não lança em dobro
+            "token": uuid4().hex,
             "abrir_com_credito": request.GET.get("usar_credito") == "1" and not post,
             "resumo": resumo,
             # o cartão verde do recibo já diz "Pagamento lançado": sem o aviso repetido
@@ -987,6 +1040,7 @@ def nd_nova(request):
                     vencimento=vencimento,
                     itens=itens,
                     observacoes=post.get("observacoes", ""),
+                    vencimento_distante_confirmado=post.get("confirmar_vencimento_distante") == "1",
                 )
             messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")
             return redirect(_voltar_seguro(request)[0] or "financeiro:nds")
@@ -1032,10 +1086,32 @@ def nd_nova(request):
 
 
 def caucoes(request):
-    lista = Caucao.com_saldos_anotados(
-        Caucao.objects.select_related("alocacao__cliente", "alocacao__veiculo")
+    """Cauções em ordem útil: carro com o cliente, depois o acerto pendente
+    (contrato encerrado com dinheiro guardado); as já acertadas só a pedido."""
+    from apps.alocacoes.models import Alocacao
+
+    lista = list(
+        Caucao.com_saldos_anotados(
+            Caucao.objects.select_related("alocacao__cliente", "alocacao__veiculo")
+        )
     )
-    return render(request, "financeiro/caucoes.html", {"caucoes": lista})
+    for caucao in lista:
+        if caucao.alocacao.status == Alocacao.Status.ATIVA:
+            caucao.grupo = 0
+        elif caucao.saldo > ZERO:
+            caucao.grupo = 1  # acerto pendente: devolver ou descontar
+        else:
+            caucao.grupo = 2  # devolvida, toda usada ou sem depósito
+    lista.sort(key=lambda c: (c.grupo, c.alocacao.cliente.nome.lower(), -c.pk))
+    mostrar_acertadas = request.GET.get("acertadas") == "1"
+    acertadas = sum(1 for c in lista if c.grupo == 2)
+    if not mostrar_acertadas:
+        lista = [c for c in lista if c.grupo < 2]
+    return render(
+        request,
+        "financeiro/caucoes.html",
+        {"caucoes": lista, "acertadas": acertadas, "mostrar_acertadas": mostrar_acertadas},
+    )
 
 
 def caucao_detalhe(request, caucao_id):
@@ -1123,20 +1199,43 @@ def caucao_detalhe(request, caucao_id):
     # reforço), não − saldo: depois de devolver ou descontar, o saldo cai e a
     # tela sugeria um depósito que não aconteceu. Contrato encerrado: nada a depositar.
     falta = max(combinado - caucao.recebido, ZERO) if ativa else ZERO
+    # caução usada para pagar cobranças com o carro ainda com o cliente: a
+    # garantia caiu abaixo do combinado e o cliente precisa repor a diferença
+    repor = (
+        max(combinado - caucao.saldo - falta, ZERO) if ativa and caucao.descontado > ZERO else ZERO
+    )
+    # depósito incompleto e caução já usada: sugere as duas partes juntas
+    # (fica no combinado, sem cair na trava de "acima do combinado")
+    sugerido = falta + repor
     pendentes = _cobrancas_devidas(cliente)
+    credito = MovimentoCredito.saldo_do_cliente(cliente)
     # Carro já devolvido e caução com saldo (ex.: logo depois de encerrar a
     # alocação): a tela já abre no acerto — descontar a dívida ou devolver —,
     # e não em "Cliente depositou a caução".
     tipo_inicial = MovimentacaoCaucao.Tipo.RECEBIMENTO
-    valor_inicial = exibir_dinheiro(falta) if falta > ZERO else ""
+    if repor > ZERO and falta == ZERO:
+        tipo_inicial = MovimentacaoCaucao.Tipo.REFORCO
+    valor_inicial = exibir_dinheiro(sugerido) if sugerido > ZERO else ""
+    cobranca_inicial = None
     if not ativa and caucao.saldo > ZERO:
-        com_saldo = [c for c in pendentes if c.saldo > ZERO]
-        if com_saldo:
+        # o crédito paga as mais antigas primeiro (como no Receber): a caução só
+        # entra no que o crédito não cobrir
+        resta_credito = max(credito, ZERO)
+        sem_credito = []
+        for cobranca in pendentes:
+            parte = min(resta_credito, max(cobranca.saldo, ZERO))
+            resta_credito -= parte
+            if cobranca.saldo - parte > ZERO:
+                sem_credito.append((cobranca, cobranca.saldo - parte))
+        if sem_credito:
+            cobranca_inicial, falta_da_cobranca = sem_credito[0]
             tipo_inicial = MovimentacaoCaucao.Tipo.DESCONTO
-            valor_inicial = exibir_dinheiro(min(caucao.saldo, com_saldo[0].saldo))
+            valor_inicial = exibir_dinheiro(min(caucao.saldo, falta_da_cobranca))
         else:
+            # sem dívida, ou o crédito já cobre tudo: o crédito vem antes da caução
             tipo_inicial = MovimentacaoCaucao.Tipo.DEVOLUCAO
-            valor_inicial = exibir_dinheiro(caucao.saldo)
+            tem_divida = any(c.saldo > ZERO for c in pendentes)
+            valor_inicial = "" if tem_divida else exibir_dinheiro(caucao.saldo)
     return render(
         request,
         "financeiro/caucao_detalhe.html",
@@ -1148,11 +1247,13 @@ def caucao_detalhe(request, caucao_id):
             "pendentes": pendentes,
             # crédito (pagamento adiantado / semanas não usadas) é do cliente, como a
             # caução: o dono vê os dois juntos antes de devolver ou descontar
-            "credito": MovimentoCredito.saldo_do_cliente(cliente),
+            "credito": credito,
             "combinado": combinado,
             "falta": falta,
-            # o campo Valor já vem com o que falta depositar (o caso mais comum)
-            "valor_sugerido": exibir_dinheiro(falta) if falta > ZERO else "",
+            "repor": repor,
+            # o campo Valor já vem com o que falta depositar (ou repor)
+            "valor_sugerido": exibir_dinheiro(sugerido) if sugerido > ZERO else "",
+            "cobranca_inicial": cobranca_inicial.pk if cobranca_inicial else None,
             "tipo_inicial": (post.get("tipo") if post else "") or tipo_inicial,
             "valor_inicial": valor_inicial,
             "deve": deve,
@@ -1357,6 +1458,14 @@ def das(request):
     ano, mes = ano_mes(request, padrao=mes_padrao_do_das(hoje))
     if not ANO_MINIMO <= ano <= hoje.year + 1:
         ano, mes = mes_padrao_do_das(hoje)
+    pedido = request.GET.get("mes", "").strip()
+    if pedido and mes_do_texto(pedido) != (ano, mes):
+        # link velho ou mês digitado errado: avisa (como KM e Relatórios), para
+        # o número de um mês não ir à contabilidade como se fosse de outro
+        messages.warning(request, f"Mês inválido — mostrando {nome_do_mes(ano, mes)}.")
+        if request.GET.get("exportar"):
+            # planilha de outro mês não sai calada: volta à tela, com o aviso à vista
+            return redirect(f"{request.path}?mes={ano}-{mes:02d}")
     resumo = services.resumo_fiscal(ano, mes)
     formato = request.GET.get("exportar")
     if formato in ("csv", "xlsx"):
@@ -1379,13 +1488,39 @@ def das(request):
     )
 
 
+#: o extrato mostra os mais recentes (e avisa quando há mais)
+LIMITE_RECEBIMENTOS_EXTRATO = 50
+LIMITE_COBRANCAS_EXTRATO = 100
+LIMITE_CAUCAO_EXTRATO = 50
+
+
+def _encargos_de_lancamento_desfeito(cliente):
+    """Encargos cancelados porque o lançamento do Receber que os criou foi desfeito."""
+    prefixo = services.marca_encargo_prefixo()
+    candidatos = {
+        pk: observacoes.removeprefix(prefixo)
+        for pk, observacoes in cliente.cobrancas.filter(
+            origem=Cobranca.Origem.ENCARGO,
+            status=Cobranca.Status.CANCELADA,
+            observacoes__startswith=prefixo,
+        ).values_list("pk", "observacoes")
+    }
+    existentes = {
+        str(pk)
+        for pk in Recebimento.objects.filter(
+            pk__in=[n for n in candidatos.values() if n.isdigit()]
+        ).values_list("pk", flat=True)
+    }
+    return [pk for pk, numero in candidatos.items() if numero not in existentes]
+
+
 def extrato_cliente(request, cliente_id):
     cliente = get_object_or_404(Cliente, pk=cliente_id)
     hoje = timezone.localdate()
     recebimentos = list(
         services.anotar_lancamento(cliente.recebimentos.all()).prefetch_related(
             "aplicacoes__cobranca", "movimentos_credito"
-        )[:50]
+        )[:LIMITE_RECEBIMENTOS_EXTRATO]
     )
     # sobra que virou reforço de caução: achada pela marca no texto (uma consulta)
     reforcos = {
@@ -1413,22 +1548,46 @@ def extrato_cliente(request, cliente_id):
             recebimento.sobra = None
     devidas = _cobrancas_devidas(cliente)
     vencido, a_vencer = _vencido_e_a_vencer(devidas, hoje)
-    caucao = sum(
-        (
-            c.saldo
-            for c in Caucao.com_saldos_anotados(Caucao.objects.filter(alocacao__cliente=cliente))
-        ),
-        ZERO,
+    caucoes_do_cliente = list(
+        Caucao.com_saldos_anotados(
+            Caucao.objects.filter(alocacao__cliente=cliente).select_related("alocacao__veiculo")
+        ).order_by("-alocacao__data_inicio", "-pk")
     )
+    caucao = sum((c.saldo for c in caucoes_do_cliente), ZERO)
+    # o card "Caução guardada" leva à caução que ainda tem dinheiro (ou à mais recente)
+    caucao_link = next(
+        (c for c in caucoes_do_cliente if c.saldo > ZERO),
+        caucoes_do_cliente[0] if caucoes_do_cliente else None,
+    )
+    # depósito, desconto (cobrança paga pela caução) e devolução: sem isso a ND
+    # paga pela caução aparecia "Pago" sem nenhum pagamento no extrato
+    movimentacoes_caucao = list(
+        MovimentacaoCaucao.objects.filter(caucao__in=caucoes_do_cliente)
+        .select_related("cobranca", "caucao__alocacao__veiculo")
+        .order_by("-data", "-pk")[:LIMITE_CAUCAO_EXTRATO]
+    )
+    # encargo cobrado junto num lançamento que foi desfeito no mesmo dia: nasceu e
+    # morreu no mesmo erro de digitação — não aparece como um 2º encargo da semana
+    cobrancas = Cobranca.com_quitacao_anotada(
+        cliente.cobrancas.exclude(pk__in=_encargos_de_lancamento_desfeito(cliente)).order_by(
+            "-vencimento", "-pk"
+        )
+    )
+    total_cobrancas = cobrancas.count()
+    total_recebimentos = cliente.recebimentos.count()
     return render(
         request,
         "financeiro/extrato_cliente.html",
         {
             "cliente": cliente,
-            "cobrancas": Cobranca.com_quitacao_anotada(cliente.cobrancas.order_by("-vencimento"))[
-                :100
-            ],
+            "cobrancas": cobrancas[:LIMITE_COBRANCAS_EXTRATO],
+            "cobrancas_cortadas": total_cobrancas > LIMITE_COBRANCAS_EXTRATO,
+            "limite_cobrancas": LIMITE_COBRANCAS_EXTRATO,
             "recebimentos": recebimentos,
+            "recebimentos_cortados": total_recebimentos > LIMITE_RECEBIMENTOS_EXTRATO,
+            "limite_recebimentos": LIMITE_RECEBIMENTOS_EXTRATO,
+            "movimentacoes_caucao": movimentacoes_caucao,
+            "caucao_link": caucao_link,
             "status_devidos": Cobranca.STATUS_DEVIDOS,  # quem ganha o botão "Recebi"
             "credito": MovimentoCredito.saldo_do_cliente(cliente),
             "vencido": vencido,

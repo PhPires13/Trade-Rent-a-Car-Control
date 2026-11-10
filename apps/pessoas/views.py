@@ -411,8 +411,12 @@ def lista(request):
     )
 
 
-def detalhe(request, cliente_id):
-    """Ficha completa do cliente — cadastro, financeiro, carros, multas e condutores."""
+def detalhe(request, cliente_id, form_condutor=None):
+    """Ficha completa do cliente — cadastro, financeiro, carros, multas e condutores.
+
+    `form_condutor`: o formulário curto de condutor que voltou com erro — a ficha
+    abre com o que foi digitado e o erro junto do campo.
+    """
     cliente = get_object_or_404(Cliente, pk=cliente_id)
     hoje = timezone.localdate()
     historico = (
@@ -428,7 +432,7 @@ def detalhe(request, cliente_id):
             "total_multas": multas.count(),
             "ultimas_multas": multas[:5],
             "condutores": cliente.condutores_autorizados.all(),
-            "form_condutor": CondutorInlineForm(),
+            "form_condutor": form_condutor or CondutorInlineForm(),
             # bloco "Em aberto": último pagamento e a mensagem única de cobrança
             "ultimo_pagamento": cliente.recebimentos.exclude(
                 forma=Recebimento.Forma.CREDITO
@@ -500,15 +504,17 @@ def condutor_novo(request, cliente_id):
             condutor.cliente = cliente
             condutor.save()
             messages.success(request, f"Condutor {condutor.nome} autorizado.")
-        elif "nome" in form.errors:
-            messages.error(request, "Informe ao menos o nome do condutor.")
         else:
-            # com a CNH no formulário curto, o erro pode ser de outro campo
-            for campo, erros in form.errors.items():
-                rotulo = form.fields[campo].label if campo in form.fields else ""
-                messages.error(
-                    request, f"{rotulo}: {' '.join(erros)}" if rotulo else " ".join(erros)
-                )
+            # volta para a ficha com o que foi digitado e o erro junto do campo
+            # (o redirect apagava tudo e a pessoa redigitava no celular)
+            messages.error(
+                request,
+                "Condutor não adicionado — corrija o campo marcado em “Adicionar condutor”.",
+            )
+            primeiro = next((campo for campo in form.fields if campo in form.errors), None)
+            if primeiro:
+                form.fields[primeiro].widget.attrs["autofocus"] = True
+            return detalhe(request, cliente.pk, form_condutor=form)
     return redirect("pessoas:detalhe", cliente.pk)
 
 

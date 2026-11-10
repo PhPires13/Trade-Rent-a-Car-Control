@@ -59,11 +59,14 @@ class SemIncluirPeloAdmin:
 
 
 class SemApagarPeloAdmin:
-    """Cobrança, ND e recebimento não se apagam pelo Admin (ETAPAS: "Não cobrar").
+    """Lançamento financeiro não se apaga pelo Admin (ETAPAS: "Não cobrar", D11).
 
-    Apagar some com o registro sem refazer a conta. O caminho certo: "não cobrar"
-    ou cancelar a ND nas cobranças, e "↩ desfazer" no recebimento. Sem permissão
-    de apagar, o Django também tira a ação "apagar selecionados" da lista.
+    Vale para cobrança, ND, recebimento, crédito e caução. Apagar some com o
+    registro sem refazer a conta (crédito dado ou tirado sem rastro; caução
+    apagada leva junto os descontos que entraram no DAS). O caminho certo: "não
+    cobrar" ou cancelar a ND nas cobranças, "↩ desfazer" no recebimento e na
+    caução. Sem permissão de apagar, o Django também tira a ação "apagar
+    selecionados" da lista.
     """
 
     def has_delete_permission(self, request, obj=None):
@@ -71,13 +74,14 @@ class SemApagarPeloAdmin:
 
 
 class InlineSoLeitura:
-    """Inline de lançamento financeiro: mostra, mas não inclui nem altera valores.
+    """Inline de lançamento financeiro: só mostra — não inclui, não altera, não apaga.
 
-    Apagar continua possível onde um signal de post_delete recalcula a cobrança
-    (aplicações e movimentações de caução); `pode_apagar = False` trava o resto.
+    Apagar uma aplicação reabria a cobrança, mas o dinheiro do recebimento
+    sumia do caixa e do DAS (nem crédito, nem cobrança); apagar a sobra que
+    virou reforço de caução fazia o mesmo. Para corrigir, "↩ desfazer" nas telas.
     """
 
-    pode_apagar = True
+    pode_apagar = False
 
     extra = 0
     campos_financeiros = ()
@@ -125,9 +129,8 @@ class RecebimentoAdmin(
 
 class ItemNotaDebitoInline(InlineSoLeitura, admin.TabularInline):
     model = ItemNotaDebito
-    campos_financeiros = ("valor", "multa")
     # apagar um item não refaz o valor da cobrança da ND: cancele a ND (D05)
-    pode_apagar = False
+    campos_financeiros = ("valor", "multa")
 
 
 @admin.register(NotaDebito)
@@ -153,7 +156,7 @@ class MovimentacaoCaucaoInline(InlineSoLeitura, admin.TabularInline):
 
 
 @admin.register(Caucao)
-class CaucaoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+class CaucaoAdmin(SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
     tela_certa = "Financeiro → Cauções"
     list_display = ["alocacao", "recebido", "descontado", "devolvido", "saldo"]
     list_select_related = ["alocacao__veiculo", "alocacao__cliente"]
@@ -182,7 +185,9 @@ class CaucaoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
 
 
 @admin.register(MovimentoCredito)
-class MovimentoCreditoAdmin(SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin):
+class MovimentoCreditoAdmin(
+    SemApagarPeloAdmin, SemIncluirPeloAdmin, SoLeituraNaEdicao, SimpleHistoryAdmin
+):
     tela_certa = "Financeiro → Receber (a sobra do pagamento vira crédito)"
     list_display = ["cliente", "tipo", "valor", "data"]
     list_select_related = ["cliente"]

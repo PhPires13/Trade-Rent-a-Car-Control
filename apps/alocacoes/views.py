@@ -116,6 +116,27 @@ def _km_com_milhar(form, nome):
     form.fields[nome] = novo
 
 
+#: Franquia mensal abaixo disso é quase sempre "3.000" lido como 3 (ou dígito faltando).
+FRANQUIA_MINIMA_KM = 500
+
+
+def _franquia_razoavel(form):
+    """Franquia de km por mês: "5.000" vira 5000 e número baixo demais é recusado.
+
+    Com a franquia errada, a leitura mensal cobra sozinha quase todo o km rodado.
+    """
+    franquia = form.cleaned_data.get("franquia_km_mensal")
+    if form.cleaned_data.get("limite_km") == Alocacao.LimiteKm.ILIMITADO:
+        # sem limite o campo fica escondido na tela: um erro nele não apareceria
+        return franquia
+    if franquia is not None and franquia < FRANQUIA_MINIMA_KM:
+        raise ValidationError(
+            f"Franquia de {milhar(franquia)} km por mês é baixa demais — confira o número "
+            f"(ex.: 3.000 ou 5000). O mínimo aceito é {milhar(FRANQUIA_MINIMA_KM)} km."
+        )
+    return franquia
+
+
 def semanas_a_lancar(inicio, hoje=None):
     """Quantas semanas de aluguel nascem de uma vez para um contrato que começou em `inicio`."""
     hoje = hoje or timezone.localdate()
@@ -184,6 +205,7 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
         hoje = timezone.localdate()
         self.fields["data_inicio"].widget.attrs["max"] = hoje.isoformat()
         _km_com_milhar(self, "km_entrega")
+        _km_com_milhar(self, "franquia_km_mensal")
         self.fields["veiculo"].queryset = Veiculo.objects.filter(
             status=Veiculo.Status.DISPONIVEL, uso=Veiculo.Uso.LOCACAO
         )
@@ -254,6 +276,9 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
                     required=False,
                     label=f"Confirmo lançar {self.semanas} semanas atrasadas",
                 )
+
+    def clean_franquia_km_mensal(self):
+        return _franquia_razoavel(self)
 
     def clean_confirmar_divida(self):
         confirmado = self.cleaned_data.get("confirmar_divida")
@@ -375,6 +400,7 @@ class AlocacaoEdicaoForm(FormularioBR, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        _km_com_milhar(self, "franquia_km_mensal")
         self.fields[
             "valor_semanal"
         ].help_text = "Vale para as próximas semanas e para a semana em aberto sem pagamento."
@@ -385,17 +411,39 @@ class AlocacaoEdicaoForm(FormularioBR, forms.ModelForm):
             "proporcional, só pelos dias ainda não cobrados."
         )
 
+    def clean_franquia_km_mensal(self):
+        return _franquia_razoavel(self)
+
+    #: Caução combinada menor que a já depositada: a tela pede esta confirmação.
+    confirmar_caucao_menor = False
+
     def clean_caucao_valor(self):
         """Não some com a caução combinada enquanto houver dinheiro retido (C01)."""
         valor = self.cleaned_data.get("caucao_valor")
-        if not valor and self.instance.pk:
-            caucao = _caucao_com_saldo(self.instance)
+        if not self.instance.pk:
+            return valor
+        caucao = _caucao_com_saldo(self.instance)
+        if not valor:
             if caucao and caucao.saldo > 0:
                 raise ValidationError(
                     f"Ainda há {brl(caucao.saldo)} retidos na caução deste cliente. "
                     "Devolva ou desconte esse valor em Financeiro > Cauções antes de "
                     "tirar a caução do contrato."
                 )
+        elif caucao and caucao.saldo > valor and "caucao_valor" in self.changed_data:
+            # o dinheiro a mais não sai sozinho da caução: só a tela da caução devolve.
+            # A caixa continua na tela (marcada) se outro campo der erro.
+            self.confirmar_caucao_menor = True
+            if self.data.get("confirmar_caucao"):
+                return valor
+            retidos = (
+                f" ({brl(caucao.saldo)} retidos hoje)" if caucao.saldo != caucao.recebido else ""
+            )
+            raise ValidationError(
+                f"Já foram depositados {brl(caucao.recebido)}{retidos}. Os "
+                f"{brl(caucao.saldo - valor)} a mais continuam guardados — devolva pela tela "
+                "da caução se combinou devolver. Para salvar assim, marque a confirmação."
+            )
         return valor
 
 
@@ -453,7 +501,9 @@ class TrocaForm(FormularioBR, forms.ModelForm):
                 else None
             )
             if veiculo and km is not None and km < veiculo.km_atual:
-                self.texto_km = texto_km_menor(veiculo.km_atual)
+                # erro junto do campo de KM, com o número digitado (C: a caixa de
+                # confirmação ficava no fim do formulário, depois de Observações)
+                self.texto_km = f"Você digitou {milhar(km)} km. " + texto_km_menor(veiculo.km_atual)
                 self.fields["confirmar_km"] = forms.BooleanField(
                     required=False, label="Confirmo o KM"
                 )
@@ -463,11 +513,11 @@ class TrocaForm(FormularioBR, forms.ModelForm):
                 "esse valor; preencha só se o substituto tiver outro preço por semana."
             )
 
-    def clean_confirmar_km(self):
-        confirmado = self.cleaned_data.get("confirmar_km")
-        if self.texto_km and not confirmado:
-            raise ValidationError(self.texto_km)
-        return confirmado
+    def clean(self):
+        dados = super().clean()
+        if self.texto_km and not dados.get("confirmar_km") and "km_retirada" not in self.errors:
+            self.add_error("km_retirada", self.texto_km)
+        return dados
 
 
 def _semanas_reajustadas(request, alteradas):
@@ -514,7 +564,7 @@ class VistoriaForm(FormularioBR, forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args, alocacao, **kwargs):
+    def __init__(self, *args, alocacao, so_o_carro_com_o_motorista=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.alocacao = alocacao
         self.instance.alocacao = alocacao
@@ -522,14 +572,38 @@ class VistoriaForm(FormularioBR, forms.ModelForm):
         # D10: só o carro da locação e os substitutos dela; na troca, o substituto vem marcado
         campo = self.fields["veiculo"]
         campo.queryset = self.instance.veiculos_possiveis()
+        troca = alocacao.troca_ativa
+        if so_o_carro_com_o_motorista:
+            # devolução: só o carro que está com o motorista (um toque errado no
+            # celular vistoriava o substituto já devolvido)
+            campo.queryset = campo.queryset.filter(
+                pk=troca.veiculo_substituto_id if troca else alocacao.veiculo_id
+            )
         # sem escolha (tela antiga, leitura da foto) vale o carro sugerido
         campo.required = False
         campo.empty_label = None
-        campo.label_from_instance = lambda v: (
-            f"{v.placa} — {v.marca_modelo}"
-            + (" (carro da locação)" if v.pk == alocacao.veiculo_id else " (substituto)")
-        )
-        troca = alocacao.troca_ativa
+        # substituto já devolvido: "(substituto até 12/11)"
+        devolvidos = {}
+        for antiga in alocacao.trocas.all():
+            if antiga.data_devolucao:
+                anterior = devolvidos.get(antiga.veiculo_substituto_id)
+                devolvidos[antiga.veiculo_substituto_id] = max(
+                    antiga.data_devolucao, anterior or antiga.data_devolucao
+                )
+        self.tem_troca_aberta = troca is not None
+
+        def rotulo(veiculo):
+            if veiculo.pk == alocacao.veiculo_id:
+                papel = " (carro da locação)"
+            elif troca and veiculo.pk == troca.veiculo_substituto_id:
+                papel = " (substituto)"
+            elif veiculo.pk in devolvidos:
+                papel = f" (substituto até {devolvidos[veiculo.pk]:%d/%m})"
+            else:
+                papel = " (substituto)"
+            return f"{veiculo.placa} — {veiculo.marca_modelo}{papel}"
+
+        campo.label_from_instance = rotulo
         self.initial.setdefault(
             "veiculo", troca.veiculo_substituto_id if troca else alocacao.veiculo_id
         )
@@ -632,6 +706,63 @@ def _aviso_km_abaixo_da_vistoria(km, km_vistoria):
     return None
 
 
+def _aviso_km_do_substituto(troca, data, km):
+    """(aviso, dá para corrigir a retirada) do KM do substituto na devolução (D27).
+
+    Só o aviso de "km rodados demais" pode ter o erro na retirada; o de KM
+    abaixo de uma vistoria é da própria devolução.
+    """
+    aviso = _aviso_km_abaixo_da_vistoria(
+        km,
+        _maior_km_de_vistoria(troca.alocacao, troca.veiculo_substituto_id, troca.data_retirada),
+    )
+    if aviso:
+        return aviso, False
+    aviso = suspeita_de_km(km, data, troca.km_retirada, troca.data_retirada, "na retirada")
+    return aviso, aviso is not None
+
+
+def _retirada_parece_errada(troca, data, km_devolucao):
+    """A devolução bate com o KM que o substituto já tinha, a retirada não.
+
+    Ex.: retirada digitada 14.314 (era 143.140) e devolução 143.200 — o erro
+    está na retirada, não na devolução.
+    """
+    km_conhecido = troca.veiculo_substituto.km_atual
+    return (
+        troca.km_retirada < km_conhecido <= km_devolucao
+        and suspeita_de_km(km_devolucao, data, troca.km_retirada, troca.data_retirada, "")
+        is not None
+        and suspeita_de_km(km_devolucao, data, km_conhecido, troca.data_retirada, "") is None
+    )
+
+
+def _km_confirmado_na_vistoria(situacao, km):
+    """O KM da devolução é o mesmo da vistoria de devolução (já conferido lá)."""
+    devolucao = situacao["vistoria_devolucao"]
+    return bool(devolucao and devolucao.km and str(devolucao.km) == str(km))
+
+
+def _corrigir_km_da_retirada(post, troca, km_devolucao):
+    """Lê o "KM na retirada" corrigido na devolução; devolve o KM antigo (ou None).
+
+    Só muda a troca em memória: o save da devolução grava junto (e no histórico).
+    """
+    texto = (post.get("km_retirada") or "").strip()
+    if not texto:
+        return None
+    novo = km_digitado(texto)
+    if novo == troca.km_retirada:
+        return None
+    if novo > km_devolucao:
+        raise ValidationError(
+            f"O KM na retirada ({milhar(novo)}) não pode ser maior que o da devolução "
+            f"({milhar(km_devolucao)})."
+        )
+    antigo, troca.km_retirada = troca.km_retirada, novo
+    return antigo
+
+
 def _ficha(alocacao):
     """C30: telas abertas da ficha do cliente voltam para ela."""
     return redirect("pessoas:detalhe", alocacao.cliente_id)
@@ -678,6 +809,7 @@ def _sugestoes_da_nova_alocacao(form):
         .order_by("data_inicio", "pk")
     }
     clientes = {}
+    hoje = timezone.localdate()
     for cliente in form.fields["cliente"].queryset:
         dados = {}
         if cliente.dia_vencimento is not None or cliente.caucao_referencia:
@@ -698,6 +830,16 @@ def _sugestoes_da_nova_alocacao(form):
                 "caucao": "",
                 **dados,
                 "com_carro": texto_cliente_com_carro(ativas[cliente.pk]),
+            }
+        if cliente.cnh_validade and cliente.cnh_validade < hoje:
+            # aviso já ao escolher (só avisa — não pede confirmação)
+            dados = {
+                "dia": "",
+                "dia_nome": "",
+                "caucao": "",
+                **dados,
+                "cnh": f"CNH vencida desde {cliente.cnh_validade:%d/%m/%Y} — confira antes "
+                "de entregar o carro.",
             }
         if dados:
             clientes[str(cliente.pk)] = dados
@@ -882,29 +1024,90 @@ def editar(request, alocacao_id):
 
 def encerrar(request, alocacao_id):
     alocacao = get_object_or_404(
-        Alocacao.objects.select_related("veiculo", "cliente"), pk=alocacao_id
+        Alocacao.objects.select_related("veiculo", "cliente").prefetch_related(
+            "trocas__veiculo_substituto"
+        ),
+        pk=alocacao_id,
     )
     if alocacao.status != Alocacao.Status.ATIVA:
         messages.warning(request, "Esta alocação já está encerrada.")
         return redirect("alocacoes:lista")
     aviso_km = None
+    retirada_errada = corrigir_retirada = False
+    # Com substituto: o cliente devolve o substituto de vez e o contrato acaba junto
+    # (o carro dele pode seguir na oficina, sem cliente). O KM digitado é o do substituto.
+    troca = alocacao.troca_ativa
+    situacao = situacao_da_devolucao(alocacao)
     if request.method == "POST":
         try:
             data_termino, km_devolucao = _data_e_km_da_devolucao(request.POST, "data_termino")
-            aviso_km = _aviso_km_abaixo_da_vistoria(
-                km_devolucao,
-                _maior_km_de_vistoria(alocacao, alocacao.veiculo_id, alocacao.data_inicio),
-            ) or suspeita_de_km(
-                km_devolucao, data_termino, alocacao.km_entrega, alocacao.data_inicio, "na entrega"
+            if troca and request.POST.get("troca") != str(troca.pk):
+                raise ValidationError(
+                    f"{alocacao.cliente.nome} está com o substituto "
+                    f"{troca.veiculo_substituto.placa} — confira o KM dele e envie de novo."
+                )
+            if not troca and request.POST.get("troca"):
+                raise ValidationError(
+                    "O substituto já foi devolvido em outra tela — confira o KM do "
+                    f"{alocacao.veiculo.placa} e envie de novo."
+                )
+            km_corrigido = (
+                _corrigir_km_da_retirada(request.POST, troca, km_devolucao) if troca else None
             )
+            if troca:
+                aviso_km, corrigir_retirada = _aviso_km_do_substituto(
+                    troca, data_termino, km_devolucao
+                )
+                retirada_errada = corrigir_retirada and _retirada_parece_errada(
+                    troca, data_termino, km_devolucao
+                )
+            else:
+                aviso_km = _aviso_km_abaixo_da_vistoria(
+                    km_devolucao,
+                    _maior_km_de_vistoria(alocacao, alocacao.veiculo_id, alocacao.data_inicio),
+                ) or suspeita_de_km(
+                    km_devolucao,
+                    data_termino,
+                    alocacao.km_entrega,
+                    alocacao.data_inicio,
+                    "na entrega",
+                )
+            if aviso_km and _km_confirmado_na_vistoria(situacao, km_devolucao):
+                # o mesmo KM já foi conferido (e confirmado) na vistoria de devolução
+                aviso_km = None
             if aviso_km and not request.POST.get("confirmar_km"):
                 raise ValidationError(aviso_km)
-            alocacao.encerrar(data_termino=data_termino, km_devolucao=km_devolucao)
-            messages.success(
-                request,
-                f"Alocação encerrada — {alocacao.veiculo.placa} está "
-                f"{alocacao.veiculo.get_status_display().lower()}.",
-            )
+            with transaction.atomic():
+                if troca:
+                    troca.devolver(data_devolucao=data_termino, km_devolucao=km_devolucao)
+                    # o carro do contrato não voltou a rodar: fica com o KM que já tinha
+                    principal = alocacao.veiculo
+                    principal.refresh_from_db(fields=["km_atual", "status"])
+                    alocacao.encerrar(
+                        data_termino=data_termino,
+                        km_devolucao=max(alocacao.km_entrega, principal.km_atual),
+                    )
+                else:
+                    alocacao.encerrar(data_termino=data_termino, km_devolucao=km_devolucao)
+            if troca:
+                messages.success(
+                    request,
+                    f"Substituto {troca.veiculo_substituto.placa} devolvido e alocação "
+                    f"encerrada — {alocacao.veiculo.placa} está "
+                    f"{alocacao.veiculo.get_status_display().lower()}.",
+                )
+                if km_corrigido is not None:
+                    messages.info(
+                        request,
+                        f"KM da retirada do {troca.veiculo_substituto.placa} corrigido de "
+                        f"{milhar(km_corrigido)} para {milhar(troca.km_retirada)}.",
+                    )
+            else:
+                messages.success(
+                    request,
+                    f"Alocação encerrada — {alocacao.veiculo.placa} está "
+                    f"{alocacao.veiculo.get_status_display().lower()}.",
+                )
             _avisar_acerto_das_semanas(request, alocacao)
             # Encerrar dispara o acerto de caução quando há saldo retido (docs.md §4.2/§4.4).
             caucao = _caucao_com_saldo(alocacao)
@@ -919,7 +1122,9 @@ def encerrar(request, alocacao_id):
             return _ficha(alocacao)
         except (ValidationError, KeyError, ValueError) as erro:
             _avisar_erro_de_devolucao(request, erro)
-    situacao = situacao_da_devolucao(alocacao)
+            # nada foi gravado: relê a troca e a alocação do banco para a tela
+            alocacao.refresh_from_db()
+            troca = alocacao.troca_ativa
     if _voltar(request):
         # a vistoria volta para esta tela sem perder o ?voltar= (ficha do cliente)
         situacao["url_vistoria_devolucao"] = (
@@ -937,6 +1142,8 @@ def encerrar(request, alocacao_id):
         (t.data_devolucao for t in alocacao.trocas.all() if t.data_devolucao), default=None
     )
     data_minima = max(alocacao.data_inicio, ultima_troca or alocacao.data_inicio)
+    if troca:
+        data_minima = max(data_minima, troca.data_retirada)
     return render(
         request,
         "alocacoes/encerrar.html",
@@ -944,10 +1151,22 @@ def encerrar(request, alocacao_id):
             "alocacao": alocacao,
             "hoje": timezone.localdate(),
             "caucao": _caucao_com_saldo(alocacao),
-            "troca_ativa": alocacao.troca_ativa,
+            "troca_ativa": troca,
+            "oficina_principal": (
+                oficina_por_veiculo([alocacao.veiculo_id]).get(alocacao.veiculo_id)
+                if troca
+                else None
+            ),
             "km_sugerido": km_sugerido,
+            # KM que o encerramento mostra como ponto de partida (o do substituto, se houver)
+            "km_saida": troca.km_retirada if troca else alocacao.km_entrega,
             "data_minima": data_minima,
             "aviso_km": aviso_km,
+            "retirada_errada": retirada_errada,
+            "corrigir_retirada": corrigir_retirada,
+            "km_confirmado_na_vistoria": bool(
+                km_sugerido and devolucao and _km_confirmado_na_vistoria(situacao, km_sugerido)
+            ),
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
             **situacao,
         },
@@ -1070,19 +1289,19 @@ def troca_devolver(request, troca_id):
         )
         return redirect("alocacoes:lista")
     aviso_km = None
+    retirada_errada = corrigir_retirada = False
     # o cliente volta para o carro dele: avisa se ele ainda consta na oficina
     principal = troca.alocacao.veiculo
     oficina_principal = oficina_por_veiculo([principal.pk]).get(principal.pk)
     if request.method == "POST":
         try:
             data_devolucao, km_devolucao = _data_e_km_da_devolucao(request.POST, "data_devolucao")
-            aviso_km = _aviso_km_abaixo_da_vistoria(
-                km_devolucao,
-                _maior_km_de_vistoria(
-                    troca.alocacao, troca.veiculo_substituto_id, troca.data_retirada
-                ),
-            ) or suspeita_de_km(
-                km_devolucao, data_devolucao, troca.km_retirada, troca.data_retirada, "na retirada"
+            km_corrigido = _corrigir_km_da_retirada(request.POST, troca, km_devolucao)
+            aviso_km, corrigir_retirada = _aviso_km_do_substituto(
+                troca, data_devolucao, km_devolucao
+            )
+            retirada_errada = corrigir_retirada and _retirada_parece_errada(
+                troca, data_devolucao, km_devolucao
             )
             if aviso_km and not request.POST.get("confirmar_km"):
                 raise ValidationError(aviso_km)
@@ -1104,10 +1323,17 @@ def troca_devolver(request, troca_id):
             )
             for saida in saidas:
                 messages.info(request, f"{principal.placa} saiu da oficina em {saida:%d/%m/%Y}.")
+            if km_corrigido is not None:
+                messages.info(
+                    request,
+                    f"KM da retirada do {substituto.placa} corrigido de {milhar(km_corrigido)} "
+                    f"para {milhar(troca.km_retirada)}.",
+                )
             _semanas_reajustadas(request, getattr(troca, "semanas_reajustadas", None))
             return _ficha(troca.alocacao)
         except (ValidationError, KeyError, ValueError) as erro:
             _avisar_erro_de_devolucao(request, erro)
+            troca.refresh_from_db()  # nada foi gravado (KM da retirada inclusive)
     return render(
         request,
         "alocacoes/troca_devolver.html",
@@ -1115,7 +1341,13 @@ def troca_devolver(request, troca_id):
             "troca": troca,
             "hoje": timezone.localdate(),
             "aviso_km": aviso_km,
+            "retirada_errada": retirada_errada,
+            "corrigir_retirada": corrigir_retirada,
             "oficina_principal": oficina_principal,
+            # cliente desistindo de vez: encerra o contrato devolvendo o substituto
+            "url_encerrar": reverse("alocacoes:encerrar", args=[troca.alocacao_id])
+            + "?"
+            + urlencode({"voltar": reverse("pessoas:detalhe", args=[troca.alocacao.cliente_id])}),
             "voltar": _voltar(request) or reverse("alocacoes:lista"),
         },
     )
@@ -1216,7 +1448,11 @@ def vistoria_nova(request, alocacao_id):
         km_base if inicial["tipo"] == Vistoria.Tipo.ENTRADA else max(km_base, vigente.km_atual)
     )
     form = VistoriaForm(
-        request.POST or None, request.FILES or None, initial=inicial, alocacao=alocacao
+        request.POST or None,
+        request.FILES or None,
+        initial=inicial,
+        alocacao=alocacao,
+        so_o_carro_com_o_motorista=request.GET.get("tipo") == Vistoria.Tipo.SAIDA,
     )
     form.fields["km"].widget.attrs.setdefault(
         "placeholder", f"último conhecido: {milhar(vigente.km_atual)} km"
@@ -1239,9 +1475,12 @@ def vistoria_nova(request, alocacao_id):
                 vistoria = form.save(commit=False)
                 vistoria.alocacao = alocacao
                 vistoria.save()
+                ajuste_km = _ajustar_km_de_partida(vistoria)
         except _FormularioComErro:
             pass
         else:
+            if ajuste_km:
+                messages.info(request, ajuste_km)
             return _depois_da_vistoria(request, vistoria)
     return render(
         request,
@@ -1256,6 +1495,109 @@ def vistoria_nova(request, alocacao_id):
             "vistorias": alocacao.vistorias.select_related("veiculo"),
         },
     )
+
+
+#: Vistoria de entrega até tantos dias depois da entrega/retirada ainda corrige o KM dela.
+DIAS_AJUSTE_KM_PARTIDA = 7
+
+
+def _ajustar_km_de_partida(vistoria):
+    """Vistoria de entrega com o KM lido no painel corrige o KM anotado ao alocar.
+
+    O contrato, a devolução e o excedente de km partem do KM da entrega (ou da
+    retirada do substituto): o número que o Paulo leu no painel é o que vale.
+    Só a 1ª vistoria de entrega daquele carro, logo depois da entrega, com o
+    contrato (ou a troca) ainda em aberto e sem leitura mensal de KM depois
+    (ela já usou o número antigo). Devolve o texto do aviso, ou None.
+    """
+    from apps.km.models import RegistroKm  # import local evita ciclo de import
+
+    if vistoria.tipo != Vistoria.Tipo.ENTRADA or not vistoria.km:
+        return None
+    alocacao = vistoria.alocacao
+    outras_entregas = alocacao.vistorias.filter(
+        veiculo_id=vistoria.veiculo_id, tipo=Vistoria.Tipo.ENTRADA
+    ).exclude(pk=vistoria.pk)
+    limite = timedelta(days=DIAS_AJUSTE_KM_PARTIDA)
+    if vistoria.veiculo_id == alocacao.veiculo_id:
+        if (
+            alocacao.status != Alocacao.Status.ATIVA
+            or vistoria.km == alocacao.km_entrega
+            or vistoria.data > alocacao.data_inicio + limite
+            or outras_entregas.exists()
+            or alocacao.trocas.filter(data_retirada__lte=vistoria.data).exists()
+            or RegistroKm.objects.filter(
+                veiculo_id=alocacao.veiculo_id, data_leitura__gte=alocacao.data_inicio
+            ).exists()
+        ):
+            return None
+        objeto, campo, veiculo = alocacao, "km_entrega", alocacao.veiculo
+        rotulo = "KM de entrega do contrato"
+    else:
+        troca = (
+            alocacao.trocas.filter(
+                veiculo_substituto_id=vistoria.veiculo_id,
+                data_retirada__lte=vistoria.data,
+                data_devolucao__isnull=True,
+            )
+            .select_related("veiculo_substituto")
+            .first()
+        )
+        if (
+            troca is None
+            or vistoria.km == troca.km_retirada
+            or vistoria.data > troca.data_retirada + limite
+            or outras_entregas.filter(data__gte=troca.data_retirada).exists()
+            or RegistroKm.objects.filter(
+                veiculo_id=troca.veiculo_substituto_id, data_leitura__gte=troca.data_retirada
+            ).exists()
+        ):
+            return None
+        objeto, campo, veiculo = troca, "km_retirada", troca.veiculo_substituto
+        rotulo = f"KM da retirada do substituto {veiculo.placa}"
+    antigo = getattr(objeto, campo)
+    maior = _gravar_km_de_partida(objeto, campo, veiculo, vistoria.km)
+    if maior is not None:
+        # para baixo, mas outro lançamento do carro já passou do número da vistoria:
+        # o carro não anda para trás — nada muda, a pessoa confere
+        return (
+            f"{rotulo} continua {milhar(antigo)}: a vistoria marcou {milhar(vistoria.km)} km, "
+            f"mas o carro já tinha {milhar(maior)} km em outro lançamento — confira o painel."
+        )
+    return (
+        f"{rotulo} ajustado para {milhar(vistoria.km)} (estava {milhar(antigo)}), como na vistoria."
+    )
+
+
+class _KmParaTras(Exception):
+    pass
+
+
+def _gravar_km_de_partida(objeto, campo, veiculo, novo):
+    """Grava o KM de partida corrigido; devolve None, ou o KM que impediu a correção.
+
+    Para baixo só vale se nenhum outro lançamento do carro passar do novo número;
+    nesse caso o KM atual do carro também volta para o maior conhecido (D27).
+    """
+    from apps.km.correcao import km_atual_recalculado  # import local evita ciclo de import
+
+    antigo = getattr(objeto, campo)
+    try:
+        with transaction.atomic():
+            setattr(objeto, campo, novo)
+            objeto.save(update_fields=[campo])
+            if novo < antigo:
+                maior = km_atual_recalculado(veiculo)
+                if maior > novo:
+                    raise _KmParaTras(maior)
+                veiculo.refresh_from_db(fields=["km_atual"])
+                if veiculo.km_atual == antigo:
+                    veiculo.km_atual = maior
+                    veiculo.save(update_fields=["km_atual"])
+    except _KmParaTras as erro:
+        setattr(objeto, campo, antigo)
+        return erro.args[0]
+    return None
 
 
 def _tipo_sugerido(alocacao, vigente):

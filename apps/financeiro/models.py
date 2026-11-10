@@ -13,6 +13,19 @@ from apps.pessoas.models import Cliente
 ZERO = Decimal("0.00")
 
 
+def _valor_positivo(nome):
+    """Trava no banco: lançamento de dinheiro com valor zero ou negativo não grava.
+
+    As telas e os serviços já recusam antes; isto só garante que nenhum caminho
+    novo (ou um script) grave dinheiro torto.
+    """
+    return models.CheckConstraint(
+        condition=Q(valor__gt=0),
+        name=nome,
+        violation_error_message="O valor deve ser maior que zero.",
+    )
+
+
 class Cobranca(models.Model):
     """Valor devido por um cliente (docs.md §4.3).
 
@@ -136,9 +149,15 @@ class Cobranca(models.Model):
         anotado = getattr(self, "_total_quitado_anotado", None)
         if anotado is not None:
             return anotado
-        recebido = self.aplicacoes.aggregate(t=Sum("valor"))["t"] or ZERO
-        caucao = self.descontos_caucao.aggregate(t=Sum("valor"))["t"] or ZERO
-        return recebido + caucao
+        if self.pk is None:
+            return ZERO
+        # a mesma fórmula das listagens, numa consulta só (antes: uma por tabela)
+        return (
+            Cobranca.com_quitacao_anotada(Cobranca.objects.filter(pk=self.pk))
+            .values_list("_total_quitado_anotado", flat=True)
+            .first()
+            or ZERO
+        )
 
     @property
     def saldo(self):
@@ -163,20 +182,27 @@ class Cobranca(models.Model):
         self.__dict__.pop("_total_quitado_anotado", None)
         if self.status == self.Status.CANCELADA:
             return
-        quitado = self.total_quitado  # calculado uma vez (2 consultas)
-        if quitado >= self.valor:
-            novo = self.Status.PAGO
-        elif self.status == self.Status.JUDICIAL:
-            return
-        elif self.vencimento < hoje:
-            novo = self.Status.ATRASADO
-        elif quitado > ZERO:
-            novo = self.Status.PARCIAL
-        else:
-            novo = self.Status.PENDENTE
+        novo = self.novo_status(self.total_quitado, hoje)  # 1 consulta
         if novo != self.status:
             self.status = novo
             self.save(update_fields=["status"])
+
+    def novo_status(self, quitado, hoje):
+        """O status que a cobrança deve ter com esse total pago, sem ler nem gravar nada.
+
+        Cancelada fica cancelada; judicial só sai sozinha quando é quitada.
+        """
+        if self.status == self.Status.CANCELADA:
+            return self.status
+        if quitado >= self.valor:
+            return self.Status.PAGO
+        if self.status == self.Status.JUDICIAL:
+            return self.status
+        if self.vencimento < hoje:
+            return self.Status.ATRASADO
+        if quitado > ZERO:
+            return self.Status.PARCIAL
+        return self.Status.PENDENTE
 
 
 class Recebimento(models.Model):
@@ -201,6 +227,7 @@ class Recebimento(models.Model):
     class Meta:
         verbose_name = "recebimento"
         ordering = ["-data", "-pk"]
+        constraints = [_valor_positivo("recebimento_valor_positivo")]
 
     def __str__(self):
         return f"{brl(self.valor)} de {self.cliente.nome} em {self.data:%d/%m/%Y}"
@@ -218,6 +245,7 @@ class AplicacaoRecebimento(models.Model):
     class Meta:
         verbose_name = "aplicação de recebimento"
         verbose_name_plural = "aplicações de recebimento"
+        constraints = [_valor_positivo("aplicacao_valor_positivo")]
 
     def __str__(self):
         return f"{brl(self.valor)} → {self.cobranca.descricao}"
@@ -247,6 +275,7 @@ class MovimentoCredito(models.Model):
         verbose_name = "movimento de crédito"
         verbose_name_plural = "movimentos de crédito"
         ordering = ["-data", "-pk"]
+        constraints = [_valor_positivo("credito_valor_positivo")]
 
     def __str__(self):
         return f"{self.get_tipo_display()}: {brl(self.valor)} — {self.cliente.nome}"
@@ -318,6 +347,15 @@ class ItemNotaDebito(models.Model):
     class Meta:
         verbose_name = "item da nota de débito"
         verbose_name_plural = "itens da nota de débito"
+        constraints = [
+            _valor_positivo("item_nd_valor_positivo"),
+            # a mesma multa nunca entra em duas NDs (cancelar a ND solta a multa)
+            models.UniqueConstraint(
+                fields=["multa"],
+                name="multa_em_uma_nd_so",
+                violation_error_message="Esta multa já está em outra nota de débito.",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.descricao} ({brl(self.valor)})"
@@ -394,7 +432,8 @@ class Caucao(models.Model):
         # "utilizada" só quando a caução pagou alguma cobrança (desconto); uma
         # devolução parcial (ex.: correção de digitação) não é uso da caução
         if self.descontado > ZERO:
-            return "Parcialmente utilizada"
+            # toda usada para pagar dívidas: "parcialmente" com saldo R$ 0 confundia
+            return "Utilizada" if self.saldo == ZERO else "Parcialmente utilizada"
         if self.devolvido > ZERO:
             return "Parcialmente devolvida"
         return "Retida"
@@ -432,6 +471,17 @@ class MovimentacaoCaucao(models.Model):
         verbose_name = "movimentação de caução"
         verbose_name_plural = "movimentações de caução"
         ordering = ["-data", "-pk"]
+        constraints = [
+            _valor_positivo("caucao_mov_valor_positivo"),
+            # só o desconto quita cobrança: com cobrança, um reforço ou devolução
+            # entraria na conta do "já pago" (com_quitacao_anotada)
+            models.CheckConstraint(
+                condition=Q(tipo="desconto", cobranca__isnull=False)
+                | (~Q(tipo="desconto") & Q(cobranca__isnull=True)),
+                name="so_desconto_quita_cobranca",
+                violation_error_message="Só o desconto da caução quita uma cobrança.",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.get_tipo_display()} {brl(self.valor)} — {self.caucao}"

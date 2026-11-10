@@ -43,8 +43,9 @@
         </td>
         <td class="block sm:table-cell sm:px-3 sm:py-2">
           <label class="mb-1 block text-xs text-gray-500 sm:hidden" for="intervalo-{{ item.pk }}">Troca a cada (km)</label>
-          <input type="number" id="intervalo-{{ item.pk }}" name="intervalo_km_padrao" min="1" placeholder="sem prazo fixo" inputmode="numeric"
-                 value="{{ item.intervalo_km_padrao|default_if_none:'' }}" form="item-{{ item.pk }}"
+          {# texto + teclado numérico: "15.000" num type=number virava 15 km #}
+          <input type="text" id="intervalo-{{ item.pk }}" name="intervalo_km_padrao" placeholder="sem prazo fixo" inputmode="numeric" autocomplete="off"
+                 value="{% if item.intervalo_km_padrao %}{{ item.intervalo_km_padrao|milhar }}{% endif %}" form="item-{{ item.pk }}"
                  aria-label="Troca a cada quantos km (vazio se não tem prazo fixo)"
                  class="w-full rounded border border-gray-300 px-2 py-2 sm:w-40 sm:py-1">
         </td>
@@ -113,7 +114,7 @@
         </td>
         <td class="block pt-1 sm:table-cell sm:px-3 sm:py-2 sm:text-right">
           <form method="post"
-                onsubmit="return confirm('Remover o intervalo de {{ p.intervalo_km }} km de {{ p.item.nome }} do {{ p.veiculo.placa }}? O veículo volta ao padrão do plano.')">
+                onsubmit="return confirm('Remover o intervalo de {{ p.intervalo_km|milhar }} km de {{ p.item.nome }} do {{ p.veiculo.placa }}? O veículo volta ao padrão do plano.')">
             {% csrf_token %}
             <input type="hidden" name="acao" value="remover_intervalo">
             <input type="hidden" name="intervalo_id" value="{{ p.pk }}">

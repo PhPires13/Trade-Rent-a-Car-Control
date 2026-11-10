@@ -706,7 +706,7 @@ def test_reforco_de_caucao_so_para_quem_tem_caucao(usuario_logado, cliente, aloc
     assert 'value="caucao"' not in sem
     com = usuario_logado.get(f"{URL_RECEBER}?cliente={cliente.pk}").content.decode()
     assert 'value="caucao"' in com
-    assert "disponivel > aplicado + 0.005" in com  # "O que sobrar vira" só quando sobra
+    assert "sobra > 0.005" in com  # "O que sobrar vira" só quando sobra
 
 
 # ---------- 23. Descrição da ND e confirmação de cancelar ----------

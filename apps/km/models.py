@@ -95,7 +95,7 @@ class RegistroKm(models.Model):
         ordering = ["-mes_referencia"]
 
     def __str__(self):
-        return f"{self.veiculo.placa} — {self.mes_referencia:%m/%Y}: {self.km} km"
+        return f"{self.veiculo.placa} — {self.mes_referencia:%m/%Y}: {milhar(self.km)} km"
 
     def save(self, *args, **kwargs):
         self.mes_referencia = primeiro_dia_do_mes(self.mes_referencia)
@@ -195,6 +195,17 @@ class RegistroKm(models.Model):
         self.mes_referencia = primeiro_dia_do_mes(self.mes_referencia)
         anterior = self.registro_anterior()
         seguinte = self.registro_seguinte()
+        venda = self.veiculo.data_venda
+        if self.data_leitura is not None and venda is not None and self.data_leitura > venda:
+            # a linha pode ter ficado aberta no celular enquanto a venda era registrada
+            raise ValidationError(
+                {
+                    "data_leitura": (
+                        f"Este carro foi vendido em {venda:%d/%m/%Y} — não dá para anotar KM "
+                        f"depois da venda."
+                    )
+                }
+            )
         if self.data_leitura is not None:
             # Com a leitura de fechamento (D21) a data pode cair no mês seguinte:
             # a ordem das datas precisa continuar a mesma dos meses.

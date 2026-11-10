@@ -37,8 +37,9 @@
              class="w-full rounded border border-gray-300 px-2 py-2"></label>
     <label class="block text-sm">
       <span class="mb-1 block font-medium">Observações</span>
-      <input name="observacoes" value="{{ fornecedor.observacoes }}"
-             class="w-full rounded border border-gray-300 px-2 py-2"></label>
+      {# textarea: num <input> o navegador junta as linhas ("Atende sábadoFalar com Zé") #}
+      <textarea name="observacoes" rows="2"
+                class="w-full rounded border border-gray-300 px-2 py-2">{{ fornecedor.observacoes }}</textarea></label>
     <div class="flex justify-end sm:col-span-2 lg:col-span-1">
       <button class="min-h-[44px] w-full whitespace-nowrap rounded bg-marca-preto px-4 py-2 text-sm font-semibold text-white hover:brightness-125 sm:w-auto">Salvar</button>
     </div>

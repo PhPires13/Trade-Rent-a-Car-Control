@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
@@ -23,7 +26,28 @@ def criar_caucao_da_alocacao(sender, instance, created, raw=False, update_fields
     abrir_caucao(instance)
 
 
+#: ligado enquanto um serviço apaga pagamentos e ele mesmo recalcula as cobranças
+_recalculo_manual = ContextVar("recalculo_manual", default=False)
+
+
+@contextmanager
+def sem_recalculo_automatico():
+    """Desliga o recálculo destes sinais dentro do bloco.
+
+    Para os serviços que já recalculam a cobrança logo depois de apagar
+    (desfazer recebimento/caução): sem isso a cobrança era relida e gravada
+    duas vezes, com uma versão intermediária falsa no histórico.
+    """
+    marca = _recalculo_manual.set(True)
+    try:
+        yield
+    finally:
+        _recalculo_manual.reset(marca)
+
+
 def _recalcular_cobranca(cobranca_id):
+    if _recalculo_manual.get():
+        return
     cobranca = Cobranca.objects.filter(pk=cobranca_id).first()
     if cobranca:
         cobranca.atualizar_status()

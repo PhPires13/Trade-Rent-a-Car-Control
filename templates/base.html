@@ -40,10 +40,14 @@
       /* link de ação no meio do texto (placa, "registrar devolução"): área de toque de 44px */
       .alvo-toque{display:inline-flex;align-items:center;min-height:44px}
       /* todo outro link do conteúdo ("Editar", "← Voltar", abas, placas): área de toque
-         de 44px de altura por uma camada invisível — o layout não muda */
+         de 44px de altura por uma camada invisível — o layout não muda. Quando outro
+         alvo está perto (link, botão, select), static/js/ux.js encurta a camada até o
+         meio do vão (--alvo-cima/--alvo-baixo): o toque nunca vai para o link vizinho. */
       main a:not([data-alvo-livre]):not(.dica-botao):not(.alvo-toque):not(.absolute):not(.fixed):not(.sticky){position:relative}
       main a:not([data-alvo-livre]):not(.dica-botao):not(.alvo-toque):not(.absolute):not(.fixed):not(.sticky)::after{
-        content:"";position:absolute;left:0;right:0;top:50%;height:max(44px,100%);transform:translateY(-50%)}
+        content:"";position:absolute;left:0;right:0;
+        top:min(0px,max(calc(50% - 22px),calc(-1 * var(--alvo-cima,22px))));
+        bottom:min(0px,max(calc(50% - 22px),calc(-1 * var(--alvo-baixo,22px))))}
     }
     /* foco do teclado bem visível (o padrão do navegador, 1px, some no botão amarelo);
        no fundo escuro (cabeçalho, barra de baixo) o contorno é amarelo */
@@ -70,7 +74,9 @@
   {# teclado: o primeiro Tab já oferece pular o cabeçalho e o menu #}
   <a href="#conteudo" class="pular-conteudo print:hidden" data-alvo-livre>Pular para o conteúdo</a>
   {% with ns=request.resolver_match.namespace nome=request.resolver_match.url_name %}
-  <header class="bg-marca-preto text-white print:hidden" x-data="{ menu: false, conta: false }">
+  {# Esc fecha o menu aberto e devolve o foco ao botão que o abriu (teclado) #}
+  <header class="bg-marca-preto text-white print:hidden" x-data="{ menu: false, conta: false }"
+          @keydown.escape.window="if (conta) { conta = false; $refs.botaoConta.focus() } else if (menu) { menu = false; $refs.botaoMenu.focus() }">
     <div class="flex w-full items-center justify-between gap-4 px-4 py-3">
       <a href="{% url 'painel' %}" class="flex shrink-0 items-center gap-2" aria-label="Trade Rent a Car — início">
         <span class="rounded bg-marca-amarelo px-2 py-1 text-lg font-black tracking-tight text-marca-preto">TRADE</span>
@@ -89,10 +95,12 @@
           <input id="busca-global" type="search" name="q" value="{{ request.GET.q }}" placeholder="Placa, nome, CPF, telefone…"
                  class="w-56 rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-white placeholder-gray-400 focus:border-marca-amarelo focus:outline-none">
         </form>
-        <div class="relative">
-          <button type="button" @click="conta = !conta" @click.outside="conta = false"
+        {# o menu da conta também fecha quando o foco (Tab) sai dele #}
+        <div class="relative" @focusout="if ($event.relatedTarget && !$el.contains($event.relatedTarget)) conta = false">
+          <button type="button" @click="conta = !conta" @click.outside="conta = false" x-ref="botaoConta"
                   class="flex items-center gap-1 rounded px-2 py-1 text-gray-200 hover:bg-gray-800"
-                  :aria-expanded="conta" aria-haspopup="menu">
+                  :aria-expanded="conta" aria-haspopup="menu"
+                  aria-label="Conta: {{ user.first_name|default:user.get_username }} — sair ou Retaguarda">
             <span class="flex h-6 w-6 items-center justify-center rounded-full bg-marca-amarelo text-xs font-black text-marca-preto">{{ user.get_username|first|upper }}</span>
             <span class="hidden md:inline">{{ user.first_name|default:user.get_username }}</span>
             <span aria-hidden="true" class="text-xs">▾</span>
@@ -113,7 +121,7 @@
         {# celular: a busca fica à vista (antes só aparecia dentro do ☰) #}
         <a href="{% url 'buscar' %}" data-alvo-livre aria-label="Buscar placa, nome, CPF, telefone ou nº da multa"
            class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 sm:hidden"><span aria-hidden="true">🔍</span></a>
-        <button type="button" @click="menu = !menu" class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 xl:hidden"
+        <button type="button" @click="menu = !menu" x-ref="botaoMenu" class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 xl:hidden"
                 :aria-expanded="menu" aria-controls="menu-movel" aria-label="Abrir menu">☰</button>
       </div>
     </div>
@@ -166,7 +174,7 @@
   {# celular/tablet: barra fixa embaixo com o que mais se faz no dia a dia (no computador, o menu do topo) #}
   <nav class="nao-imprime fixed inset-x-0 bottom-0 z-40 border-t border-gray-800 bg-marca-preto text-white xl:hidden print:hidden"
        style="padding-bottom: env(safe-area-inset-bottom)" aria-label="Atalhos"
-       x-data="{ lancar: false }" @keydown.escape.window="lancar = false">
+       x-data="{ lancar: false }" @keydown.escape.window="if (lancar) { lancar = false; $refs.botaoLancar.focus() }">
     <div class="relative mx-auto grid max-w-lg grid-cols-4 gap-1 px-2 py-1 text-xs font-semibold">
       <a href="{% url 'painel' %}" data-alvo-livre
          class="flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-lg {% if not ns and nome == 'painel' %}text-marca-amarelo{% else %}text-gray-200 hover:bg-gray-800{% endif %}">
@@ -177,19 +185,19 @@
       <a href="{% url 'km:lista' %}" data-alvo-livre
          class="flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-lg {% if ns == 'km' %}text-marca-amarelo{% else %}text-gray-200 hover:bg-gray-800{% endif %}">
         <span aria-hidden="true" class="text-xl leading-none">🛣️</span>KM</a>
-      <button type="button" data-alvo-livre @click="lancar = !lancar" @click.outside="lancar = false"
+      <button type="button" data-alvo-livre x-ref="botaoLancar" @click="lancar = !lancar" @click.outside="lancar = false"
               :aria-expanded="lancar" aria-controls="menu-lancar"
               class="my-1 flex min-h-[48px] flex-col items-center justify-center rounded-lg bg-marca-amarelo text-sm font-black text-marca-preto">
         + Lançar</button>
       <div id="menu-lancar" x-show="lancar" x-cloak x-transition.opacity
-           class="absolute bottom-full right-2 mb-2 w-64 overflow-hidden rounded-lg bg-white text-base font-medium text-gray-900 shadow-xl ring-1 ring-black/10">
+           class="absolute bottom-full right-2 mb-2 w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg bg-white text-base font-medium text-gray-900 shadow-xl ring-1 ring-black/10">
         <p class="border-b border-gray-100 px-4 py-2 text-xs font-normal text-gray-600">O que você quer lançar?</p>
         <a href="{% url 'financeiro:receber' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">💵</span>Pagamento recebido</a>
-        <a href="{% url 'manutencao:preventivas' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🔧</span>Manutenção <span class="text-xs font-normal text-gray-600">(escolha o carro)</span></a>
+        <a href="{% url 'manutencao:preventivas' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🔧</span><span>Manutenção<span class="block text-xs font-normal text-gray-600">escolha o carro na lista</span></span></a>
         <a href="{% url 'multas:nova' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🚦</span>Multa</a>
         <a href="{% url 'sinistros:novo' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">💥</span>Sinistro (batida, roubo…)</a>
         <a href="{% url 'alocacoes:nova' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">🔑</span>Nova alocação</a>
-        <a href="{% url 'alocacoes:lista' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">↩️</span>Devolução de carro <span class="text-xs font-normal text-gray-600">(escolha o carro)</span></a>
+        <a href="{% url 'alocacoes:lista' %}" class="flex min-h-[48px] items-center gap-3 px-4 hover:bg-gray-50"><span aria-hidden="true">↩️</span><span>Devolução do carro<span class="block text-xs font-normal text-gray-600">escolha o carro na lista</span></span></a>
       </div>
     </div>
   </nav>

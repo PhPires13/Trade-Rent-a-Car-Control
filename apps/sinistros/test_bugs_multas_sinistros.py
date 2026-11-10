@@ -274,7 +274,7 @@ def test_franquia_com_cobranca_cancelada_pode_ser_cobrada_de_novo(
     primeira.status = Cobranca.Status.CANCELADA
     primeira.save(update_fields=["status"])
     html = usuario_logado.get(f"/sinistros/{sinistro.pk}/editar/").content.decode()
-    assert "foi cancelada no financeiro" in html
+    assert "A cobrança anterior da franquia foi cancelada." in html
     assert "Cobrar do cliente" in html
     usuario_logado.post(url)
     sinistro.refresh_from_db()

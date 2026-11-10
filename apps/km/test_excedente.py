@@ -63,7 +63,7 @@ def test_estouro_gera_cobranca_com_valor_e_vencimento(alocacao_limitada, veiculo
     assert cobranca.origem == Cobranca.Origem.EXCEDENTE_KM
     assert cobranca.valor == Decimal("500.00")  # 1.000 km × R$ 0,50
     assert cobranca.vencimento == date(2026, 7, 15) + timedelta(days=7)
-    assert "1000 km além da franquia de 3000 km" in cobranca.descricao
+    assert "1.000 km além da franquia de 3.000 km" in cobranca.descricao
     registro.refresh_from_db()
     assert registro.cobranca_excedente == cobranca
 
@@ -74,7 +74,7 @@ def test_franquia_rateada_pelos_dias_do_periodo(alocacao_limitada, veiculo):
     cobranca = gerar_cobranca_excedente(registro)
     # franquia rateada: 3.000 × 15/30 = 1.500 km → excedente 500 km × R$ 0,50
     assert cobranca.valor == Decimal("250.00")
-    assert "franquia de 1500 km" in cobranca.descricao
+    assert "franquia de 1.500 km" in cobranca.descricao
 
 
 def test_dentro_da_franquia_nao_gera(alocacao_limitada, veiculo):
@@ -233,4 +233,6 @@ def test_badge_de_excedente_na_lista_mensal(usuario_logado, alocacao_limitada, v
     registro = registrar(veiculo, date(2026, 7, 15), 54_000)
     gerar_cobranca_excedente(registro)
     resposta = usuario_logado.get("/km/?mes=2026-07")
-    assert "km excedente: R$" in resposta.content.decode()
+    # etapa 18b: o selo mostra os km além da franquia (o title não aparece no celular)
+    assert "km além da franquia de" in resposta.content.decode()
+    assert "km = R$" in resposta.content.decode()

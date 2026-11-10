@@ -105,7 +105,7 @@
           {% if encargo or cobranca.status == "atrasado" or cobranca.status == "judicial" or cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.origem in origens_cancelaveis %}
           {# decisões menos frequentes ficam recolhidas: com 13 semanas atrasadas, a lista não vira um muro de formulários #}
           <details class="text-xs">
-            <summary class="cursor-pointer select-none list-none py-1 text-gray-600 underline [&::-webkit-details-marker]:hidden">Mais ▾</summary>
+            <summary class="flex min-h-11 cursor-pointer select-none list-none items-center text-gray-600 underline sm:min-h-0 sm:py-1 [&::-webkit-details-marker]:hidden">Mais ▾</summary>
             <div class="mt-1 space-y-2 rounded border border-gray-200 bg-gray-50 p-2">
             {% if encargo %}
             <form method="post" action="{% url 'financeiro:aplicar_encargo' cobranca.pk %}" class="flex flex-wrap items-center gap-1"

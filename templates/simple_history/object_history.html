@@ -1,0 +1,17 @@
+{% extends "admin/object_history.html" %}
+{# Histórico da Retaguarda em português (o original do django-simple-history vem em inglês) #}
+
+{% block content %}
+  <div id="content-main">
+    {% if not revert_disabled %}
+      <p>Toque na data de uma versão para ver como o registro estava naquele momento.</p>
+    {% endif %}
+    <div class="module">
+      {% if page_obj.object_list %}
+        {% include object_history_list_template %}
+      {% else %}
+        <p>Este registro ainda não tem histórico de mudanças.</p>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

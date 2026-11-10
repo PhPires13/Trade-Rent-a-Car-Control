@@ -14,7 +14,13 @@ from apps.campos import ler_data
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
 
-from .correcao import apagar_leitura, corrigir_leitura, origens_do_km, suspeita_do_km
+from .correcao import (
+    _fontes_de_km,
+    apagar_leitura,
+    corrigir_leitura,
+    refazer_excedente,
+    suspeita_do_km,
+)
 from .excedente import gerar_cobrancas_excedente
 from .forms import CorrecaoLeituraForm, ano_razoavel, data_nao_futura, km_digitado
 from .models import (
@@ -128,10 +134,13 @@ def _cliente_do_vinculo(vinculo):
     return vinculo.cliente if vinculo is not None else None
 
 
-def _texto_desde_a_entrega(registro, vinculo):
+def _texto_desde_a_entrega(registro, vinculo, parenteses=True):
     """ "2.000 km desde a entrega (35.000 em 20/07)" — o KM rodado da 1ª leitura,
     que não tem "KM anterior": a base é a entrega (ou a retirada do substituto)
-    ao cliente da data, a mesma do excedente. None quando não há essa base."""
+    ao cliente da data, a mesma do excedente. None quando não há essa base.
+
+    Sem `parenteses` (mensagem que já tem parênteses em volta): "2.000 km desde
+    a entrega, em 20/07, com 35.000 km"."""
     if registro.km_anterior is not None or vinculo is None:
         return None
     if isinstance(vinculo, TrocaTemporaria):
@@ -142,6 +151,8 @@ def _texto_desde_a_entrega(registro, vinculo):
         return None
     # entrega de outro ano (contrato antigo, carga de dados): sem o ano a data engana
     quando = f"{data:%d/%m}" if data.year == registro.data_leitura.year else f"{data:%d/%m/%Y}"
+    if not parenteses:
+        return f"{milhar(registro.km - km)} km desde a {rotulo}, em {quando}, com {milhar(km)} km"
     return f"{milhar(registro.km - km)} km desde a {rotulo} ({milhar(km)} em {quando})"
 
 
@@ -161,28 +172,51 @@ def _pendentes_anotados(mes, veiculos=None):
 
 
 def _anotar_maior_km(veiculos, mes):
-    """ "Última" da linha = o maior KM conhecido do carro e de onde ele veio.
+    """ "Última" da linha = o maior KM conhecido do carro até o mês e de onde veio.
 
     A última leitura mensal pode estar atrás do KM atual (manutenção, devolução,
     vistoria): mostrar só ela faria a pessoa aceitar um número menor sem estranhar.
-    Lançamento de depois do mês da tela não conta (num mês passado ele é o futuro).
+    Lançamento de depois do mês da tela não conta (num mês passado ele é o futuro) —
+    nem o KM atual, que pode ter vindo dele. Sem nada anotado até o mês: o KM da
+    compra, ou o do cadastro quando o carro não tem lançamento nenhum.
+    Uma consulta por tipo de lançamento, qualquer tamanho de frota.
     """
     # último dia aceito = dia DIAS_DE_FECHAMENTO do mês seguinte (igual a leitura_cabe_no_mes)
     limite = primeiro_dia_do_mes(mes + timedelta(days=32)) + timedelta(days=DIAS_DE_FECHAMENTO - 1)
+    ids = [veiculo.pk for veiculo in veiculos]
+    maiores, maior_de_todos = {}, {}
+    for rotulo, modelo, campo_carro, campo_km, campo_data in _fontes_de_km():
+        leitura = modelo is RegistroKm
+        campos = [campo_carro, campo_km, campo_data] + (["mes_referencia"] if leitura else [])
+        linhas = modelo.objects.filter(
+            **{
+                f"{campo_carro}__in": ids,
+                f"{campo_km}__isnull": False,
+                f"{campo_data}__isnull": False,
+            }
+        ).values_list(*campos)
+        for veiculo_id, km, data, *referencia in linhas:
+            maior_de_todos[veiculo_id] = max(km, maior_de_todos.get(veiculo_id, km))
+            # leitura mensal de um mês depois do da tela é o futuro, mesmo com data no limite
+            if data > limite or (referencia and referencia[0] > mes):
+                continue
+            atual = maiores.get(veiculo_id)
+            if atual is None or (km, data) > (atual[0], atual[1]):
+                maiores[veiculo_id] = (km, data, rotulo)
     for veiculo in veiculos:
-        veiculo.maior_km = veiculo.ultimo_km
-        veiculo.maior_km_data = veiculo.ultima_leitura
-        veiculo.maior_km_origem = "leitura mensal" if veiculo.ultimo_km is not None else None
-    atras = [v for v in veiculos if v.ultimo_km is None or v.ultimo_km < v.km_atual]
-    # de onde veio o KM atual: em lote (eram 7 consultas por carro da lista)
-    origens = origens_do_km({v.pk: v.km_atual for v in atras})
-    for veiculo in atras:
-        rotulo, data = origens[veiculo.pk]
-        if rotulo == "leitura mensal" or (data is not None and data > limite):
-            continue  # leitura do próprio mês (ou de depois) não é a "Última" de antes dele
-        veiculo.maior_km = veiculo.km_atual
-        veiculo.maior_km_data = data
-        veiculo.maior_km_origem = rotulo if data is not None else None
+        candidatos = [maiores.get(veiculo.pk)]
+        compra = veiculo.data_aquisicao
+        if veiculo.km_compra is not None and (compra is None or compra <= limite):
+            candidatos.append((veiculo.km_compra, compra, "compra"))
+        if veiculo.pk not in maior_de_todos:
+            candidatos.append((veiculo.km_atual, None, "cadastro"))
+        elif veiculo.km_atual > maior_de_todos[veiculo.pk] and limite >= timezone.localdate():
+            # KM atual subido à mão na ficha do carro (maior que todo lançamento): no mês
+            # atual ele não é "do futuro" e também conta
+            candidatos.append((veiculo.km_atual, None, "ficha"))
+        candidatos = [c for c in candidatos if c is not None]
+        maior = max(candidatos, key=lambda c: c[0]) if candidatos else (None, None, None)
+        veiculo.maior_km, veiculo.maior_km_data, veiculo.maior_km_origem = maior
     return veiculos
 
 
@@ -208,6 +242,15 @@ def lista_mensal(request):
     return _pagina_da_lista(request, mes)
 
 
+def _detalhe_do_excedente(cobranca):
+    """ "3.117 km além da franquia de 1.883 km" — o miolo da descrição da cobrança
+    (apps/km/excedente._criar_cobranca), sem a placa e sem a taxa; None se não achar."""
+    _inicio, separador, detalhe = cobranca.descricao.partition(" — ")
+    if not separador or "além da franquia" not in detalhe:
+        return None
+    return detalhe.split(" (", 1)[0]
+
+
 def _pagina_da_lista(request, mes, estados=None):
     """`estados` ({veiculo.pk: {...}}) devolve a linha com o que foi digitado e o
     aviso de KM fora do normal, quando o registro não foi gravado.
@@ -215,13 +258,19 @@ def _pagina_da_lista(request, mes, estados=None):
     registros = list(
         RegistroKm.objects.filter(mes_referencia=mes)
         .select_related("veiculo", "cobranca_excedente")
-        .prefetch_related("acertos_excedente__cobranca")
+        .prefetch_related("acertos_excedente__cobranca__cliente")
         .order_by("veiculo__placa")
     )
     vinculos = _vinculos_das_leituras(registros)
     for registro in registros:
         vinculo = vinculos[registro.pk]
         registro.cliente = _cliente_do_vinculo(vinculo)
+        # o selo mostra os km além da franquia (o title não aparece no celular)
+        for cobranca in [registro.cobranca_excedente] + [
+            acerto.cobranca for acerto in registro.acertos_excedente.all()
+        ]:
+            if cobranca is not None:
+                cobranca.detalhe = _detalhe_do_excedente(cobranca)
         # 1ª leitura sem "KM anterior": o KM rodado sai da entrega (base do excedente)
         registro.desde_entrega = _texto_desde_a_entrega(registro, vinculo)
     pendentes = _anotar_maior_km(list(_pendentes_anotados(mes)), mes)
@@ -244,11 +293,6 @@ def _aviso_reencadeamento(registro):
         f"recalculada: KM anterior agora é {milhar(registro.km)} e o KM utilizado dela caiu "
         f"para {milhar(seguinte.km_utilizado)}."
     )
-    if seguinte.cobranca_excedente_id:
-        aviso += (
-            " Ela já tinha cobrança de excedente de km — confira no Financeiro e cancele "
-            "se ficou em duplicidade."
-        )
     return aviso
 
 
@@ -341,14 +385,21 @@ def registrar(request, veiculo_id):
         desde = f"a leitura de {anterior.data_leitura:%d/%m/%Y}" if anterior else "a compra"
         sucesso += f" (rodou {milhar(registro.km_utilizado)} km desde {desde})"
     elif desde_entrega := _texto_desde_a_entrega(
-        registro, _vinculos_das_leituras([registro])[registro.pk]
+        registro, _vinculos_das_leituras([registro])[registro.pk], parenteses=False
     ):
-        sucesso += f" (rodou {desde_entrega})"
+        sucesso += f" — rodou {desde_entrega}"
     avisos = [_aviso_reencadeamento(registro)]
     try:
         # a leitura já está gravada: erro no excedente não vira tela de erro
+        refeito = None
         with transaction.atomic():
+            if registro.seguinte_reencadeado is not None:
+                # Mês esquecido: o excedente já cobrado do mês seguinte contava o km deste
+                # mês também. Em aberto é refeito (como no Corrigir); pago só avisa.
+                refeito = refazer_excedente(registro.seguinte_reencadeado)
             cobrancas = gerar_cobrancas_excedente(registro)
+        # só depois do atomic: se algo falhou, o "era X, agora é Y" foi desfeito junto
+        avisos.append(refeito)
     except Exception:  # noqa: BLE001
         logger.exception("Excedente de km: falhou na leitura %s.", registro.pk)
         cobrancas = []
@@ -380,6 +431,18 @@ def registrar(request, veiculo_id):
     return _volta_para_lista(mes_da_tela)
 
 
+def _o_que_mudou(registro, km_antes, data_antes, observacoes_antes):
+    """ "data 10/11 → 01/11", "KM 52.000 → 52.500" — só o que a correção mudou."""
+    mudancas = []
+    if registro.km != km_antes:
+        mudancas.append(f"KM {milhar(km_antes)} → {milhar(registro.km)}")
+    if registro.data_leitura != data_antes:
+        mudancas.append(f"data {data_antes:%d/%m} → {registro.data_leitura:%d/%m}")
+    if registro.observacoes != observacoes_antes:
+        mudancas.append("observação atualizada")
+    return ", ".join(mudancas) or "nada mudou"
+
+
 def corrigir(request, registro_id):
     """Corrige ou apaga uma leitura digitada errada (proposta de UX nº 4, opção C)."""
     registro = get_object_or_404(RegistroKm.objects.select_related("veiculo"), pk=registro_id)
@@ -408,15 +471,19 @@ def corrigir(request, registro_id):
         return voltar()
 
     km_errado = registro.km
+    antes = (registro.data_leitura, registro.observacoes)
     form = CorrecaoLeituraForm(request.POST or None, instance=registro)
+    falta_confirmar = False
     if request.method == "POST" and form.is_valid():
         aviso = suspeita_do_km(form.instance)
+        # mesmo número avisado e a caixinha em branco: diz o que falta (como no Registrar)
+        falta_confirmar = bool(aviso) and request.POST.get("avisado") == str(registro.km)
         if aviso is None or form.confirmou():
             avisos = corrigir_leitura(form.instance, km_errado)
             messages.success(
                 request,
                 f"Leitura de {registro.mes_referencia:%m/%Y} de {veiculo.placa} corrigida: "
-                f"{milhar(km_errado)} → {milhar(registro.km)} km.",
+                f"{_o_que_mudou(registro, km_errado, *antes)}.",
             )
             for texto in avisos:
                 messages.warning(request, texto)
@@ -431,6 +498,7 @@ def corrigir(request, registro_id):
             "form": form,
             "aviso": aviso,
             "km_avisado": form.cleaned_data.get("km") if aviso else None,
+            "falta_confirmar": falta_confirmar,
             "voltar_para_lista": voltar_para_lista,
             "cobranca": registro.cobranca_excedente,
         },

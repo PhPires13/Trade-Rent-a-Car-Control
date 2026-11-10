@@ -24,8 +24,11 @@
 </form>
 
 {% if cliente %}
+{# total das caixas marcadas, ao vivo, e no texto da confirmação #}
 <form method="post" class="rounded-lg bg-white p-6 shadow"
-      onsubmit="return confirm('Emitir a ND para {{ cliente.nome|escapejs }} com as multas marcadas? A cobrança entra no Financeiro e a numeração não pode ser reaproveitada.')">
+      x-data="{ total: {{ total_inicial|stringformat:'s' }}, soma() { this.total = [...this.$el.querySelectorAll('input[name=multa]:checked')].reduce((t, c) => t + Number(c.dataset.valor), 0) }, reais(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) } }"
+      @change="soma()"
+      @submit="if (!confirm('Emitir a ND para {{ cliente.nome|escapejs }} no total de ' + reais(total) + '? A cobrança entra no Financeiro e a numeração não pode ser reaproveitada.')) $event.preventDefault()">
   {% csrf_token %}
   <input type="hidden" name="cliente" value="{{ cliente.pk }}">
   <input type="hidden" name="token" value="{{ token }}">
@@ -37,7 +40,7 @@
     <tbody class="divide-y divide-gray-100">
       {% for multa in multas %}
       <tr>
-        <td class="px-3 py-2"><input type="checkbox" name="multa" value="{{ multa.pk }}" checked aria-label="Incluir multa de {{ multa.data_infracao|date:'d/m/Y' }}"></td>
+        <td class="px-3 py-2"><input type="checkbox" name="multa" value="{{ multa.pk }}" data-valor="{{ multa.valor|stringformat:'s' }}" checked aria-label="Incluir multa de {{ multa.data_infracao|date:'d/m/Y' }}"></td>
         <td class="px-3 py-2">{{ multa.data_infracao|date:"d/m/Y" }}</td>
         <td class="px-3 py-2">{{ multa.veiculo.placa }}</td>
         <td class="px-3 py-2">{{ multa.descricao }}</td>
@@ -50,6 +53,14 @@
       </td></tr>
       {% endfor %}
     </tbody>
+    {% if multas %}
+    <tfoot>
+      <tr class="border-t-2 border-gray-200 font-bold">
+        <td colspan="4" class="px-3 py-2 text-right">Total marcado</td>
+        <td class="px-3 py-2" x-text="reais(total)">{{ total_inicial|brl }}</td>
+      </tr>
+    </tfoot>
+    {% endif %}
   </table>
   </div>
   {% if multas %}

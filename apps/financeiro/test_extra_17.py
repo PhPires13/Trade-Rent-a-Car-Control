@@ -85,9 +85,10 @@ def test_caucao_ativa_falta_e_combinado_menos_depositado(usuario_logado, alocaca
     cobranca = Cobranca.objects.get()
     services.descontar_da_caucao(caucao, cobranca, Decimal("650.00"), HOJE)
     html = usuario_logado.get(f"/financeiro/caucoes/{caucao.pk}/").content.decode()
-    # o desconto não faz a tela pedir um novo depósito de R$ 650
+    # o desconto não faz a tela pedir um novo depósito de R$ 650 — mas, com o
+    # carro ainda com o cliente, a garantia caiu: pede para repor (etapa 18b)
     assert "falta R$" not in html
-    assert "completa ✓" in html
+    assert "falta repor R$ 650,00" in html
 
 
 def test_aviso_acima_do_possivel_usa_ponto_de_milhar(usuario_logado, alocacao):
@@ -276,7 +277,8 @@ def test_nd_de_multa_sem_codigo_sem_espaco_duplo(cliente):
     )
     assert multa.repasse == "A cobrar"
     nd = gerar_nd_de_multas(cliente, [multa], HOJE)
-    assert nd.itens.get().descricao == "Multa MS-TESTE futuro (01/05/2026)"
+    # etapa 18b: o item traz a placa (e o AIT, quando há) para o cliente conferir
+    assert nd.itens.get().descricao == "Multa — RTX1A11 — MS-TESTE futuro (01/05/2026)"
 
 
 def test_whatsapp_franquia_do_sinistro_sem_repeticao(cliente):

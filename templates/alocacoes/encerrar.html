@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block titulo %}Encerrar alocação — Trade Rent a Car{% endblock %}
+{% block titulo %}Devolução do carro — {{ alocacao.veiculo.placa }} — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <a href="{{ voltar }}" class="text-sm text-gray-600 underline">← Voltar</a>
@@ -27,13 +27,14 @@
 </dl>
 
 {% if troca_ativa %}
-<div class="mb-6 max-w-3xl rounded-lg border-l-4 border-red-500 bg-red-50 p-5 text-sm text-red-900">
-  <p class="font-semibold">Antes de encerrar, devolva o carro substituto.</p>
-  <p class="mt-1">{{ alocacao.cliente.nome }} está com o substituto {{ troca_ativa.veiculo_substituto.placa }} desde {{ troca_ativa.data_retirada|date:"d/m/Y" }}.</p>
-  <a href="{% url 'alocacoes:troca_devolver' troca_ativa.pk %}"
-     class="mt-3 block rounded bg-marca-amarelo px-4 py-3 text-center font-semibold text-marca-preto hover:brightness-95 sm:inline-block sm:py-2">Devolver substituto</a>
+<div class="mb-4 max-w-3xl rounded-lg border-l-4 border-blue-500 bg-blue-50 p-4 text-sm text-blue-900 sm:p-5" data-encerrar-com-substituto>
+  <p class="font-semibold">{{ alocacao.cliente.nome }} está com o substituto {{ troca_ativa.veiculo_substituto.placa }} desde {{ troca_ativa.data_retirada|date:"d/m/Y" }}.</p>
+  <p class="mt-1">Encerrando aqui, o cliente devolve o <strong>{{ troca_ativa.veiculo_substituto.placa }}</strong> e o contrato acaba junto: a vistoria, a data e o KM abaixo são do substituto.
+    {% if oficina_principal %}O {{ alocacao.veiculo.placa }} continua na oficina (desde {{ oficina_principal.data_entrada|date:"d/m" }}), sem cliente.{% else %}O {{ alocacao.veiculo.placa }} fica disponível para alugar.{% endif %}</p>
+  <p class="mt-2">O cliente vai continuar o contrato e voltar para o {{ alocacao.veiculo.placa }}?
+    <a href="{% url 'alocacoes:troca_devolver' troca_ativa.pk %}?voltar={{ request.get_full_path|urlencode }}" class="inline-flex min-h-11 items-center font-semibold underline sm:min-h-0">Devolver só o substituto →</a></p>
 </div>
-{% else %}
+{% endif %}
 <div class="max-w-3xl space-y-4">
   {# Passo 1 — vistoria de devolução #}
   <section class="rounded-lg p-4 shadow sm:p-5 {% if vistoria_devolucao %}bg-white{% else %}border-2 border-yellow-400 bg-yellow-50{% endif %}">
@@ -44,7 +45,7 @@
       <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-yellow-600 text-sm font-bold text-yellow-800" aria-label="Falta fazer">1</span>
       {% endif %}
       <div class="min-w-0 flex-1">
-        <h2 class="font-semibold">Vistoria de devolução</h2>
+        <h2 class="font-semibold">Vistoria de devolução{% if troca_ativa %} do {{ troca_ativa.veiculo_substituto.placa }}{% endif %}</h2>
         {% if vistoria_devolucao %}
         <p class="text-sm text-gray-700">Feita em {{ vistoria_devolucao.data|date:"d/m/Y" }}{% if vistoria_devolucao.km %} — {{ vistoria_devolucao.km|milhar }} km{% endif %}.</p>
         {% if not data_da_vistoria %}
@@ -79,8 +80,9 @@
   </section>
 
   <form method="post" class="space-y-4"
-        onsubmit="return confirm('Encerrar a alocação de {{ alocacao.veiculo.placa|escapejs }} com {{ alocacao.cliente.nome|escapejs }}? Não dá para desfazer.')">
+        onsubmit="return confirm('{% if troca_ativa %}Devolver o substituto {{ troca_ativa.veiculo_substituto.placa|escapejs }} e encerrar{% else %}Encerrar{% endif %} a alocação de {{ alocacao.veiculo.placa|escapejs }} com {{ alocacao.cliente.nome|escapejs }}? Não dá para desfazer.')">
     {% csrf_token %}
+    {% if troca_ativa %}<input type="hidden" name="troca" value="{{ troca_ativa.pk }}">{% endif %}
     {# Passo 2 — data e KM final #}
     <section class="rounded-lg bg-white p-4 shadow sm:p-5">
       <div class="flex items-start gap-3">
@@ -88,7 +90,7 @@
         <div class="min-w-0 flex-1 space-y-3">
           <h2 class="font-semibold">Data e KM final</h2>
           <div>
-            <label class="mb-1 block text-sm font-medium" for="data_termino">Data em que o carro voltou</label>
+            <label class="mb-1 block text-sm font-medium" for="data_termino">Data em que o {% if troca_ativa %}substituto {{ troca_ativa.veiculo_substituto.placa }}{% else %}carro{% endif %} voltou</label>
             <input type="date" name="data_termino" id="data_termino"
                    value="{% firstof request.POST.data_termino data_sugerida|date:'Y-m-d' %}"
                    min="{{ data_minima|date:'Y-m-d' }}" max="{{ hoje|date:'Y-m-d' }}" required>
@@ -98,23 +100,16 @@
             <p class="mt-1 text-xs text-gray-500">Não pode ser no futuro: as semanas são cobradas até esta data.</p>
           </div>
           <div>
-            <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM no painel na devolução</label>
+            <label class="mb-1 block text-sm font-medium" for="km_devolucao">KM no painel {% if troca_ativa %}do {{ troca_ativa.veiculo_substituto.placa }} {% endif %}na devolução</label>
             <input type="text" name="km_devolucao" id="km_devolucao" inputmode="numeric" autocomplete="off"
                    value="{% firstof request.POST.km_devolucao km_sugerido %}"
-                   placeholder="saiu com {{ alocacao.km_entrega|milhar }}" required>
+                   placeholder="saiu com {{ km_saida|milhar }}" required>
             {% if km_sugerido and not request.POST.km_devolucao %}
-            <p class="mt-1 text-xs text-blue-900">Preenchido com o KM da vistoria de devolução — confira.</p>
+            <p class="mt-1 text-xs text-blue-900">Preenchido com o KM da vistoria de devolução{% if km_confirmado_na_vistoria %} (já conferido lá){% endif %} — confira.</p>
             {% endif %}
-            <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM da entrega ({{ alocacao.km_entrega|milhar }} km).</p>
+            <p class="mt-1 text-xs text-gray-500">Não pode ser menor que o KM {% if troca_ativa %}da retirada do substituto{% else %}da entrega{% endif %} ({{ km_saida|milhar }} km).</p>
           </div>
-          {% if aviso_km %}
-          <div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
-            <p>{{ aviso_km }}</p>
-            <label class="mt-2 flex min-h-11 items-center gap-2 font-semibold">
-              <input type="checkbox" name="confirmar_km" value="1" class="shrink-0"> Confirmo o KM
-            </label>
-          </div>
-          {% endif %}
+          {% if aviso_km %}{% with troca=troca_ativa %}{% include "alocacoes/_aviso_km_devolucao.html" %}{% endwith %}{% endif %}
         </div>
       </div>
     </section>
@@ -134,6 +129,15 @@
           <p class="mt-1 text-gray-700">Sem débitos em aberto hoje.</p>
           {% endif %}
           {% if vistoria_devolucao.avarias and vistoria_devolucao.avarias|lower|cut:" " != vistoria_entrega.avarias|default:""|lower|cut:" " %}
+          {% if notas_depois_da_vistoria %}
+          {# ND já emitida depois da vistoria: não repete o convite (evita ND em dobro) #}
+          <div class="mt-2 rounded border-l-4 border-green-600 bg-green-50 p-3 text-green-900" data-nd-emitida>
+            {% for nota in notas_depois_da_vistoria %}
+            <p class="font-semibold">✓ ND {{ nota.numero|stringformat:"03d" }} emitida ({{ nota.total|brl }}) em {{ nota.data_emissao|date:"d/m" }}.</p>
+            {% endfor %}
+            <p class="mt-1">Ela entra no acerto da caução. Só emita outra se for outra cobrança.</p>
+          </div>
+          {% else %}
           {# avaria nova: sem ND não há cobrança para a caução pagar no acerto #}
           <div class="mt-2 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-amber-900" data-marca-nova>
             <p class="font-semibold">Marca nova na devolução — cobrar avaria?</p>
@@ -141,6 +145,7 @@
             <a href="{% url 'financeiro:nd_nova' %}?cliente={{ alocacao.cliente.pk }}&voltar={{ request.get_full_path|urlencode }}"
                class="mt-2 inline-flex min-h-11 items-center font-semibold underline sm:min-h-0">Emitir nota de débito da avaria →</a>
           </div>
+          {% endif %}
           {% endif %}
           {% if semanas_a_cancelar %}
           <p class="mt-2 rounded bg-blue-50 px-2 py-1.5 text-blue-900">Não cobre agora:
@@ -163,7 +168,12 @@
         <div class="min-w-0 flex-1 text-sm">
           <h2 class="text-base font-semibold">Confirmar a devolução</h2>
           <ul class="mt-1 list-inside list-disc space-y-1 text-gray-700">
+            {% if troca_ativa %}
+            <li>O substituto {{ troca_ativa.veiculo_substituto.placa }} é devolvido e volta a ficar <strong>disponível</strong>.</li>
+            <li>O {{ alocacao.veiculo.placa }} {% if oficina_principal %}continua <strong>em manutenção</strong> (na oficina), sem cliente{% else %}volta a ficar <strong>disponível</strong> para alugar{% endif %}.</li>
+            {% else %}
             <li>O carro volta a ficar <strong>disponível</strong> para alugar.</li>
+            {% endif %}
             <li>Semanas com vencimento a partir da data de devolução são <strong>canceladas</strong>. O que já tinha sido pago nelas vira <strong>crédito do cliente</strong> (ou volta para a caução, se foi descontado dela).</li>
             <li>Não dá para desfazer — confira a data e o KM antes.</li>
           </ul>
@@ -171,7 +181,7 @@
           <p class="mt-2 rounded bg-yellow-100 px-2 py-1.5 text-yellow-900">Atenção: a vistoria de devolução ainda não foi registrada.</p>
           {% endif %}
           <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button class="rounded bg-red-600 px-4 py-3 font-bold text-white hover:bg-red-700 sm:py-2">Encerrar alocação</button>
+            <button class="rounded bg-red-600 px-4 py-3 font-bold text-white hover:bg-red-700 sm:py-2">{% if troca_ativa %}Devolver o {{ troca_ativa.veiculo_substituto.placa }} e encerrar{% else %}Encerrar alocação{% endif %}</button>
             <a href="{{ voltar }}" class="px-4 py-2 text-center text-gray-600 underline">Voltar sem encerrar</a>
           </div>
         </div>
@@ -179,7 +189,6 @@
     </section>
   </form>
 </div>
-{% endif %}
 
 <style>
   form input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.5rem 0.6rem; }

@@ -337,7 +337,12 @@ def test_d10_vistoria_na_troca_vai_para_o_substituto(usuario_logado, alocacao, t
     troca.veiculo_substituto.refresh_from_db()
     assert veiculo.km_atual == 50_000
     assert troca.veiculo_substituto.km_atual == 40_600
-    # não conta como devolução do carro da locação
+    # com o substituto em aberto, o encerramento devolve o substituto: a vistoria
+    # que vale é a dele (etapa 18b); depois de devolvido, não conta como
+    # devolução do carro da locação
+    assert situacao_da_devolucao(alocacao)["vistoria_devolucao"] == vistoria
+    troca.devolver(data_devolucao=HOJE, km_devolucao=40_600)
+    alocacao.refresh_from_db()
     assert situacao_da_devolucao(alocacao)["vistoria_devolucao"] is None
 
 

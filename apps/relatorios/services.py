@@ -3,7 +3,7 @@
 from calendar import monthrange
 from datetime import date
 
-from django.db.models import Min, Sum
+from django.db.models import IntegerField, Min, Sum, Value
 from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.utils import timezone
 
@@ -359,10 +359,10 @@ def primeiro_mes_com_dado():
     fontes = [
         (_veiculos_da_locadora(), "data_aquisicao"),
         (_veiculos_da_locadora(), "data_venda"),
-        (Alocacao.objects, "data_inicio"),
-        (Recebimento.objects, "data"),
-        (Cobranca.objects, "vencimento"),
-        (MovimentacaoCaucao.objects, "data"),
+        (Alocacao.objects.all(), "data_inicio"),
+        (Recebimento.objects.all(), "data"),
+        (Cobranca.objects.all(), "vencimento"),
+        (MovimentacaoCaucao.objects.all(), "data"),
         (Manutencao.objects.filter(veiculo__uso=LOCACAO), "data"),
         (Multa.objects.filter(veiculo__uso=LOCACAO), "data_infracao"),
         (Sinistro.objects.filter(veiculo__uso=LOCACAO), "data"),
@@ -370,7 +370,17 @@ def primeiro_mes_com_dado():
         (AuxilioMotorista.objects.filter(sinistro__veiculo__uso=LOCACAO), "data_recebimento"),
         (PagamentoIpva.objects.filter(veiculo__uso=LOCACAO), "pago_em"),
     ]
-    datas = [qs.aggregate(d=Min(campo))["d"] for qs, campo in fontes]
+    # o menor de cada fonte, todos numa consulta só (UNION ALL): eram 12 idas ao
+    # banco a cada abertura de Relatórios
+    menores = [
+        qs.order_by()
+        .annotate(_um=Value(1, output_field=IntegerField()))
+        .values("_um")
+        .annotate(d=Min(campo))
+        .values_list("d", flat=True)
+        for qs, campo in fontes
+    ]
+    datas = list(menores[0].union(*menores[1:], all=True))
     datas = [d for d in datas if d]
     return min(datas) if datas else None
 

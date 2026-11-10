@@ -304,7 +304,10 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
         self.fields["foto"].error_messages.update(
             invalid_image=texto_foto, invalid_extension=texto_foto
         )
-        if not self.instance.pk:
+        if self.instance.pk:
+            # guarda o KM mostrado ao abrir a tela: só o que a pessoa mudar é conferido
+            self.fields["km_atual"].show_hidden_initial = True
+        else:
             # carro novo: em branco, o KM atual é o da compra (preenchido no clean)
             self.fields["km_atual"].required = False
             self.fields["km_atual"].help_text = "Deixe em branco se for o mesmo KM da compra"
@@ -393,6 +396,10 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
         km = self.cleaned_data["km_atual"]
         if km is None:  # só no carro novo (campo opcional): o clean usa o KM da compra
             return km
+        if self.instance.pk and km == self._km_mostrado_na_tela():
+            # a pessoa não mexeu no KM: fica o do banco — uma leitura lançada (ou
+            # corrigida) enquanto a ficha estava aberta não é desfeita nem acusa erro
+            return self.instance.km_atual
         if self.instance.pk and km < self.instance.km_atual:
             raise ValidationError(
                 f"KM atual ({milhar(km)}) menor que o registrado "
@@ -400,6 +407,13 @@ class VeiculoForm(FormularioBR, forms.ModelForm):
                 + _onde_corrigir_km(self.instance)
             )
         return km
+
+    def _km_mostrado_na_tela(self):
+        """KM atual que a tela mostrava quando foi aberta (campo escondido); None se não veio."""
+        try:
+            return km_digitado(self.data.get(self.add_initial_prefix("km_atual")))
+        except ValidationError:
+            return None
 
     def clean_uso(self):
         """Carro alugado não pode virar "Fora de locação" (C14 — regra em
@@ -577,6 +591,9 @@ class PagamentoIpvaForm(FormularioBR, forms.ModelForm):
         if dados.get("pago_em") and dados["pago_em"] > timezone.localdate():
             # a despesa cairia num mês futuro e o alerta de IPVA em aberto sumiria agora
             self.add_error("pago_em", "A data do pagamento não pode ser depois de hoje.")
+        elif dados.get("pago_em") and dados["pago_em"] != self.instance.pago_em:
+            # a despesa entraria num mês em que o carro não era da empresa
+            self._conferir_pago_em_com_compra_e_venda(dados["pago_em"])
         veiculo_id = self.instance.veiculo_id
         if (
             veiculo_id
@@ -593,6 +610,23 @@ class PagamentoIpvaForm(FormularioBR, forms.ModelForm):
                 "edite a linha dele acima.",
             )
         return dados
+
+    def _conferir_pago_em_com_compra_e_venda(self, pago_em):
+        veiculo = self.instance.veiculo if self.instance.veiculo_id else None
+        if veiculo is None:
+            return
+        if veiculo.data_aquisicao and pago_em < veiculo.data_aquisicao:
+            self.add_error(
+                "pago_em",
+                f"O carro foi comprado em {veiculo.data_aquisicao:%d/%m/%Y} — "
+                "IPVA pago antes disso foi do dono anterior.",
+            )
+        elif veiculo.data_venda and pago_em > veiculo.data_venda:
+            self.add_error(
+                "pago_em",
+                f"O carro foi vendido em {veiculo.data_venda:%d/%m/%Y} — "
+                "IPVA pago depois disso não é mais despesa da empresa.",
+            )
 
     def validate_unique(self):
         # a duplicidade com o banco já vira a mensagem acima (sem repetir a genérica)
@@ -684,17 +718,17 @@ def _cadastro_simples(request, form_classe, modelo, template, chave_id, contexto
             acao = "atualizado" if instancia else "cadastrado"
             messages.success(request, f"“{salvo.nome}” {acao} com sucesso.")
             return redirect(request.path)
-        detalhes = "; ".join(
-            f"{form.fields[campo].label if campo in form.fields else 'Formulário'}: {erros[0]}"
-            for campo, erros in form.errors.items()
-        )
+        # cadastro novo com erro: o resumo no topo do formulário e o erro no campo
+        # já explicam — sem repetir a mesma frase numa terceira mensagem
         if instancia:
             # erro na edição de uma linha da tabela: o formulário "Novo" volta limpo,
             # senão ele apareceria preenchido com a linha editada (e criaria uma cópia).
+            detalhes = "; ".join(
+                f"{form.fields[campo].label if campo in form.fields else 'Formulário'}: {erros[0]}"
+                for campo, erros in form.errors.items()
+            )
             messages.error(request, f"“{instancia.nome}” não foi salvo — {detalhes}")
             form = form_classe()
-        else:
-            messages.error(request, f"Não foi possível cadastrar — {detalhes}")
     return render(request, template, {"form": form, **contexto_extra()})
 
 
@@ -759,6 +793,7 @@ def _km_da_venda(texto):
 
 def vender(request, veiculo_id):
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
+    pede_confirmacao_km = False
     if request.method == "POST":
         try:
             desmobilizacao.registrar_venda(
@@ -774,6 +809,7 @@ def vender(request, veiculo_id):
                 ),
                 # "45.000" vira 45000; "12.5" é recusado (não vira 125)
                 km=_km_da_venda(request.POST.get("km", "")),
+                confirmar_km=bool(request.POST.get("confirmar_km")),
             )
             messages.success(
                 request,
@@ -791,6 +827,10 @@ def vender(request, veiculo_id):
                 ["Confira a data e os valores — ex.: valor 45.000,00 e KM só com números."],
             )
             messages.error(request, "Venda não registrada: " + "; ".join(mensagens))
+            # KM fora do normal: a tela mostra a caixa "Confirmo o KM" (D27)
+            pede_confirmacao_km = any(
+                getattr(e, "code", None) == "km_suspeito" for e in getattr(erro, "error_list", [])
+            ) or bool(request.POST.get("confirmar_km"))
     if veiculo.status == Veiculo.Status.VENDIDO:
         impedimento = {
             "texto": f"{veiculo.placa} já foi vendido.",
@@ -811,6 +851,7 @@ def vender(request, veiculo_id):
             "dados": dados,
             "ficha": desmobilizacao.montar_ficha(veiculo),
             "impedimento_venda": impedimento,
+            "pede_confirmacao_km": pede_confirmacao_km,
             # já vem com o valor de mercado estimado; a pessoa ajusta para o recebido
             "valor_sugerido": numero_br(estimado) if estimado and not dados else "",
         },

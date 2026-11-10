@@ -221,6 +221,7 @@ def test_vistoria_aceita_km_com_milhar(usuario_logado, alocacao):
 
 def test_passos_de_caucao_e_receber_levam_voltar_para_a_ficha(alocacao):
     alocacao.caucao_valor = Decimal("1000")
+    alocacao.data_inicio = HOJE  # o cartão só aparece em entrega recente (etapa 18b)
     alocacao.save()
     Caucao.objects.get_or_create(alocacao=alocacao)
     passos = passos_da_entrega(alocacao)

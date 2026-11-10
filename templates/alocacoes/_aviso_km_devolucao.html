@@ -1,0 +1,20 @@
+{# Aviso de KM fora do normal na devolução (D27) — espera aviso_km; com troca, corrigir_retirada e retirada_errada. #}
+<div class="rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm text-orange-900" role="alert">
+  {% if retirada_errada %}
+  <p class="font-semibold">O KM da retirada ({{ troca.km_retirada|milhar }}) parece errado: o {{ troca.veiculo_substituto.placa }} já tinha marcado {{ troca.veiculo_substituto.km_atual|milhar }} km.</p>
+  <p class="mt-1">Corrija o KM da retirada abaixo e registre de novo.</p>
+  {% else %}
+  <p>{{ aviso_km }}</p>
+  {% endif %}
+  {% if corrigir_retirada %}
+  <div class="mt-2">
+    <label class="mb-1 block font-medium" for="km_retirada">KM do {{ troca.veiculo_substituto.placa }} na retirada ({{ troca.data_retirada|date:"d/m" }})</label>
+    <input type="text" name="km_retirada" id="km_retirada" inputmode="numeric" autocomplete="off"
+           value="{% firstof request.POST.km_retirada troca.km_retirada|milhar %}">
+    <p class="mt-1 text-xs">Se o erro foi na retirada, corrija aqui. Se os dois números estão certos, marque a confirmação.</p>
+  </div>
+  {% endif %}
+  <label class="mt-2 flex min-h-11 items-center gap-2 font-semibold">
+    <input type="checkbox" name="confirmar_km" value="1" class="shrink-0"> Confirmo o KM
+  </label>
+</div>

@@ -71,9 +71,16 @@
       </div>
       <div>
         <label for="venda-km" class="mb-1 block text-sm font-medium">KM no dia da venda</label>
-        <input id="venda-km" type="number" name="km" min="{{ veiculo.km_atual|unlocalize }}" value="{{ dados.km|default:veiculo.km_atual }}">
+        {# texto com teclado numérico: aceita "31.500" como os outros campos de KM #}
+        <input id="venda-km" type="text" name="km" inputmode="numeric" autocomplete="off" value="{% if dados.km %}{{ dados.km }}{% else %}{{ veiculo.km_atual|unlocalize }}{% endif %}">
       </div>
     </div>
+    {% if pede_confirmacao_km %}
+    <label class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+      <input type="checkbox" name="confirmar_km" value="1" class="mt-1 shrink-0" style="width:auto"{% if dados.confirmar_km %} checked{% endif %}>
+      <span>Confirmo o KM (está certo, mesmo fora do normal)</span>
+    </label>
+    {% endif %}
     <div class="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4">
       <button class="rounded bg-red-700 px-4 py-2 font-bold text-white hover:bg-red-800">Confirmar venda do {{ veiculo.placa }}</button>
       <a href="{% url 'frota:ficha' veiculo.pk %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>

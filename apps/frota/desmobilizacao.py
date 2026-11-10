@@ -11,14 +11,14 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import BooleanField, ExpressionWrapper, Q, Sum
+from django.db.models import BooleanField, ExpressionWrapper, Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.text import capfirst
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import ZERO, AplicacaoRecebimento, MovimentacaoCaucao
-from apps.formatos import brl
+from apps.formatos import brl, milhar
 from apps.manutencao.models import Manutencao
 from apps.multas.models import Multa
 from apps.sinistros.models import AuxilioMotorista
@@ -443,23 +443,82 @@ def texto_oficina_impede_venda(manutencao):
     )
 
 
-def _validar_data_e_km_da_venda(veiculo, data, km, hoje=None):
-    """Data entre a compra e hoje; KM da venda nunca abaixo do KM atual do carro."""
+def ultimo_lancamento_do_carro(veiculo, so_com_km=False):
+    """(rótulo, data) do lançamento mais recente do carro, ou None se não houver.
+
+    Leitura de KM, entrega/devolução, troca (como substituto), vistoria,
+    manutenção e a saída da oficina — a venda não pode ser antes de nenhum deles.
+    so_com_km: só os lançamentos que anotaram o KM (base do aviso de KM da venda).
+    """
+    from apps.km.correcao import _fontes_de_km  # km importa frota
+
+    fontes = list(_fontes_de_km())
+    if not so_com_km:
+        fontes.append(("saída da oficina", Manutencao, "veiculo_id", None, "data_saida"))
+    mais_recente = None
+    for rotulo, modelo, campo_carro, campo_km, campo_data in fontes:
+        filtro = {campo_carro: veiculo.pk}
+        if so_com_km:
+            filtro[f"{campo_km}__isnull"] = False
+        data = modelo.objects.filter(**filtro).aggregate(d=Max(campo_data))["d"]
+        if data and (mais_recente is None or data > mais_recente[1]):
+            mais_recente = (rotulo, data)
+    return mais_recente
+
+
+def suspeita_do_km_da_venda(veiculo, km, data):
+    """Aviso quando o KM da venda foge do normal (mesma régua da manutenção, D27)."""
+    from apps.alocacoes.km_aviso import suspeita_de_km
+    from apps.km.correcao import SALTO_MAXIMO_SEM_LEITURA
+
+    if km is None or km <= veiculo.km_atual or not veiculo.km_atual:
+        return None  # sem KM nenhum no cadastro não há com o que comparar
+    # base: o último lançamento que ANOTOU o KM (uma saída da oficina sem KM não
+    # diz quanto o carro marcava — a mensagem falaria de uma anotação que não houve)
+    ultimo = ultimo_lancamento_do_carro(veiculo, so_com_km=True)
+    data_base = ultimo[1] if ultimo else veiculo.data_aquisicao
+    if data_base is not None:
+        return suspeita_de_km(km, data, veiculo.km_atual, data_base, "na última anotação de KM")
+    if km - veiculo.km_atual <= SALTO_MAXIMO_SEM_LEITURA:
+        return None
+    return (
+        f"Você digitou {milhar(km)} km, mas o carro está cadastrado com "
+        f"{milhar(veiculo.km_atual)} km — seriam {milhar(km - veiculo.km_atual)} km a mais. "
+        "Confira se não sobrou um dígito. Se estiver certo, marque “Confirmo o KM” e "
+        "salve de novo."
+    )
+
+
+def _validar_data_e_km_da_venda(veiculo, data, km, hoje=None, confirmar_km=False):
+    """Data entre o último lançamento do carro e hoje; KM nunca abaixo do atual.
+
+    A venda não se desfaz: um KM fora do normal (dígito a mais) só passa com
+    "Confirmo o KM", senão ficaria no carro para sempre.
+    """
     hoje = hoje or timezone.localdate()
     erros = []
     if data > hoje:
         erros.append("A data da venda não pode ser depois de hoje.")
     if veiculo.data_aquisicao and data < veiculo.data_aquisicao:
         erros.append(f"A venda não pode ser antes da compra ({veiculo.data_aquisicao:%d/%m/%Y}).")
+    ultimo = ultimo_lancamento_do_carro(veiculo)
+    if ultimo and data < ultimo[1]:
+        erros.append(
+            f"O carro tem {ultimo[0]} registrada em {ultimo[1]:%d/%m/%Y} — "
+            "a venda não pode ser antes disso."
+        )
     # KM negativo fica para _validar_campos_da_venda (mensagem do campo "KM na venda")
     if km is not None and 0 <= km < veiculo.km_atual:
         erros.append("KM da venda menor que o KM atual do carro — confira o painel.")
     if erros:
         raise ValidationError(erros)
+    aviso = None if confirmar_km else suspeita_do_km_da_venda(veiculo, km, data)
+    if aviso:
+        raise ValidationError(aviso, code="km_suspeito")
 
 
 @transaction.atomic
-def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None):
+def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None, confirmar_km=False):
     """Vende o veículo — só sem alocação ativa, troca aberta nem oficina (docs.md §4.9)."""
     if veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).exists():
         raise ValidationError("Encerre a alocação ativa antes de vender o veículo.")
@@ -477,7 +536,7 @@ def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None):
     if na_oficina:
         raise ValidationError(texto_oficina_impede_venda(na_oficina))
     # antes de mexer no objeto: a tela reaproveita o veículo para remontar a ficha
-    _validar_data_e_km_da_venda(veiculo, data, km)
+    _validar_data_e_km_da_venda(veiculo, data, km, confirmar_km=confirmar_km)
     # a venda não se desfaz: valor zero/negativo estragaria o resultado final do carro
     erros_valor = []
     if valor is None or valor <= 0:

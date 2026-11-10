@@ -151,7 +151,8 @@ def test_primeira_leitura_mostra_km_desde_a_entrega(usuario_logado, db):
     )
 
     html = resposta.content.decode()
-    texto = f"2.000 km desde a entrega (35.000 em {HOJE - timedelta(days=20):%d/%m})"
+    # etapa 18b: sem parênteses dentro de parênteses na mensagem
+    texto = f"2.000 km desde a entrega, em {HOJE - timedelta(days=20):%d/%m}, com 35.000 km"
     assert f"rodou {texto}" in html
     # na lista o texto ficou de fora: custava consultas por linha (pendente p/ fazer em lote)
 

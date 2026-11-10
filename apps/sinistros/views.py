@@ -10,15 +10,17 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import format_html
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
 from apps.alocacoes.models import Alocacao
-from apps.alocacoes.services import cliente_vigente
 from apps.alocacoes.views import _avisar_acerto_das_semanas
+from apps.busca import so_letras_e_digitos
 from apps.campos import OPCAO_VAZIA, CampoDinheiro, FormularioBR, id_valido, ler_data
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
 from apps.frota.models import Veiculo, normalizar_placa
+from apps.multas.services import cliente_dirigindo, troca_do_carro_parado
 
 from . import services
 from .models import DIAS_CARENCIA_AUXILIO, AuxilioMotorista, Sinistro, numero_do_bo
@@ -150,6 +152,14 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         # a caixa liga/desliga a data do evento e a franquia na tela (Alpine)
         campos["acionou_protecao"].widget.attrs["x-model"] = "protecao"
         if not self.instance.pk:
+            # culpa do nosso motorista sugere "Cliente" em Quem paga (e a de outra
+            # pessoa, "Empresa") — a não ser que a pessoa já tenha mexido nesse campo
+            campos["responsabilidade"].widget.attrs["x-on:change"] = (
+                "if (!mexeuCusto) custo = $event.target.value === 'cliente' ? 'cliente' "
+                ": ($event.target.value === 'terceiro' ? 'empresa' : custo)"
+            )
+            campos["responsavel_custo"].widget.attrs["x-model"] = "custo"
+            campos["responsavel_custo"].widget.attrs["x-on:change"] = "mexeuCusto = true"
             # no cadastro todo sinistro começa "Aberto": a situação só muda na edição
             del campos["status"]
             del campos["observacoes"]
@@ -223,8 +233,57 @@ class SinistroForm(FormularioBR, forms.ModelForm):
                 "Informe a data em que o evento foi aberto — a franquia entra nas "
                 "despesas desse mês.",
             )
+        if (
+            dados.get("responsabilidade") == Sinistro.Responsabilidade.TERCEIRO
+            and dados.get("responsavel_custo") == "cliente"
+            and self._novo_ou_mudou("responsabilidade", "responsavel_custo")
+        ):
+            # a franquia ia virar lembrete e cobrança do motorista que não teve culpa
+            self.add_error(
+                "responsavel_custo",
+                "A culpa foi de outra pessoa; o motorista não paga a franquia. Escolha "
+                "Empresa ou mude a culpa.",
+            )
+        self._conferir_repetido(dados)
         self._conferir_franquia_cobrada(dados)
         return dados
+
+    def _novo_ou_mudou(self, *campos):
+        return not self.instance.pk or bool(set(campos) & set(self.changed_data))
+
+    def _conferir_repetido(self, dados):
+        """Cadastro do mesmo sinistro duas vezes: a franquia seria cobrada em dobro.
+
+        Repetido = mesmo carro e mesmo nº de BO, ou mesmo carro, dia e tipo (a não
+        ser que os dois tenham BO e sejam diferentes: outro ocorrido no mesmo dia).
+        """
+        veiculo, dia = dados.get("veiculo"), dados.get("data")
+        if self.instance.pk or not veiculo or not dia:
+            return
+        bo = _bo_comparavel(dados.get("boletim_ocorrencia"))
+        for outro in Sinistro.objects.filter(veiculo=veiculo).order_by("-pk"):
+            bo_outro = _bo_comparavel(outro.boletim_ocorrencia)
+            mesmo_bo = bool(bo) and bo == bo_outro
+            mesmo_dia = (
+                outro.data == dia
+                and outro.tipo == dados.get("tipo")
+                and not (bo and bo_outro and bo != bo_outro)
+            )
+            if mesmo_bo or mesmo_dia:
+                detalhe = f", BO {outro.boletim_numero}" if outro.boletim_numero else ""
+                self.add_error(
+                    None,
+                    format_html(
+                        "Este sinistro já foi cadastrado ({} em {}{}) — "
+                        '<a href="{}" class="font-semibold underline">abra-o</a> em vez de '
+                        "cadastrar de novo.",
+                        veiculo.placa,
+                        f"{outro.data:%d/%m/%Y}",
+                        detalhe,
+                        reverse("sinistros:editar", args=[outro.pk]),
+                    ),
+                )
+                return
 
     def _conferir_franquia_cobrada(self, dados):
         """Franquia já cobrada do motorista: não deixa mudar o que a cobrança usou.
@@ -239,10 +298,18 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         if cobranca.status == "cancelada":
             return
         mudou = set(self.changed_data)
-        aviso = (
-            f"A franquia já foi cobrada de {cobranca.cliente.nome} ({brl(cobranca.valor)}). "
-            "Cancele a cobrança em Financeiro antes de mudar."
-        )
+        aviso = f"A franquia já foi cobrada de {cobranca.cliente.nome} ({brl(cobranca.valor)}). "
+        if cobranca.status in services.FRANQUIA_CANCELAVEL:
+            aviso += (
+                "Use “Cancelar esta cobrança” em “Franquia paga pelo motorista”, mais abaixo "
+                "nesta página, antes de mudar."
+            )
+        else:
+            # paga, com parte paga ou na Justiça: o botão de cancelar não aparece
+            aviso += (
+                "Ela já tem pagamento ou está em cobrança judicial — para mudar, desfaça "
+                "o pagamento no Financeiro antes."
+            )
         for campo in ("franquia_valor", "responsavel_custo", "acionou_protecao"):
             if campo in mudou and campo in self.fields:
                 self.add_error(campo, aviso)
@@ -256,7 +323,7 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         else:
             cliente = self.instance.cliente
         if cliente is None and veiculo and dia:
-            cliente = cliente_vigente(veiculo, dia)
+            cliente = cliente_dirigindo(veiculo, dia)
         if (cliente.pk if cliente else None) != cobranca.cliente_id:
             campo = next(c for c in ("cliente", "data", "veiculo") if c in mudou)
             if campo in dados:
@@ -271,7 +338,7 @@ class SinistroForm(FormularioBR, forms.ModelForm):
             and {"veiculo", "data"} & set(self.changed_data)
             and "cliente" not in self.changed_data
         ):
-            sinistro.cliente = None  # o save() do modelo preenche pelo cliente_vigente
+            sinistro.cliente = None  # o save() do modelo preenche por quem dirigia
         if commit:
             sinistro.save()
         return sinistro
@@ -287,6 +354,11 @@ class SinistroForm(FormularioBR, forms.ModelForm):
         else:
             ordem = [bloco for bloco in ordem if bloco["chave"] != "situacao"]
         return [{**bloco, "campos": [self[nome] for nome in bloco["campos"]]} for bloco in ordem]
+
+
+def _bo_comparavel(texto):
+    """Nº do BO só com letras e números, para achar o mesmo boletim digitado diferente."""
+    return so_letras_e_digitos(numero_do_bo(texto))
 
 
 def _valor_digitado(request):
@@ -337,7 +409,7 @@ def _volta(request):
 
 def lista(request):
     sinistros = Sinistro.objects.select_related(
-        "veiculo", "cliente", "cobranca_franquia"
+        "veiculo", "cliente", "cobranca_franquia__cliente"
     ).prefetch_related("manutencoes", "auxilios")
     status = request.GET.get("status")
     if status:
@@ -442,6 +514,13 @@ def _aplicar_roubo(request, sinistro):
             f" A locação de {continua.cliente.nome} continua, porque o cliente está com o "
             f"carro substituto {continua.troca_ativa.veiculo_substituto.placa}."
         )
+    if resultado.encerrada_depois is not None:
+        encerrada = resultado.encerrada_depois
+        texto += (
+            f" A locação de {encerrada.cliente.nome} foi encerrada em "
+            f"{encerrada.data_termino:%d/%m/%Y}, depois do roubo ({sinistro.data:%d/%m/%Y}). "
+            "Ajuste o término em Alocações para o aluguel parar na data do roubo."
+        )
     messages.warning(request, texto)
     if alocacao is not None:
         # o que já tinha sido pago por semanas depois do roubo (crédito/caução)
@@ -466,19 +545,26 @@ def _deixou_de_ser_roubo(request, sinistro, veiculo_id=None):
 SESSAO_TOKENS_SINISTRO = "sinistro_tokens_usados"
 
 
+def _envio_repetido(request):
+    messages.warning(
+        request, "Este sinistro já tinha sido registrado — o envio repetido foi ignorado."
+    )
+    return redirect("sinistros:lista")
+
+
 def novo(request):
     # código único por formulário (como na ND): reenviar não grava em dobro
     token = request.POST.get("token", "") if request.method == "POST" else ""
+    if token and token in request.session.get(SESSAO_TOKENS_SINISTRO, []):
+        # o mesmo formulário enviado de novo (Voltar, F5): o aviso certo é este,
+        # e não o de "sinistro já cadastrado" da conferência de repetidos
+        return _envio_repetido(request)
     form = SinistroForm(request.POST or None, initial={"data": timezone.localdate()})
     if request.method == "POST" and form.is_valid():
         # linha da sessão travada até gravar: o 2º envio de um clique duplo espera
         with _envio_unico(request, SESSAO_TOKENS_SINISTRO, token) as repetido:
             if repetido:
-                messages.warning(
-                    request,
-                    "Este sinistro já tinha sido registrado — o envio repetido foi ignorado.",
-                )
-                return redirect("sinistros:lista")
+                return _envio_repetido(request)
             sinistro = form.save()
         messages.success(
             request, f"Sinistro registrado — motorista: {_mensagem_motorista(sinistro)}."
@@ -553,11 +639,12 @@ def quem_estava(request):
         dia = date.fromisoformat(request.GET.get("data", ""))
     except ValueError:
         dia = None
-    cliente = cliente_vigente(veiculo, dia) if veiculo and dia else None
+    cliente = cliente_dirigindo(veiculo, dia) if veiculo and dia else None
+    troca = troca_do_carro_parado(veiculo, dia) if veiculo and dia else None
     return render(
         request,
         "sinistros/_quem_estava.html",
-        {"veiculo": veiculo, "dia": dia, "cliente": cliente},
+        {"veiculo": veiculo, "dia": dia, "cliente": cliente, "troca": troca},
     )
 
 
@@ -621,7 +708,8 @@ def receber_auxilio(request, auxilio_id):
             return redirect(_volta(request))
         try:
             valor = _valor_digitado(request)
-            recebido_em = _data_digitada(request)
+            # o dinheiro não entra antes do pedido: cairia num mês já fechado
+            recebido_em = _data_digitada(request, *_inicio_do_auxilio(auxilio))
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
             return redirect(_volta(request))
@@ -637,6 +725,60 @@ def receber_auxilio(request, auxilio_id):
             request,
             f"Auxílio de {brl(auxilio.valor)} recebido — outro crédito, fora da base do DAS.",
         )
+    return redirect(_volta(request))
+
+
+def _inicio_do_auxilio(auxilio):
+    """Data mínima do recebimento: o pedido (ou, sem ele, o próprio sinistro)."""
+    if auxilio.data_solicitacao:
+        return auxilio.data_solicitacao, "do pedido do auxílio"
+    return auxilio.sinistro.data, "do sinistro"
+
+
+def corrigir_auxilio(request, auxilio_id):
+    """Auxílio já recebido com valor ou data digitados errado: corrige na tela.
+
+    Mesmas conferências do recebimento (valor válido; data entre o pedido e hoje).
+    """
+    auxilio = get_object_or_404(AuxilioMotorista.objects.select_related("sinistro"), pk=auxilio_id)
+    if request.method == "POST":
+        if auxilio.status != AuxilioMotorista.Status.RECEBIDO:
+            messages.info(request, "Este auxílio ainda não foi recebido — use “Marcar recebido”.")
+            return redirect(_volta(request))
+        try:
+            valor = _valor_digitado(request)
+            recebido_em = _data_digitada(request, *_inicio_do_auxilio(auxilio))
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+            return redirect(_volta(request))
+        if valor is None:
+            messages.error(request, "Informe o valor recebido (ex.: 1.518,00).")
+            return redirect(_volta(request))
+        auxilio.valor = valor
+        auxilio.data_recebimento = recebido_em
+        auxilio.save(update_fields=["valor", "data_recebimento"])
+        messages.success(
+            request,
+            f"Auxílio corrigido: {brl(valor)} recebido em {recebido_em:%d/%m/%Y}.",
+        )
+    return redirect(_volta(request))
+
+
+def cancelar_franquia(request, sinistro_id):
+    """Botão "Cancelar esta cobrança": libera o sinistro para corrigir a franquia."""
+    sinistro = get_object_or_404(Sinistro, pk=sinistro_id)
+    if request.method == "POST":
+        try:
+            cobranca = services.cancelar_cobranca_franquia(sinistro)
+        except ValidationError as erro:
+            messages.error(request, "; ".join(erro.messages))
+        else:
+            messages.success(
+                request,
+                f"Cobrança da franquia ({brl(cobranca.valor)}, {cobranca.cliente.nome}) "
+                "cancelada — não será cobrada. Corrija o sinistro e, se ainda for para "
+                "cobrar, use “Cobrar do cliente” de novo.",
+            )
     return redirect(_volta(request))
 
 

@@ -153,6 +153,7 @@ def test_consultas_nao_crescem_com_os_devedores(usuario_logado):
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
 
+        usuario_logado.get(reverse("financeiro:quem_deve"))  # renova a sessão (fora da conta)
         with CaptureQueriesContext(connection) as ctx:
             assert usuario_logado.get(reverse("financeiro:quem_deve")).status_code == 200
         return len(ctx.captured_queries)
@@ -233,6 +234,7 @@ def test_painel_consultas_nao_crescem_com_os_devedores(usuario_logado):
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
 
+        usuario_logado.get("/")  # renova a sessão (fora da conta)
         with CaptureQueriesContext(connection) as ctx:
             assert usuario_logado.get("/").status_code == 200
         return len(ctx.captured_queries)

@@ -28,6 +28,12 @@
     {% endif %}
     {% if field.help_text %}<p class="mt-1 text-xs text-gray-500">{{ field.help_text }}</p>{% endif %}
     {% for erro in field.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
+    {% if field.name == "caucao_valor" and form.confirmar_caucao_menor %}
+    <label class="mt-2 flex min-h-11 items-center gap-2 rounded border-l-4 border-orange-400 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-900">
+      <input type="checkbox" name="confirmar_caucao" value="1"{% if form.data.confirmar_caucao %} checked{% endif %} class="shrink-0" style="width:1.25rem;height:1.25rem;padding:0">
+      Confirmo: a caução combinada passa a ser menor que a depositada
+    </label>
+    {% endif %}
   </div>
   {% endfor %}
   <div class="flex gap-3">

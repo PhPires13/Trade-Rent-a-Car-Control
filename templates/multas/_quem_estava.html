@@ -6,7 +6,14 @@
 {% if escolhido and escolhido != vigente %}
 <p class="mt-1 text-amber-800">Atenção: você escolheu cobrar de <strong>{{ escolhido.nome }}</strong>, que não estava com o carro nessa data.</p>
 {% endif %}
+{% elif troca %}
+<p class="text-amber-800">Nessa data o carro estava <strong>na oficina</strong>: {{ troca.alocacao.cliente.nome }} estava com o substituto {{ troca.veiculo_substituto.placa }}{% if not escolhido %} — a multa fica sem cliente (em “Definir responsável”){% endif %}.</p>
 {% else %}
 <p class="text-amber-800">Nessa data o carro <strong>não estava alugado</strong> para ninguém{% if not escolhido %} — a multa fica sem cliente{% endif %}.</p>
+{% endif %}
+{% if limpar_cliente %}
+<p class="mt-1 text-amber-800">O carro ou a data mudou: o campo “Cliente que paga” foi limpo. Ao salvar, a multa vai para quem estava com o carro na nova data.</p>
+{# troca só as opções (innerHTML): o select continua o mesmo e segue avisando as mudanças #}
+<select id="id_cliente" hx-swap-oob="innerHTML">{% for valor, rotulo in opcoes_cliente %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}</select>
 {% endif %}
 <div id="caixa-condutor" hx-swap-oob="true">{{ campo_condutor }}</div>

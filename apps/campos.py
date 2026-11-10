@@ -99,6 +99,19 @@ def validar_ano_plausivel(data):
         raise ValidationError(MENSAGEM_ANO, code="ano_invalido")
 
 
+def _com_ano(texto):
+    """ "27/10" (sem ano) → "27/10/<ano mais perto de hoje>"; o resto fica como veio."""
+    sem_ano = _DIA_E_MES.match(texto)
+    if not sem_ano:
+        return texto
+    completa = _completar_ano(int(sem_ano[1]), int(sem_ano[2]))
+    ano = completa.year if completa else timezone.localdate().year
+    return f"{sem_ano[1]}/{sem_ano[2]}/{ano}"
+
+
+MENSAGEM_DATA_INVALIDA = "Data inválida — escolha a data no calendário (ex.: 27/10/2026)."
+
+
 def ler_data(texto, rotulo="Data"):
     """Data do POST cru (fora de formulário Django) com as mesmas regras dos formulários.
 
@@ -106,12 +119,7 @@ def ler_data(texto, rotulo="Data"):
     (o ano que deixa a data mais perto de hoje); recusa ano fora de 2000..hoje+10.
     Erro vira ValidationError com mensagem para a pessoa (nunca erro 500).
     """
-    texto = str(texto or "").strip()
-    sem_ano = _DIA_E_MES.match(texto)
-    if sem_ano:
-        completa = _completar_ano(int(sem_ano[1]), int(sem_ano[2]))
-        ano = completa.year if completa else timezone.localdate().year
-        texto = f"{sem_ano[1]}/{sem_ano[2]}/{ano}"
+    texto = _com_ano(str(texto or "").strip())
     for formato in FORMATOS_DE_DATA:
         try:
             dia = datetime.strptime(texto, formato).date()
@@ -259,6 +267,16 @@ class FormularioBR:
             widget.format = "%Y-%m-%d"
         # não depende do idioma: pt-BR do Django não traz o AAAA-MM-DD do calendário
         campo.input_formats = FORMATOS_DE_DATA
+        # mesma regra do ler_data (Receber e outras telas): "10/11" sem ano vale, e o
+        # erro diz o que fazer em vez do "Informe uma data válida." do Django
+        if not getattr(campo, "_aceita_sem_ano", False):
+            original = campo.to_python
+            campo.to_python = lambda valor: original(
+                _com_ano(valor.strip()) if isinstance(valor, str) else valor
+            )
+            campo._aceita_sem_ano = True
+        # cópia: o dicionário é dividido com o campo da classe (Field.__deepcopy__)
+        campo.error_messages = {**campo.error_messages, "invalid": MENSAGEM_DATA_INVALIDA}
         if validar_ano_plausivel not in campo.validators:
             campo.validators.append(validar_ano_plausivel)
 

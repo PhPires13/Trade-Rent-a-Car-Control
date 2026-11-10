@@ -22,11 +22,12 @@ def suspeita_de_km(km, data, km_base, data_base, rotulo_base):
     dias = (data - data_base).days
     if rodado <= LIMITE_KM_POR_DIA * max(dias, 1):
         return None
-    por_dia = round(rodado / max(dias, 1))
+    # no mesmo dia (ou no dia seguinte) "uns X km por dia" só repete o total
+    por_dia = f", uns {milhar(round(rodado / dias))} km por dia" if dias > 1 else ""
     return (
         f"Você digitou {milhar(km)} km, mas o carro estava com {milhar(km_base)} km "
         f"{rotulo_base} ({_ha_quanto_tempo(dias)}, em {data_base:%d/%m/%Y}). Seriam "
-        f"{milhar(rodado)} km rodados, uns {milhar(por_dia)} km por dia — confira se não "
+        f"{milhar(rodado)} km rodados{por_dia} — confira se não "
         f"sobrou um dígito. Se estiver certo, marque “Confirmo o KM” e salve de novo."
     )
 

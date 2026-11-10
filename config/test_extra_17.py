@@ -152,7 +152,9 @@ def test_pagina_tem_pular_para_o_conteudo_e_foco_visivel(usuario_logado):
 
 def test_links_do_conteudo_tem_area_de_toque_de_44px():
     base = (RAIZ / "templates/base.html").read_text()
-    assert "height:max(44px,100%)" in base
+    # 44px de altura (22px para cima e para baixo do meio), encurtados pelo ux.js
+    # quando outro alvo está perto (etapa 18b)
+    assert "calc(50% - 22px)" in base and "var(--alvo-cima,22px)" in base
 
 
 def test_filtro_automatico_espera_enter_quando_muda_pelo_teclado():

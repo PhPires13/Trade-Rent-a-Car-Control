@@ -44,7 +44,9 @@ def test_encerrar_cancela_semanas_sem_consultar_cobranca_por_cobranca(
     # todas vem numa consulta só — eram mais 2 leituras por semana (54 no total).
     # +3 fixas: encargos das semanas canceladas (1) e inadimplência recalculada (2).
     # +1 fixa: trava a alocação no banco (duas abas não encerram duas vezes).
-    with django_assert_max_num_queries(39):
+    # +2 fixas (etapa 18): a inadimplência trava e regrava o cliente (com histórico).
+    # +1 fixa (conferência 18b): trava o cliente antes da alocação (pagamento ao mesmo tempo).
+    with django_assert_max_num_queries(42):
         alocacao.encerrar(date(2026, 7, 20), km_devolucao=51_000)
     # Vencidas antes do término ficam; as 11 a partir de 22/07 (sem pagamento) caem.
     canceladas = alocacao.cobrancas.filter(status=Cobranca.Status.CANCELADA)

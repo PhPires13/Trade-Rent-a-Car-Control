@@ -32,13 +32,21 @@
   <div class="rounded-lg bg-white p-3 shadow" title="Dinheiro que o cliente pagou a mais e pode ser usado nas próximas cobranças"><div class="text-xs text-gray-500">Crédito do cliente</div>
     <div class="whitespace-nowrap text-xl font-black text-green-700">{{ credito|brl }}</div>
     {% if credito > 0 and devido_total > 0 %}<a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}&usar_credito=1" class="text-xs underline">usar nas cobranças</a>{% endif %}</div>
+  {% if caucao_link %}
+  <a href="{% url 'financeiro:caucao_detalhe' caucao_link.pk %}" class="block rounded-lg bg-white p-3 shadow hover:bg-gray-50" data-link-caucao>
+    <div class="text-xs text-gray-500">Caução guardada</div>
+    <div class="whitespace-nowrap text-xl font-black">{{ saldo_caucao|brl }}</div>
+    <div class="text-xs underline">ver a caução →</div></a>
+  {% else %}
   <div class="rounded-lg bg-white p-3 shadow"><div class="text-xs text-gray-500">Caução guardada</div>
     <div class="whitespace-nowrap text-xl font-black">{{ saldo_caucao|brl }}</div></div>
+  {% endif %}
 </div>
 
 <div class="grid gap-6 lg:grid-cols-2">
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 font-semibold">Cobranças</h2>
+    {% if cobrancas_cortadas %}<p class="mb-2 text-xs text-gray-500" data-lista-cortada>Mostrando as {{ limite_cobrancas }} mais recentes.</p>{% endif %}
     {# no celular cada linha vira um cartão (descrição em cima, datas e valores embaixo) #}
     <div class="sm:overflow-x-auto">
     <table class="block w-full text-sm sm:table">
@@ -72,6 +80,7 @@
 
   <div class="rounded-lg bg-white p-5 shadow">
     <h2 class="mb-3 font-semibold">Pagamentos recebidos</h2>
+    {% if recebimentos_cortados %}<p class="mb-2 text-xs text-gray-500" data-lista-cortada>Mostrando os {{ limite_recebimentos }} mais recentes.</p>{% endif %}
     <div class="sm:overflow-x-auto">
     <table class="block w-full text-sm sm:table">
       <tbody class="block divide-y divide-gray-100 sm:table-row-group">
@@ -109,4 +118,27 @@
     </div>
   </div>
 </div>
+
+{% if movimentacoes_caucao %}
+{# o que entrou e saiu da caução: a cobrança paga pela caução não ficava "Pago" sem explicação #}
+<div class="mt-6 rounded-lg bg-white p-5 shadow" data-caucao-extrato>
+  <h2 class="mb-1 font-semibold">Caução</h2>
+  <p class="mb-3 text-xs text-gray-500">Depósitos, devoluções e cobranças pagas com a caução. O desconto na caução não é dinheiro novo.</p>
+  <ul class="divide-y divide-gray-100 text-sm">
+    {% for m in movimentacoes_caucao %}
+    <li class="flex items-start justify-between gap-3 py-2">
+      <div class="min-w-0">
+        <div><span class="whitespace-nowrap text-gray-600">{{ m.data|date:"d/m/Y" }}</span> ·
+          {% if m.tipo == "desconto" %}Desconto na caução (não é dinheiro novo){% else %}{{ m.get_tipo_display }}{% endif %}
+          <a href="{% url 'financeiro:caucao_detalhe' m.caucao_id %}" class="text-xs underline">caução {{ m.caucao.alocacao.veiculo.placa }}</a></div>
+        {% if m.cobranca %}<div class="text-xs text-gray-500">pagou: {{ m.cobranca.descricao }}</div>{% endif %}
+      </div>
+      <div class="whitespace-nowrap text-right font-medium {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}text-red-700{% else %}text-green-700{% endif %}">
+        {% if m.tipo == 'desconto' or m.tipo == 'devolucao' %}−{% else %}+{% endif %} {{ m.valor|brl }}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 {% endblock %}

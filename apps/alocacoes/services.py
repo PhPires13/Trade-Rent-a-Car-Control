@@ -32,6 +32,19 @@ def cliente_vigente(veiculo, data):
     return alocacao.cliente if alocacao else None
 
 
+#: Ordem dos eventos de um mesmo dia (do primeiro ao último a acontecer).
+_ORDEM_NO_DIA = {
+    "entrega": 0,
+    "vistoria_entrega": 1,
+    "oficina": 2,
+    "troca": 3,
+    "saida_oficina": 4,
+    "fim_troca": 5,
+    "vistoria_devolucao": 6,
+    "devolucao": 7,
+}
+
+
 def linha_do_tempo(veiculo):
     """Histórico cronológico do veículo — substitui o diário em texto das planilhas."""
     eventos = []
@@ -40,6 +53,7 @@ def linha_do_tempo(veiculo):
             {
                 "data": alocacao.data_inicio,
                 "tipo": "Alocação",
+                "ordem": _ORDEM_NO_DIA["entrega"],
                 "descricao": f"Entregue a {alocacao.cliente.nome} "
                 f"({brl(alocacao.valor_semanal)}/semana, {milhar(alocacao.km_entrega)} km)",
             }
@@ -49,6 +63,7 @@ def linha_do_tempo(veiculo):
                 {
                     "data": alocacao.data_termino,
                     "tipo": "Devolução",
+                    "ordem": _ORDEM_NO_DIA["devolucao"],
                     "descricao": f"Devolvido por {alocacao.cliente.nome}"
                     + (f" ({milhar(alocacao.km_devolucao)} km)" if alocacao.km_devolucao else ""),
                 }
@@ -61,6 +76,7 @@ def linha_do_tempo(veiculo):
             {
                 "data": troca.data_retirada,
                 "tipo": "Troca temporária",
+                "ordem": _ORDEM_NO_DIA["troca"],
                 "descricao": f"Emprestado a {cliente} como substituto"
                 + (f" — {troca.motivo}" if troca.motivo else ""),
             }
@@ -70,6 +86,7 @@ def linha_do_tempo(veiculo):
                 {
                     "data": troca.data_devolucao,
                     "tipo": "Fim da troca",
+                    "ordem": _ORDEM_NO_DIA["fim_troca"],
                     "descricao": f"Devolvido por {cliente} ({milhar(troca.km_devolucao)} km)",
                 }
             )
@@ -80,11 +97,22 @@ def linha_do_tempo(veiculo):
             {
                 "data": troca.data_retirada,
                 "tipo": "Carro na oficina",
+                "ordem": _ORDEM_NO_DIA["troca"],
                 "descricao": f"{troca.alocacao.cliente.nome} ficou com o substituto "
                 f"{troca.veiculo_substituto.placa}"
                 + (f" — {troca.motivo}" if troca.motivo else ""),
             }
         )
+        if troca.data_devolucao:
+            eventos.append(
+                {
+                    "data": troca.data_devolucao,
+                    "tipo": "Fim da troca",
+                    "ordem": _ORDEM_NO_DIA["fim_troca"],
+                    "descricao": f"Voltou para o carro dele: {troca.alocacao.cliente.nome} "
+                    f"devolveu o substituto {troca.veiculo_substituto.placa}",
+                }
+            )
     # C27: a vistoria registrada aparece na linha do tempo para onde a tela leva
     vistorias = Vistoria.objects.filter(
         Q(veiculo=veiculo) | Q(veiculo__isnull=True, alocacao__veiculo=veiculo)
@@ -102,20 +130,42 @@ def linha_do_tempo(veiculo):
             {
                 "data": vistoria.data,
                 "tipo": f"Vistoria ({vistoria.get_tipo_display().lower()})",
+                "ordem": _ORDEM_NO_DIA[
+                    "vistoria_entrega"
+                    if vistoria.tipo == Vistoria.Tipo.ENTRADA
+                    else "vistoria_devolucao"
+                ],
                 "descricao": descricao,
                 "url": vistoria.foto.url if vistoria.foto else "",
             }
         )
-    for manutencao in veiculo.manutencoes.select_related("item"):
+    for manutencao in veiculo.manutencoes.select_related("item", "oficina"):
         rotulo = manutencao.item.nome if manutencao.item else manutencao.get_tipo_display()
+        partes = [rotulo + (f" aos {milhar(manutencao.km)} km" if manutencao.km else "")]
+        if manutencao.descricao:
+            partes.append(manutencao.descricao)
+        if manutencao.oficina:
+            partes.append(manutencao.oficina.nome)
         eventos.append(
             {
                 "data": manutencao.data,
                 "tipo": "Manutenção",
-                "descricao": rotulo + (f" aos {milhar(manutencao.km)} km" if manutencao.km else ""),
+                "ordem": _ORDEM_NO_DIA["oficina"],
+                "descricao": " · ".join(partes),
             }
         )
-    return sorted(eventos, key=lambda e: e["data"], reverse=True)
+        if manutencao.data_saida:
+            eventos.append(
+                {
+                    "data": manutencao.data_saida,
+                    "tipo": "Saiu da oficina",
+                    "ordem": _ORDEM_NO_DIA["saida_oficina"],
+                    "descricao": rotulo
+                    + (f" · {manutencao.oficina.nome}" if manutencao.oficina else ""),
+                }
+            )
+    # mais recente no topo; no mesmo dia, na ordem em que as coisas acontecem
+    return sorted(eventos, key=lambda e: (e["data"], e["ordem"]), reverse=True)
 
 
 def refazer_semanas_da_troca(troca, hoje=None):

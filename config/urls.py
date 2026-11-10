@@ -4,7 +4,7 @@ from django.contrib.admin.options import BaseModelAdmin
 from django.urls import include, path
 
 from apps.campos import validar_tamanho_arquivo
-from config import views
+from config import historico, views
 
 # Retaguarda (/admin/) com a marca do sistema e em português
 admin.site.site_header = "Trade Rent a Car — Retaguarda"
@@ -38,6 +38,9 @@ def _campo_com_limite_de_arquivo(self, db_field, request, **kwargs):
 
 
 BaseModelAdmin.formfield_for_dbfield = _campo_com_limite_de_arquivo
+
+# Histórico da Retaguarda em português e sem erro 500 com carro apagado
+historico.ligar()
 
 
 class BloqueioDeLoginAdmin(admin.ModelAdmin):

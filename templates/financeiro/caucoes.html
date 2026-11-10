@@ -7,6 +7,9 @@
 <h1 class="mb-4 text-2xl font-bold">Financeiro — Cauções</h1>
 {% include "financeiro/_abas.html" with aba="caucoes" %}
 
+<p class="mb-3 text-sm text-gray-600">Primeiro as de carro com o cliente; depois as de contrato encerrado com dinheiro guardado (<strong>acerto pendente</strong>: devolver ou descontar).
+  {% if mostrar_acertadas %}<a href="?" class="underline">Esconder as já acertadas</a>{% elif acertadas %}<a href="?acertadas=1" class="underline" data-mostrar-acertadas>Mostrar as já acertadas ({{ acertadas }})</a>{% endif %}</p>
+
 {# Celular: um cartão por caução (cliente e saldo em destaque). Do md para cima: tabela. #}
 <div class="md:overflow-x-auto md:rounded-lg md:bg-white md:shadow">
   <table class="block w-full text-sm md:table">
@@ -33,7 +36,8 @@
           </div>
         </td>
         <td class="block text-gray-600 md:table-cell md:px-3 md:py-2 md:text-gray-900">
-          {{ caucao.alocacao.veiculo.placa }}<span class="md:hidden"> · {{ caucao.status }}</span></td>
+          {{ caucao.alocacao.veiculo.placa }}<span class="md:hidden"> · {{ caucao.status }}</span>
+          {% if caucao.grupo == 1 %}<span class="ml-1 whitespace-nowrap rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-900" data-acerto-pendente>acerto pendente</span>{% endif %}</td>
         <td class="block text-xs text-gray-500 md:table-cell md:whitespace-nowrap md:px-3 md:py-2 md:text-sm md:text-gray-900">
           <span class="whitespace-nowrap"><span class="md:hidden">Acordada </span>{{ caucao.alocacao.caucao_valor|brl }}</span>
           <span class="md:hidden">· <span class="whitespace-nowrap">recebida {{ caucao.recebido|brl }}</span>{% if caucao.descontado %} · <span class="whitespace-nowrap">descontos {{ caucao.descontado|brl }}</span>{% endif %}{% if caucao.devolvido %} · <span class="whitespace-nowrap">devolvida {{ caucao.devolvido|brl }}</span>{% endif %}</span>
@@ -49,7 +53,7 @@
         </td>
       </tr>
       {% empty %}
-      <tr class="block md:table-row"><td colspan="8" class="block rounded-lg bg-white px-3 py-4 text-gray-500 shadow md:table-cell md:shadow-none">Nenhuma caução registrada (a caução é opcional).</td></tr>
+      <tr class="block md:table-row"><td colspan="8" class="block rounded-lg bg-white px-3 py-4 text-gray-500 shadow md:table-cell md:shadow-none">{% if acertadas and not mostrar_acertadas %}Nenhuma caução de carro com cliente nem acerto pendente.{% else %}Nenhuma caução registrada (a caução é opcional).{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.financeiro.models import Cobranca
-from apps.formatos import brl
+from apps.formatos import brl, milhar
 
 from .models import AcertoExcedenteKm, RegistroKm, mes_anterior
 
@@ -204,7 +204,7 @@ def _criar_cobranca(registro, vinculo, excedente, franquia, hoje):
         origem=Cobranca.Origem.EXCEDENTE_KM,
         descricao=(
             f"Excedente de km {registro.veiculo.placa} {registro.mes_referencia:%m/%Y} — "
-            f"{excedente} km além da franquia de {franquia} km "
+            f"{milhar(excedente)} km além da franquia de {milhar(franquia)} km "
             f"({brl(taxa)}/km)"
         ),
         valor=valor,

@@ -43,6 +43,10 @@
         <input type="checkbox" name="confirmo" value="{{ km_avisado }}" autofocus class="h-6 w-6">
         Sim, o número está certo
       </label>
+      <input type="hidden" name="avisado" value="{{ km_avisado }}">
+      {% if falta_confirmar %}
+      <p class="mt-1 font-semibold text-red-700">✕ Marque “Sim, o número está certo” para gravar.</p>
+      {% endif %}
       <p class="text-xs">Se digitou errado, corrija o KM acima e salve de novo.</p>
     </div>
     {% endif %}

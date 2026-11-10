@@ -20,6 +20,14 @@
                 emissao: "{% if post.data_emissao %}{{ post.data_emissao|escapejs }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}",
                 venc: "{{ post.vencimento|default:''|escapejs }}",
                 manual: {% if post.vencimento %}true{% else %}false{% endif %},
+                confirmaDistante: {% if post.confirmar_vencimento_distante == "1" %}true{% else %}false{% endif %},
+                /* vencimento a mais de 60 dias da emissão: quase sempre o ano errado */
+                get distante() {
+                  if (!this.venc || !this.emissao) return false;
+                  return (new Date(this.venc + "T12:00:00") - new Date(this.emissao + "T12:00:00")) / 86400000 > 60;
+                },
+                /* sempre true/false: o Alpine só tira o "disabled" com false/null */
+                get bloqueado() { return !!(this.enviando || this.temIncompleta || (this.distante && !this.confirmaDistante)); },
                 nomesDias: ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"],
                 diaDoCliente() { const d = this.dias[this.cliente]; return d === undefined ? null : d; },
                 sugerido() {
@@ -42,7 +50,7 @@
                 br(texto) {
                   let t = String(texto || "").replace(/R\$|\s/g, "");
                   if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
-                  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+                  else if (/^[1-9]\d{0,2}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
                   return parseFloat(t) || 0;
                 },
                 /* linha pela metade (só descrição ou só valor) não entra no total e trava o Emitir */
@@ -73,7 +81,7 @@
   <div class="grid gap-4 sm:grid-cols-2">
     <div>
       <label for="nd-emissao" class="mb-1 block text-sm font-medium">Data de emissão</label>
-      <input type="date" name="data_emissao" id="nd-emissao" required x-model="emissao" x-on:change="ajustar()"
+      <input type="date" name="data_emissao" id="nd-emissao" required x-model="emissao" x-on:change="ajustar()" max="{{ hoje|date:'Y-m-d' }}"
              value="{% if post.data_emissao %}{{ post.data_emissao }}{% else %}{{ hoje|date:'Y-m-d' }}{% endif %}">
     </div>
     <div>
@@ -88,17 +96,22 @@
             x-on:click="manual = false; ajustar()">usar a data sugerida</button>
     <span x-show="!cliente">Se deixar em branco, a nota vence no próximo dia de pagamento do cliente — nunca no mesmo dia da emissão.</span>
   </p>
+  <label x-show="distante" x-cloak class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-vencimento-distante>
+    <input type="checkbox" name="confirmar_vencimento_distante" value="1" x-model="confirmaDistante" class="mt-1 h-4 w-4" style="width:auto">
+    <span><strong>Confirmo: vencimento distante</strong> — vence mais de 60 dias depois da emissão. Confira o ano do vencimento.</span>
+  </label>
 
   <div>
     <p class="mb-1 block text-sm font-medium">O que está sendo cobrado</p>
     <p class="mb-2 text-xs text-gray-500">Um item por linha: descrição e valor em reais.</p>
     <template x-for="(item, i) in itens" x-bind:key="i">
       <div class="mb-2">
-        <div class="flex gap-2">
-          <input type="text" name="item_descricao" placeholder="descrição (ex.: multa avanço de sinal 12/04)"
-                 x-model="item.d" class="flex-1" maxlength="200" aria-label="Descrição do item"
+        {# no celular: descrição na largura toda e o valor embaixo (lado a lado o texto ficava cortado) #}
+        <div class="flex flex-wrap gap-2 sm:flex-nowrap">
+          <input type="text" name="item_descricao" placeholder="descrição (ex.: multa 12/04)"
+                 x-model="item.d" class="basis-full sm:basis-auto sm:flex-1" maxlength="200" aria-label="Descrição do item"
                  x-bind:style="incompleta(item) && !String(item.d || '').trim() ? 'border-color:#dc2626;background:#fef2f2' : ''">
-          <input type="text" name="item_valor" placeholder="R$ ex.: 150,00" x-model="item.v" class="w-28" aria-label="Valor do item (R$)"
+          <input type="text" name="item_valor" placeholder="ex.: 150,00" x-model="item.v" class="item-valor" aria-label="Valor do item (R$)"
                  inputmode="decimal" autocomplete="off"
                  x-bind:style="incompleta(item) && !(br(item.v) > 0) ? 'border-color:#dc2626;background:#fef2f2' : ''">
           <button type="button" class="px-1 text-red-600" x-on:click="itens.splice(i, 1)" x-show="itens.length > 1"
@@ -121,8 +134,8 @@
 
   <div class="flex items-center gap-3">
     <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95"
-            x-bind:disabled="enviando || temIncompleta"
-            x-bind:class="enviando ? 'cursor-wait opacity-50' : (temIncompleta ? 'cursor-not-allowed opacity-50' : '')">
+            x-bind:disabled="bloqueado"
+            x-bind:class="enviando ? 'cursor-wait opacity-50' : (bloqueado ? 'cursor-not-allowed opacity-50' : '')">
       <span x-show="!enviando">Emitir nota de débito</span><span x-show="enviando">Emitindo…</span>
     </button>
     <a href="{% url 'financeiro:nds' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
@@ -133,6 +146,7 @@
   form input, form select, form textarea {
     width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.4rem 0.6rem;
   }
-  form .w-28 { width: 7rem; }
+  form .item-valor { width: 10rem; }
+  @media (min-width: 640px) { form .item-valor { width: 7rem; } }
 </style>
 {% endblock %}

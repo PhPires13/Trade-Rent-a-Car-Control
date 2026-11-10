@@ -159,7 +159,7 @@ def test_htmx_sem_login_nao_vira_json_401(db):
         HTTP_HX_CURRENT_URL="http://testserver/clientes/novo/",
     )
     assert resposta.status_code == 204
-    assert resposta["HX-Redirect"] == "/entrar/?next=/clientes/novo/"
+    assert resposta["HX-Redirect"] == "/entrar/?next=/clientes/novo/&expirou=1"
 
 
 def test_fetch_com_token_csrf_velho_recebe_json(usuario_logado):

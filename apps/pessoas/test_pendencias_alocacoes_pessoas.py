@@ -137,4 +137,7 @@ def test_condutor_com_cnh_longa_demais_explica_o_erro(usuario_logado, cliente):
     html = resposta.content.decode()
     assert not CondutorAutorizado.objects.filter(nome="Rita").exists()
     assert "Informe ao menos o nome" not in html
-    assert "CNH — número:" in html and "20" in html
+    # etapa 18b: o erro aparece junto do campo, com o que foi digitado
+    erros = resposta.context["form_condutor"].errors["cnh_numero"]
+    assert "20" in " ".join(erros) and " ".join(erros) in html.replace("&#x27;", "'")
+    assert 'value="Rita"' in html

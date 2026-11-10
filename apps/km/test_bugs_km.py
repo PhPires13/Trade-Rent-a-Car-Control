@@ -304,14 +304,14 @@ def test_d22_mes_de_31_dias_nao_ganha_franquia_a_mais(veiculo, contrato_desde_ja
     marco = registrar(veiculo, date(2026, 3, 31), 15_600)  # 3.100 km em 31 dias
     [cobranca] = gerar_cobrancas_excedente(marco, hoje=date(2026, 3, 31))
     assert cobranca.valor == Decimal("50.00")  # 100 km × R$ 0,50
-    assert "franquia de 3000 km" in cobranca.descricao
+    assert "franquia de 3.000 km" in cobranca.descricao
 
 
 def test_d22_mes_faltando_continua_rateado(veiculo, contrato_desde_janeiro):
     registrar(veiculo, date(2026, 1, 31), 12_500)
     marco = registrar(veiculo, date(2026, 3, 2), 18_000)  # fevereiro sem leitura, 30 dias
     [cobranca] = gerar_cobrancas_excedente(marco, hoje=date(2026, 3, 2))
-    assert "franquia de 3000 km" in cobranca.descricao  # 3.000 × 30/30
+    assert "franquia de 3.000 km" in cobranca.descricao  # 3.000 × 30/30
 
 
 # --- D30: mudar o limite do contrato não reavalia leitura antiga ---------------

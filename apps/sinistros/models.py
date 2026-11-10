@@ -114,9 +114,10 @@ class Sinistro(models.Model):
 
     def save(self, *args, **kwargs):
         if self.cliente_id is None and self.veiculo_id and self.data:
-            from apps.alocacoes.services import cliente_vigente
+            # carro parado durante uma troca: o cliente estava com o substituto
+            from apps.multas.services import cliente_dirigindo
 
-            self.cliente = cliente_vigente(self.veiculo, self.data)
+            self.cliente = cliente_dirigindo(self.veiculo, self.data)
         super().save(*args, **kwargs)
 
     @property

@@ -7,13 +7,16 @@ Aqui o redirect vira um HX-Redirect: o navegador vai para o login de
 verdade e, depois de entrar, volta para a tela onde a pessoa estava.
 """
 
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth.signals import user_logged_in
+from django.dispatch import receiver
 from django.http import HttpResponse, JsonResponse
 from django.middleware.csrf import REASON_NO_CSRF_COOKIE
 from django.shortcuts import redirect, render, resolve_url
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import csrf
 
@@ -81,8 +84,56 @@ class HtmxLoginRedirectMiddleware:
             # Com JSON 401 a tela mostra o motivo certo.
             if _e_fetch(request):
                 return JsonResponse({"erro": SESSAO_EXPIRADA}, status=401)
+            # formulário enviado com a sessão vencida: o que foi digitado se perde.
+            # O login avisa (expirou=1) em vez de aparecer mudo. Só no redirect do
+            # LoginRequiredMiddleware (tem "next"), não no "Sair" nem no próprio login.
+            if (
+                request.method == "POST"
+                and not request.user.is_authenticated
+                and request.path != login
+                and "next=" in destino.query
+            ):
+                resposta["Location"] = urlunsplit(
+                    destino._replace(query=destino.query + "&expirou=1")
+                )
             return resposta
         nova = HttpResponse(status=204)
         volta = _volta(request)
-        nova["HX-Redirect"] = f"{login}?next={quote(volta)}" if volta else login
+        destino_htmx = f"{login}?next={quote(volta)}" if volta else login
+        if request.method == "POST" and not request.user.is_authenticated:
+            # clique que grava (registrar KM, dar baixa) também se perdeu: mesmo aviso
+            destino_htmx += ("&" if volta else "?") + "expirou=1"
+        nova["HX-Redirect"] = destino_htmx
         return nova
+
+
+RENOVADA_EM = "renovada_em"
+
+
+def marcar_sessao_renovada(request):
+    """Marca a sessão como renovada hoje."""
+    request.session[RENOVADA_EM] = timezone.localdate().isoformat()
+
+
+@receiver(user_logged_in, dispatch_uid="config.marcar_sessao_renovada")
+def _marcar_ao_entrar(sender, request, user, **kwargs):
+    # todo login (tela "Entrar" e o login da Retaguarda) abre sessão que se renova
+    if request is not None and hasattr(request, "session"):
+        marcar_sessao_renovada(request)
+
+
+class SessaoRenovadaMiddleware:
+    """Renova a sessão uma vez por dia de uso: quem usa o sistema todo dia não cai
+    no login no meio do trabalho. Só grava no banco 1x por dia (não a cada clique,
+    como faria o SESSION_SAVE_EVERY_REQUEST). Vale para as sessões abertas por um
+    login (Entrar ou Retaguarda), que já nascem marcadas com o dia."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.user.is_authenticated:
+            marcada = request.session.get(RENOVADA_EM)
+            if marcada and marcada != timezone.localdate().isoformat():
+                marcar_sessao_renovada(request)  # sessão alterada → validade renovada
+        return self.get_response(request)

@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
 from django.contrib import messages
@@ -8,10 +9,10 @@ from django.http import Http404, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import format_html
 from django.utils.http import urlencode
 from django.views.decorators.cache import never_cache
 
-from apps.alocacoes.services import cliente_vigente
 from apps.campos import CampoDinheiro, id_valido, ler_data
 from apps.financeiro import services as financeiro_services
 from apps.financeiro.views import _envio_unico
@@ -54,9 +55,10 @@ def _voltar_para_lista(request, ancora=""):
 
 def lista(request):
     hoje = timezone.localdate()
-    multas = Multa.objects.select_related("veiculo", "cliente", "orgao").prefetch_related(
-        Multa.PREFETCH_REPASSE
-    )
+    # multa_nic: o botão "Registrar NIC" confere se a NIC já existe sem uma consulta por linha
+    multas = Multa.objects.select_related(
+        "veiculo", "cliente", "orgao", "multa_nic"
+    ).prefetch_related(Multa.PREFETCH_REPASSE)
     veiculo = request.GET.get("veiculo", "").strip()
     if veiculo:
         # o banco grava a placa sem hífen/espaço: "ABC-1D23" precisa achar "ABC1D23"
@@ -155,10 +157,19 @@ def editar(request, multa_id):
     um histórico simples de quem mudou o quê.
     """
     multa = get_object_or_404(Multa.objects.select_related("veiculo", "cliente"), pk=multa_id)
+    # o is_valid() já troca os campos na instância: guarda o de antes
+    cliente_antes, anulada_antes = multa.cliente_id, multa.anulada
     form = MultaEdicaoForm(request.POST or None, instance=multa)
     if request.method == "POST" and form.is_valid():
-        form.save()
-        messages.success(request, f"Multa {multa.veiculo.placa} atualizada.")
+        multa = form.save()
+        texto = f"Multa {multa.veiculo.placa} atualizada."
+        if multa.cliente_id != cliente_antes:
+            # carro ou data corrigidos recalculam o cliente: quem salvou precisa saber
+            nome = multa.cliente.nome if multa.cliente else "nenhum cliente na data"
+            texto = f"Multa {multa.veiculo.placa} atualizada — agora atribuída a: {nome}."
+        messages.success(request, texto)
+        if multa.anulada and not anulada_antes:
+            _avisar_nic_da_anulada(request, multa)
         return _voltar_para_lista(request)
     return render(
         request,
@@ -185,10 +196,14 @@ def quem_estava(request):
         data = date.fromisoformat(request.GET.get("data_infracao", ""))
     except ValueError:
         data = None
-    vigente = cliente_vigente(veiculo, data) if veiculo and data else None
+    vigente = services.cliente_dirigindo(veiculo, data) if veiculo and data else None
+    troca = services.troca_do_carro_parado(veiculo, data) if veiculo and data else None
     escolhido = None
     if id_valido(request.GET.get("cliente", "")):
         escolhido = Cliente.objects.filter(pk=request.GET["cliente"]).first()
+    limpar_cliente = _cliente_sera_recalculado(request, veiculo, data, escolhido)
+    if limpar_cliente:
+        escolhido = None
     atual = request.GET.get("condutor_autorizado", "")
     atual = int(atual) if id_valido(atual) else None
     form = MultaForm(initial={"condutor_autorizado": atual})
@@ -201,8 +216,53 @@ def quem_estava(request):
             "data": data,
             "vigente": vigente,
             "escolhido": escolhido,
+            "troca": troca,
+            "limpar_cliente": limpar_cliente,
+            "opcoes_cliente": form.fields["cliente"].choices,
             "campo_condutor": form["condutor_autorizado"],
         },
+    )
+
+
+def _cliente_sera_recalculado(request, veiculo, data, escolhido):
+    """Edição: carro ou data mudou e o cliente na tela ainda é o salvo.
+
+    Ao salvar, o cliente é recalculado pela nova data (MultaForm.save) — o
+    campo "Cliente que paga" não pode continuar mostrando o antigo, nem o aviso
+    tratá-lo como escolhido. Só quando a pessoa mexeu no carro ou na data (não
+    quando ela própria escolheu o cliente) e a multa não está numa ND nem é NIC.
+    """
+    multa_id = request.GET.get("multa", "")
+    if not (id_valido(multa_id) and veiculo and data and escolhido):
+        return False
+    if request.GET.get(MultaEdicaoForm.CAMPO_CLIENTE_ESCOLHIDO) == "1":
+        # ela própria escolheu o cliente (o HX-Trigger é sempre a caixa do aviso)
+        return False
+    multa = Multa.objects.filter(pk=multa_id).first()
+    return bool(
+        multa
+        and escolhido.pk == multa.cliente_id
+        and (veiculo.pk != multa.veiculo_id or data != multa.data_infracao)
+        and not multa.multa_origem_nic_id
+        and not multa.itens_nd.exists()
+    )
+
+
+def _avisar_nic_da_anulada(request, multa):
+    """Original anulada (cancelada, advertência...): a NIC dela costuma cair junto."""
+    nic = Multa.objects.filter(multa_origem_nic=multa).first()
+    if nic is None or nic.anulada:
+        return
+    valor = brl(nic.valor) if nic.valor is not None else "valor não informado"
+    messages.warning(
+        request,
+        format_html(
+            "Esta multa tinha NIC ({}, de {}). Confira com o órgão se a NIC também foi "
+            'anulada e atualize-a: <a href="{}" class="font-semibold underline">abrir a NIC</a>.',
+            valor,
+            f"{nic.data_infracao:%d/%m/%Y}",
+            reverse("multas:editar", args=[nic.pk]),
+        ),
     )
 
 
@@ -219,6 +279,15 @@ def indicar_fici(request, multa_id):
             request,
             f"A indicação do motorista desta multa já está como "
             f'"{multa.get_fici_status_display()}".',
+        )
+    elif request.method == "POST" and multa.fici_prazo and multa.fici_prazo < timezone.localdate():
+        # o órgão não aceita a indicação depois do prazo: marcar "Indicado" agora
+        # escondia a NIC que vai chegar (e depois ela não podia mais ser registrada)
+        messages.error(
+            request,
+            f"O prazo para indicar venceu em {multa.fici_prazo:%d/%m/%Y} — o órgão não aceita "
+            "mais. Quando a multa NIC chegar, use “Registrar NIC”. Se você indicou dentro "
+            "do prazo e só esqueceu de marcar, use Editar e informe a data da indicação.",
         )
     elif request.method == "POST":
         multa.fici_status = Multa.Fici.INDICADO
@@ -242,15 +311,20 @@ def registrar_nic(request, multa_id):
             # aba antiga: o motorista já foi indicado, não há NIC a registrar
             messages.info(request, "O motorista desta multa já foi indicado — não há NIC.")
             return _voltar_para_lista(request)
-        if multa.fici_status != Multa.Fici.PENDENTE:
-            # aba antiga, NIC já registrada ou multa que já é uma NIC (NIC de NIC)
+        if multa.fici_status != Multa.Fici.PENDENTE and not multa.pode_registrar_nic:
+            # aba antiga, NIC já registrada ou multa que já é uma NIC (NIC de NIC);
+            # "Prazo perdido" marcado em Editar, sem NIC ainda, passa
             messages.info(
                 request,
                 "A indicação do motorista desta multa já está como "
                 f"“{multa.get_fici_status_display()}” — não há NIC a registrar.",
             )
             return _voltar_para_lista(request)
-        if multa.fici_prazo and multa.fici_prazo >= timezone.localdate():
+        if (
+            multa.fici_status == Multa.Fici.PENDENTE
+            and multa.fici_prazo
+            and multa.fici_prazo >= timezone.localdate()
+        ):
             # dentro do prazo ainda dá para indicar — a NIC criaria multa à toa (UX #13)
             messages.error(
                 request,
@@ -272,9 +346,17 @@ def marcar_paga(request, multa_id):
         multa.pagamento = Multa.Pagamento.PAGO
         # só as duas opções do botão (D23): texto solto não tirava a multa da ND
         digitado = request.POST.get("pago_por", "").strip().lower()
-        multa.pago_por = {"empresa": "Empresa", "cliente": Multa.PAGO_POR_CLIENTE}.get(digitado, "")
+        opcoes = {"empresa": "Empresa", "cliente": Multa.PAGO_POR_CLIENTE}
+        if multa.responsavel == Multa.Responsavel.VENDEDOR:
+            # multa de antes da compra: quem pagou pode ter sido o dono anterior
+            opcoes["vendedor anterior"] = Multa.PAGO_POR_VENDEDOR
+        multa.pago_por = opcoes.get(digitado, "")
         multa.save(update_fields=["pagamento", "pago_por"])
-        quem = {"Empresa": " pela empresa", "Cliente": " pelo cliente"}.get(multa.pago_por, "")
+        quem = {
+            "Empresa": " pela empresa",
+            "Cliente": " pelo cliente",
+            Multa.PAGO_POR_VENDEDOR: " pelo vendedor anterior",
+        }.get(multa.pago_por, "")
         aviso = ""
         if multa.paga_pelo_cliente:
             item = multa.itens_nd.select_related("nota_debito").first()
@@ -312,13 +394,6 @@ def gerar_nd(request):
         # transação — com os itens em memória, dois envios seguidos gerariam ND em dobro
         selecionadas = list(cliente.multas.select_related("veiculo").filter(pk__in=marcadas))
         try:
-            if len(marcadas) != len(enviadas):
-                # marcada na tela, mas excluída, editada ou já cobrada em outra aba:
-                # antes a ND saía sem ela, sem aviso, com total diferente do da tela
-                raise ValidationError(
-                    "Uma das multas marcadas foi alterada, excluída ou já entrou em outra "
-                    "nota de débito. Confira a lista abaixo e emita de novo."
-                )
             if vencimento["data"] is None:
                 raise ValidationError("Vencimento inválido — use uma data a partir de hoje.")
             # mesmo código único da ND manual: o clique duplo não emite duas NDs
@@ -330,6 +405,15 @@ def gerar_nd(request):
                         "ignorado e nada foi cobrado em dobro.",
                     )
                     return redirect("financeiro:nds")
+                if len(marcadas) != len(enviadas):
+                    # marcada na tela, mas excluída, editada ou já cobrada em outra aba:
+                    # antes a ND saía sem ela, sem aviso, com total diferente do da tela.
+                    # Depois do código único: no clique duplo a multa já está na ND
+                    # e o aviso certo é o de cima, não "emita de novo"
+                    raise ValidationError(
+                        "Uma das multas marcadas foi alterada, excluída ou já entrou em outra "
+                        "nota de débito. Confira a lista abaixo e emita de novo."
+                    )
                 nd = services.gerar_nd_de_multas(
                     cliente, selecionadas, timezone.localdate(), vencimento=vencimento["data"]
                 )
@@ -346,6 +430,8 @@ def gerar_nd(request):
             "clientes": clientes,
             "cliente": cliente,
             "multas": a_cobrar,
+            # "Total marcado" antes de emitir (todas vêm marcadas)
+            "total_inicial": sum((m.valor for m in a_cobrar), Decimal("0")),
             "vencimento": vencimento,
             "token": token or uuid4().hex,
         },

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block titulo %}KM Mensal — Trade Rent a Car{% endblock %}
+{% block titulo %}KM do mês — Trade Rent a Car{% endblock %}
 
 {% block conteudo %}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-2xl font-bold">Registro mensal de KM — {{ mes|date:"m/Y" }}</h1>
+  <h1 class="text-2xl font-bold">KM do mês — {{ mes|date:"m/Y" }}</h1>
   <form method="get" class="flex items-center gap-2">
     <label for="filtro-mes-km" class="text-sm text-gray-600">Mês:</label>
     <input id="filtro-mes-km" type="month" name="mes" value="{{ mes|date:'Y-m' }}" onchange="this.form.submit()"
@@ -103,13 +103,13 @@
           {% if registro.cobranca_excedente and registro.cobranca_excedente.status != "cancelada" %}
             <span class="ml-1 rounded bg-yellow-100 px-1.5 py-0.5 text-xs font-normal text-yellow-800"
                   title="Rodou além da franquia contratada — {{ registro.cobranca_excedente.descricao }}">
-              km excedente: {{ registro.cobranca_excedente.valor|brl }}
+              {% if registro.cobranca_excedente.detalhe %}{{ registro.cobranca_excedente.detalhe }} = {% else %}km excedente: {% endif %}{{ registro.cobranca_excedente.valor|brl }}
             </span>
           {% endif %}
           {% for acerto in registro.acertos_excedente.all %}{% if acerto.cobranca.status != "cancelada" %}
             <span class="ml-1 rounded bg-yellow-100 px-1.5 py-0.5 text-xs font-normal text-yellow-800"
                   title="Cliente que devolveu o carro antes da leitura — {{ acerto.cobranca.descricao }}">
-              excedente de {{ acerto.cobranca.cliente.nome }}: {{ acerto.cobranca.valor|brl }}
+              excedente de {{ acerto.cobranca.cliente.nome }}: {% if acerto.cobranca.detalhe %}{{ acerto.cobranca.detalhe }} = {% endif %}{{ acerto.cobranca.valor|brl }}
             </span>
           {% endif %}{% endfor %}</span>
         </td>

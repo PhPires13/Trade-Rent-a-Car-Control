@@ -84,11 +84,12 @@
     <div class="text-sm text-gray-500">Clientes inadimplentes</div>
     <div class="text-2xl font-black {% if inadimplentes %}text-red-700{% endif %}">{{ inadimplentes|length }}</div>
     {% if inadimplentes %}
-    <div class="mt-1 text-xs leading-relaxed">
-      {% for c in inadimplentes %}<a class="underline hover:text-marca-preto" href="{% url 'financeiro:extrato_cliente' c.pk %}">{{ c.nome }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
-    </div>
+    {# um nome por linha e alvo de toque de 44px no celular: em texto corrido, o toque num nome abria o vizinho #}
+    <ul class="mt-1 text-xs leading-relaxed">
+      {% for c in inadimplentes %}<li><a class="alvo-toque underline hover:text-marca-preto" href="{% url 'financeiro:extrato_cliente' c.pk %}">{{ c.nome }}</a></li>{% endfor %}
+    </ul>
     {% endif %}
-    {% if nds_abertas %}<div class="mt-1 text-xs"><a href="{% url 'financeiro:nds' %}" class="underline">{{ nds_abertas }} nota{{ nds_abertas|pluralize }} de débito em aberto</a></div>{% endif %}
+    {% if nds_abertas %}<div class="mt-1 text-xs"><a href="{% url 'financeiro:nds' %}" class="alvo-toque underline">{{ nds_abertas }} nota{{ nds_abertas|pluralize }} de débito em aberto</a></div>{% endif %}
   </div>
 </div>
 

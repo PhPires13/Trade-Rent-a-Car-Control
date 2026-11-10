@@ -260,7 +260,8 @@ def test_htmx_sem_login_vai_para_o_login_em_vez_de_encaixar_a_pagina():
         HTTP_HX_CURRENT_URL="http://testserver/km/?mes=2026-10",
     )
     assert resposta.status_code == 204
-    assert resposta["HX-Redirect"] == "/entrar/?next=/km/%3Fmes%3D2026-10"
+    # POST perdido: o login avisa que nada foi salvo (etapa 18b)
+    assert resposta["HX-Redirect"] == "/entrar/?next=/km/%3Fmes%3D2026-10&expirou=1"
 
 
 @pytest.mark.django_db

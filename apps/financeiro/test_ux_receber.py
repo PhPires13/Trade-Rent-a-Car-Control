@@ -262,6 +262,7 @@ def test_desfazer_remove_reforco_de_caucao(cliente, atrasada, alocacao):
         "pix",
         [(atrasada, Decimal("650.00"))],
         sobra_destino="caucao",
+        caucao_acima_confirmado=True,  # 1.050 passa do combinado de 1.000
     )
     assert caucao.saldo == Decimal("1050.00")
     resumo = services.resumo_recebimento(recebimento)

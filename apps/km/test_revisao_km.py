@@ -141,7 +141,8 @@ def test_registrar_duas_vezes_avisa_sem_linha_em_branco(usuario_logado, veiculo)
     postar(usuario_logado, veiculo, "14000")
     conteudo = postar(usuario_logado, veiculo, "14000").content.decode()
     assert "já tem leitura em 02/2024 (14.000 km em 10/02/2024)" in conteudo
-    assert "12.000 km" in conteudo  # a "Última:" continua preenchida
+    # a "Última:" continua preenchida — com a leitura já gravada, a mesma do erro (etapa 18b)
+    assert "14.000 km</strong>" in conteudo
     assert veiculo.registros_km.count() == 2
 
 

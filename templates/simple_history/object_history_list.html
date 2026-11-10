@@ -1,0 +1,74 @@
+{% load url from simple_history_compat %}
+{% load admin_urls %}
+{% load getattribute from getattributes %}
+{# Lista do histórico em português: sem a coluna "motivo" (nunca é preenchida) e sem #}
+{# chamar o nome da versão antiga (dava erro 500 quando o carro dela foi apagado). #}
+{# Os valores já chegam formatados (datas, R$, situações) por config/historico.py. #}
+
+<table id="change-history" class="table table-bordered table-striped">
+  <thead>
+    <tr>
+      <th scope="col">Quando</th>
+      {% for column in history_list_display %}
+        <th scope="col">{{ column }}</th>
+      {% endfor %}
+      <th scope="col">O que houve</th>
+      <th scope="col">Quem fez</th>
+      <th scope="col">Mudanças</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for record in page_obj %}
+      <tr>
+        <td>
+          <a href="{% url opts|admin_urlname:'simple_history' object.pk record.pk %}">{{ record.history_date|date:"d/m/Y H:i" }}</a>
+        </td>
+        {% for column in history_list_display %}
+          <td>{{ record|getattribute:column }}</td>
+        {% endfor %}
+        <td>{% if record.history_type == "+" %}Criado{% elif record.history_type == "~" %}Alterado{% else %}Apagado{% endif %}</td>
+        <td>
+          {% if record.history_user %}
+            {% url admin_user_view record.history_user_id as admin_user_url %}
+            {% if admin_user_url %}
+              <a href="{{ admin_user_url }}">{{ record.history_user }}</a>
+            {% else %}
+              {{ record.history_user }}
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% if record.history_delta_changes %}
+            <ul>
+              {% for change in record.history_delta_changes %}
+                <li>
+                  <strong>{{ change.field }}:</strong>
+                  {{ change.old }}&nbsp;&rarr;&nbsp;&nbsp;{{ change.new }}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p class="paginator" style="border-top: 0">
+  {% if pagination_required %}
+    {% for i in page_range %}
+      {% if i == page_obj.paginator.ELLIPSIS %}
+        {{ page_obj.paginator.ELLIPSIS }}
+      {% elif i == page_obj.number %}
+        <span class="this-page">{{ i }}</span>
+      {% else %}
+        <a href="?{{ page_var }}={{ i }}" {% if i == page_obj.paginator.num_pages %} class="end" {% endif %}>{{ i }}</a>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  {{ page_obj.paginator.count }} registro{{ page_obj.paginator.count|pluralize }}
+</p>
