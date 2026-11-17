@@ -308,7 +308,7 @@ def recebiveis_em_aberto(hoje=None):
     """Saldo devedor por cliente (inclui cobrança judicial).
 
     Mesma conta do "Quem deve": vencido = vence até hoje (inclusive); o resto
-    é "a vencer". O crédito guardado do cliente (sobra de pagamento) aparece ao
+    é "a vencer". O crédito do cliente (sobra de pagamento) aparece ao
     lado, com o líquido — quem tem crédito não deve o total cheio.
     """
     hoje = hoje or timezone.localdate()

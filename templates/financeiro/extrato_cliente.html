@@ -34,11 +34,11 @@
     {% if credito > 0 and devido_total > 0 %}<a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}&usar_credito=1" class="text-xs underline">usar nas cobranças</a>{% endif %}</div>
   {% if caucao_link %}
   <a href="{% url 'financeiro:caucao_detalhe' caucao_link.pk %}" class="block rounded-lg bg-white p-3 shadow hover:bg-gray-50" data-link-caucao>
-    <div class="text-xs text-gray-500">Caução guardada</div>
+    <div class="text-xs text-gray-500">Caução retida</div>
     <div class="whitespace-nowrap text-xl font-black">{{ saldo_caucao|brl }}</div>
     <div class="text-xs underline">ver a caução →</div></a>
   {% else %}
-  <div class="rounded-lg bg-white p-3 shadow"><div class="text-xs text-gray-500">Caução guardada</div>
+  <div class="rounded-lg bg-white p-3 shadow"><div class="text-xs text-gray-500">Caução retida</div>
     <div class="whitespace-nowrap text-xl font-black">{{ saldo_caucao|brl }}</div></div>
   {% endif %}
 </div>

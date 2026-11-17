@@ -477,6 +477,7 @@ def test_nd_nova_vencimento_antes_da_emissao_mostra_erro(usuario_logado, cliente
         {
             "cliente": cliente.pk,
             "data_emissao": "2026-10-21",
+            "confirmar_emissao_antiga": "1",  # a data fixa fica antiga com o tempo
             "vencimento": "2026-10-20",
             "item_descricao": ["X"],
             "item_valor": ["10,00"],

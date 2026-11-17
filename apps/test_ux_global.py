@@ -40,15 +40,15 @@ def test_barra_de_atalhos_no_celular(usuario_logado):
     ):
         assert f'href="{reverse(destino)}"' in barra
     assert "Pagamento recebido" in barra
-    # só no celular/tablet, fixa embaixo, e fora da impressão
-    assert re.search(r'<nav class="[^"]*\bfixed\b[^"]*\bbottom-0\b[^"]*\bxl:hidden\b', html)
+    # só no celular/tablet (abaixo de 1024px), fixa embaixo, e fora da impressão
+    assert re.search(r'<nav class="[^"]*\bfixed\b[^"]*\bbottom-0\b[^"]*\blg:hidden\b', html)
     assert "print:hidden" in html[html.rindex("<nav", 0, html.index('aria-label="Atalhos"')) :]
 
 
 def test_conteudo_nao_fica_atras_da_barra(usuario_logado):
     html = usuario_logado.get("/").content.decode()
     main = re.search(r'<main [^>]*class="([^"]*)"', html).group(1)
-    assert "pb-28" in main and "xl:pb-6" in main
+    assert "pb-28" in main and "lg:pb-6" in main
 
 
 def test_sem_login_nao_tem_barra(client):

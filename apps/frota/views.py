@@ -6,7 +6,8 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MinValueValidator
-from django.db.models import Count, Q
+from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -17,9 +18,12 @@ from apps.alocacoes.models import Alocacao, TrocaTemporaria
 from apps.campos import FormularioBR, dinheiro_br, id_valido, ler_data
 from apps.formatos import milhar, numero_br
 from apps.km.forms import CampoKm, km_digitado
+from apps.km.models import RegistroKm
+from apps.manutencao.models import Manutencao
 from apps.manutencao.services import contagem_alertas_por_veiculo
 from apps.multas.models import Multa
 from apps.pessoas.widgets import ArquivoInput
+from apps.sinistros.models import Sinistro
 
 from . import alertas, crlv, desmobilizacao
 from .models import (
@@ -141,10 +145,32 @@ def hub(request):
     )
 
 
+def _quantos_do_carro(modelo):
+    """Quantos registros do modelo o carro tem — subconsulta na própria busca do carro."""
+    return Coalesce(
+        Subquery(
+            modelo.objects.filter(veiculo=OuterRef("pk"))
+            .order_by()
+            .values("veiculo")
+            .annotate(n=Count("pk"))
+            .values("n")
+        ),
+        0,
+    )
+
+
 def detalhe(request, veiculo_id):
     """Página-hub de um veículo — cadastro, situação atual e atalhos (docs.md §4.1)."""
     veiculo = get_object_or_404(
-        Veiculo.objects.select_related("categoria").prefetch_related("pagamentos_ipva"),
+        Veiculo.objects.select_related("categoria")
+        .prefetch_related("pagamentos_ipva")
+        # as contagens dos atalhos vêm junto com o carro (uma consulta, não quatro)
+        .annotate(
+            n_km=_quantos_do_carro(RegistroKm),
+            n_manutencoes=_quantos_do_carro(Manutencao),
+            n_multas=_quantos_do_carro(Multa),
+            n_sinistros=_quantos_do_carro(Sinistro),
+        ),
         pk=veiculo_id,
     )
     contexto = {
@@ -156,10 +182,10 @@ def detalhe(request, veiculo_id):
         )
         .distinct()
         .count(),
-        "total_km": veiculo.registros_km.count(),
-        "total_manutencoes": veiculo.manutencoes.count(),
-        "total_multas": veiculo.multas.count(),
-        "total_sinistros": veiculo.sinistros.count(),
+        "total_km": veiculo.n_km,
+        "total_manutencoes": veiculo.n_manutencoes,
+        "total_multas": veiculo.n_multas,
+        "total_sinistros": veiculo.n_sinistros,
     }
     # uma consulta só para o selo, a faixa de pendências e o bloqueio da venda
     contexto["em_oficina"] = em_oficina = desmobilizacao.oficina_impede_venda(veiculo)
@@ -474,9 +500,6 @@ def _onde_corrigir_km(veiculo):
     Corrigir a leitura de KM ou a manutenção baixa o KM atual sozinho
     (km.correcao.ajustar_km_atual).
     """
-    from apps.km.models import RegistroKm
-    from apps.manutencao.models import Manutencao
-
     km = veiculo.km_atual
     leitura = RegistroKm.objects.filter(veiculo=veiculo, km=km).order_by("-mes_referencia").first()
     if leitura:
@@ -764,9 +787,12 @@ def fornecedores(request):
 
 def ranking(request):
     """Ranking de desmobilização — candidatos à venda primeiro (docs.md §4.9)."""
-    fichas, media = desmobilizacao.ranking_da_frota()
-    vendidos = Veiculo.objects.filter(status=Veiculo.Status.VENDIDO).order_by("-data_venda")
-    fichas_vendidos = desmobilizacao.montar_fichas_em_lote(vendidos)
+    # ativos e vendidos num lote só: as mesmas somas da ficha uma vez, não duas
+    ativos = list(desmobilizacao.frota_de_locacao())
+    vendidos = list(Veiculo.objects.filter(status=Veiculo.Status.VENDIDO).order_by("-data_venda"))
+    lote = desmobilizacao.montar_fichas_em_lote(ativos + vendidos)
+    fichas, media = desmobilizacao.avaliar_e_ordenar(lote[: len(ativos)])
+    fichas_vendidos = lote[len(ativos) :]
     return render(
         request,
         "frota/ranking.html",
@@ -820,8 +846,8 @@ def vender(request, veiculo_id):
             )
             return redirect("frota:ficha", veiculo.pk)
         except (ValidationError, KeyError, InvalidOperation, ValueError) as erro:
-            # registrar_venda pode ter preenchido os campos da venda no objeto antes
-            # de recusar: sem isto a ficha abaixo mostraria um "resultado final" falso
+            # o carro pode ter mudado desde que a tela abriu (vendido em outra aba,
+            # KM novo): a tela e a ficha abaixo mostram o que está gravado agora
             veiculo.refresh_from_db()
             mensagens = getattr(
                 erro,

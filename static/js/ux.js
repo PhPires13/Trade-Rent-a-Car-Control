@@ -318,11 +318,23 @@
   const ALVOS = "main a[href], main button, main summary, main select, main input:not([type=hidden]), main textarea, main label";
   const META_TOQUE = 22; // metade dos 44px
 
+  // Dentro de um <details> fechado só o próprio resumo aparece. O resto continua com
+  // caixas (o Chrome só o esconde com content-visibility) e, sem este filtro, a lista
+  // escondida "Sem registro" encurtava a camada de toque dos links visíveis por cima dela.
+  function escondidoEmDetailsFechado(el) {
+    for (let d = el.closest("details:not([open])"); d; d = d.parentElement && d.parentElement.closest("details:not([open])")) {
+      const resumo = d.querySelector(":scope > summary");
+      if (!resumo || !resumo.contains(el)) return true;
+    }
+    return false;
+  }
+
   function limitarAlvosDeToque() {
     if (!window.matchMedia("(max-width: 639px)").matches) return;
     const alvos = [];
     document.querySelectorAll(ALVOS).forEach(function (el) {
       if (!el.getClientRects().length) return; // escondido
+      if (escondidoEmDetailsFechado(el)) return;
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) return;
       alvos.push({ el: el, r: r, esticado: el.matches(LINK_ESTICADO) });

@@ -53,6 +53,7 @@ class VinculoLimitado:
     fim: date | None  # término/devolução, se já aconteceu
     km_saida: int | None  # odômetro registrado na saída, se houver
     termos: TermosKm | None = None  # None = termos atuais da alocação
+    pelo_substituto: bool = False  # True: o vínculo é a troca temporária, não o contrato
 
     @property
     def franquia_km_mensal(self):
@@ -142,6 +143,7 @@ def _vinculos_limitados_no_periodo(veiculo, inicio_busca, data_leitura, momentos
                 km_entrega=troca.km_retirada,
                 fim=troca.data_devolucao,
                 km_saida=troca.km_devolucao,
+                pelo_substituto=True,
             )
         )
     limitados = []
@@ -164,6 +166,19 @@ def _ciclo_mensal_completo(registro):
     return anterior is not None and anterior.mes_referencia == mes_anterior(registro.mes_referencia)
 
 
+def _dias_com_substituto(alocacao, inicio, fim):
+    """Dias entre `inicio` e `fim` em que o cliente estava com um carro substituto."""
+    trocas = (
+        TrocaTemporaria.objects.filter(alocacao=alocacao, data_retirada__lt=fim)
+        .filter(Q(data_devolucao__isnull=True) | Q(data_devolucao__gt=inicio))
+        .values_list("data_retirada", "data_devolucao")
+    )
+    return sum(
+        max((min(devolucao or fim, fim) - max(retirada, inicio)).days, 0)
+        for retirada, devolucao in trocas
+    )
+
+
 def calcular_excedente(registro, vinculo):
     """(km excedente, franquia do período) — só o uso do próprio cliente conta.
 
@@ -172,7 +187,10 @@ def calcular_excedente(registro, vinculo):
     primeira leitura de um carro comprado usado). Teto: o odômetro da saída,
     quando o vínculo já terminou. Mês completo com o cliente usa a franquia
     cheia (D22); entrega, devolução, troca ou mês faltando rateiam a franquia
-    pelos dias em que o cliente de fato ficou com o carro (dias/30).
+    pelos dias em que o cliente de fato ficou com o carro (dias/30). Dias em
+    que o cliente estava com um substituto saem da franquia do carro principal:
+    o substituto já ganha a franquia desses dias (docs.md §4.8, "troca no meio
+    do mês consolida os trechos") — senão eles contariam duas vezes.
     """
     franquia_mensal = vinculo.franquia_km_mensal
     fim_vigencia = vinculo.fim or registro.data_leitura
@@ -183,7 +201,9 @@ def calcular_excedente(registro, vinculo):
     data_base = (
         registro.data_leitura - timedelta(days=registro.dias) if registro.dias else vinculo.inicio
     )
-    dias = (min(registro.data_leitura, fim_vigencia) - max(data_base, vinculo.inicio)).days
+    inicio = max(data_base, vinculo.inicio)
+    fim = min(registro.data_leitura, fim_vigencia)
+    dias = (fim - inicio).days
     if dias <= 0:
         return 0, franquia_mensal
     periodo_inteiro = vinculo.inicio <= data_base and fim_vigencia >= registro.data_leitura
@@ -191,6 +211,18 @@ def calcular_excedente(registro, vinculo):
         franquia = franquia_mensal
     else:
         franquia = round(franquia_mensal * dias / 30)
+    if not vinculo.pelo_substituto:
+        com_substituto = _dias_com_substituto(vinculo.alocacao, inicio, fim)
+        if com_substituto >= dias:
+            return 0, 0  # o período todo com o substituto: o km deste carro não é do cliente
+        # Cede o que o substituto ganha por esses dias (franquia × dias/30): o mês
+        # completo com troca soma a franquia cheia, também em fevereiro (D22). Nunca
+        # fica abaixo da proporção dos dias do cliente neste carro — o km rodado
+        # pela oficina não se separa da leitura e não é do cliente.
+        franquia = max(
+            franquia - round(franquia_mensal * com_substituto / 30),
+            round(franquia * (dias - com_substituto) / dias),
+        )
     return max(topo - base - franquia, 0), franquia
 
 
@@ -273,6 +305,21 @@ def gerar_cobranca_excedente(registro, hoje=None):
     return None
 
 
+def _carros_com_contrato_limitado():
+    """Filtro das leituras de carro que já teve contrato limitado (hoje ou no
+    histórico, D30) — direto ou como substituto. Leitura de carro que nunca teve
+    um não gera excedente: a rotina nem olha (eram ~9 consultas por leitura)."""
+    limitado = Alocacao.LimiteKm.LIMITADO
+    ja_limitadas = Alocacao.objects.filter(
+        Q(limite_km=limitado) | Q(pk__in=Alocacao.history.filter(limite_km=limitado).values("id"))
+    )
+    return Q(veiculo__in=ja_limitadas.values("veiculo_id")) | Q(
+        veiculo__in=TrocaTemporaria.objects.filter(alocacao__in=ja_limitadas).values(
+            "veiculo_substituto_id"
+        )
+    )
+
+
 def gerar_excedentes_pendentes(hoje=None):
     """Varre leituras recentes e cria o excedente que ainda faltar (rotina diária).
 
@@ -287,15 +334,16 @@ def gerar_excedentes_pendentes(hoje=None):
         RegistroKm.objects.filter(
             data_leitura__gte=hoje - timedelta(days=DIAS_RETROATIVOS_MAXIMOS),
         )
+        .filter(_carros_com_contrato_limitado())
         .select_related("veiculo")
         .order_by("data_leitura")
     )
     falhas = []
     for registro in recentes:
-        # uma leitura com dado ruim não impede o excedente das outras
+        # uma leitura com dado ruim não impede o excedente das outras (o atomic de
+        # gerar_cobrancas_excedente desfaz só a leitura que falhou)
         try:
-            with transaction.atomic():
-                criadas.extend(gerar_cobrancas_excedente(registro, hoje=hoje))
+            criadas.extend(gerar_cobrancas_excedente(registro, hoje=hoje))
         except Exception:  # noqa: BLE001
             logger.exception("Excedente de km: falhou na leitura %s.", registro.pk)
             falhas.append(f"leitura {registro.pk} ({registro.veiculo.placa})")

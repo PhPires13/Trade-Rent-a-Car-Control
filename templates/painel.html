@@ -33,7 +33,7 @@
           <a href="{% url 'financeiro:extrato_cliente' d.cliente.pk %}" class="font-semibold underline decoration-marca-amarelo decoration-2">{{ d.cliente.nome }}</a>
           <span class="whitespace-nowrap font-black {% if d.atrasado %}text-red-700{% endif %}">{{ d.total|brl }}</span>
         </div>
-        <div class="text-sm">{% include "financeiro/_quando_deve.html" %}{% if d.placas %} <span class="text-xs text-gray-500">· {{ d.placas|join:", " }}</span>{% endif %}</div>
+        <div class="text-sm">{% include "financeiro/_quando_deve.html" %}{% if d.placas %} <span class="text-xs text-gray-500">{# com crédito a placa abre linha nova: o "·" ficava solto no começo #}{% if not d.credito %}· {% endif %}{{ d.placas|join:", " }}</span>{% endif %}</div>
       </div>
       <div class="grid shrink-0 grid-cols-2 gap-2 sm:flex">
         <a href="{% url 'financeiro:receber' %}?cliente={{ d.cliente.pk }}"
@@ -92,6 +92,21 @@
     {% if nds_abertas %}<div class="mt-1 text-xs"><a href="{% url 'financeiro:nds' %}" class="alvo-toque underline">{{ nds_abertas }} nota{{ nds_abertas|pluralize }} de débito em aberto</a></div>{% endif %}
   </div>
 </div>
+
+{% if caucoes_a_repor %}
+{# a caução pagou cobranças com o carro ainda com o cliente: a garantia ficou menor que a combinada #}
+<div class="mb-8 rounded-lg border-l-4 border-amber-500 bg-white p-5 shadow" data-caucao-a-repor>
+  <h2 class="mb-3 font-semibold">Caução abaixo do combinado (usada para pagar cobranças)</h2>
+  <ul class="space-y-1 text-sm">
+    {% for caucao in caucoes_a_repor %}
+    <li><a href="{% url 'financeiro:caucao_detalhe' caucao.pk %}" class="-mx-2 block min-h-[44px] rounded px-2 py-2 hover:bg-gray-50">
+      <span class="font-semibold underline">{{ caucao.alocacao.cliente.nome }}</span> <span class="text-gray-500">({{ caucao.alocacao.veiculo.placa }})</span>
+      — <span class="font-semibold text-amber-700">falta repor {{ caucao.a_repor|brl }}</span>
+    </a></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 
 <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Frota</h2>
 <div class="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">

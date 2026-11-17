@@ -26,9 +26,9 @@
 {% if cliente %}
 {# total das caixas marcadas, ao vivo, e no texto da confirmação #}
 <form method="post" class="rounded-lg bg-white p-6 shadow"
-      x-data="{ total: {{ total_inicial|stringformat:'s' }}, soma() { this.total = [...this.$el.querySelectorAll('input[name=multa]:checked')].reduce((t, c) => t + Number(c.dataset.valor), 0) }, reais(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) } }"
+      x-data="{ total: {{ total_inicial|stringformat:'s' }}, marcadas: {{ multas|length }}, soma() { const caixas = [...this.$el.querySelectorAll('input[name=multa]:checked')]; this.marcadas = caixas.length; this.total = caixas.reduce((t, c) => t + Number(c.dataset.valor), 0) }, reais(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) } }"
       @change="soma()"
-      @submit="if (!confirm('Emitir a ND para {{ cliente.nome|escapejs }} no total de ' + reais(total) + '? A cobrança entra no Financeiro e a numeração não pode ser reaproveitada.')) $event.preventDefault()">
+      @submit="soma(); if (!marcadas) { $event.preventDefault(); return } if (!confirm('Emitir a ND para {{ cliente.nome|escapejs }} no total de ' + reais(total) + '? A cobrança entra no Financeiro e a numeração não pode ser reaproveitada.')) $event.preventDefault()">
   {% csrf_token %}
   <input type="hidden" name="cliente" value="{{ cliente.pk }}">
   <input type="hidden" name="token" value="{{ token }}">
@@ -78,8 +78,10 @@
   </div>
   {% endif %}
   <div class="flex flex-wrap items-center gap-3">
-    <button class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95">Emitir ND</button>
+    {# nenhuma marcada: não pergunta "emitir R$ 0,00?" — trava o botão e diz o porquê #}
+    <button :disabled="!marcadas" class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">Emitir ND</button>
     <a href="{% url 'multas:lista' %}" class="px-4 py-2 text-sm text-gray-600 underline">Cancelar</a>
+    <p x-show="!marcadas" x-cloak role="status" data-aviso-sem-multa class="text-sm font-semibold text-red-700">Marque ao menos uma multa.</p>
   </div>
   {% endif %}
 </form>

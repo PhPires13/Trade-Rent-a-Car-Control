@@ -129,6 +129,9 @@ def test_nova_multa_reenviada_nao_duplica(usuario_logado, alocacao, veiculo):
     segunda = usuario_logado.post("/multas/nova/", dados, follow=True)
     assert Multa.objects.count() == 1
     assert "envio repetido foi ignorado" in segunda.content.decode()
-    # um formulário novo (outro código) grava normalmente
-    usuario_logado.post("/multas/nova/", {**dados, "token": "codigo-unico-2"})
+    # um formulário novo (outro código) grava normalmente — com outra multa: a
+    # mesma sem AIT, minutos depois, é barrada como reenvio (etapa 18c)
+    usuario_logado.post(
+        "/multas/nova/", {**dados, "token": "codigo-unico-2", "descricao": "Avançar sinal"}
+    )
     assert Multa.objects.count() == 2

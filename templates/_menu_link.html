@@ -3,7 +3,7 @@
 {# o Painel, que não tem namespace — o nome da URL da página igual a `secao`. #}
 {% url destino as u %}
 {% if estilo == "topo" %}
-<a href="{{ u }}" class="rounded px-2 py-1 hover:text-marca-amarelo {% if secao == ns or not ns and secao == nome %}bg-gray-800 text-marca-amarelo{% endif %}" {% if secao == ns or not ns and secao == nome %}aria-current="page"{% endif %}>{{ rotulo }}</a>
+<a href="{{ u }}" class="rounded px-1.5 py-1 hover:text-marca-amarelo {% if secao == ns or not ns and secao == nome %}bg-gray-800 text-marca-amarelo{% endif %}" {% if secao == ns or not ns and secao == nome %}aria-current="page"{% endif %}>{{ rotulo }}</a>
 {% else %}
 <a href="{{ u }}" class="rounded px-3 py-2 {% if secao == ns or not ns and secao == nome %}bg-gray-800 font-semibold text-marca-amarelo{% else %}hover:bg-gray-800{% endif %}">{{ rotulo }}</a>
 {% endif %}

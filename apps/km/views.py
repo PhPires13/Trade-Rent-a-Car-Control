@@ -251,10 +251,8 @@ def _detalhe_do_excedente(cobranca):
     return detalhe.split(" (", 1)[0]
 
 
-def _pagina_da_lista(request, mes, estados=None):
-    """`estados` ({veiculo.pk: {...}}) devolve a linha com o que foi digitado e o
-    aviso de KM fora do normal, quando o registro não foi gravado.
-    """
+def _leituras_do_mes(mes):
+    """Leituras do mês com cliente, selo do excedente e "desde a entrega" já anotados."""
     registros = list(
         RegistroKm.objects.filter(mes_referencia=mes)
         .select_related("veiculo", "cobranca_excedente")
@@ -273,6 +271,14 @@ def _pagina_da_lista(request, mes, estados=None):
                 cobranca.detalhe = _detalhe_do_excedente(cobranca)
         # 1ª leitura sem "KM anterior": o KM rodado sai da entrega (base do excedente)
         registro.desde_entrega = _texto_desde_a_entrega(registro, vinculo)
+    return registros
+
+
+def _pagina_da_lista(request, mes, estados=None):
+    """`estados` ({veiculo.pk: {...}}) devolve a linha com o que foi digitado e o
+    aviso de KM fora do normal, quando o registro não foi gravado.
+    """
+    registros = _leituras_do_mes(mes)
     pendentes = _anotar_maior_km(list(_pendentes_anotados(mes)), mes)
     for veiculo in pendentes:
         veiculo.estado = (estados or {}).get(veiculo.pk)
@@ -423,6 +429,8 @@ def registrar(request, veiculo_id):
                 "avisos": avisos,
                 "mes": mes_da_tela,
                 "faltam": veiculos_com_leitura_pendente(mes_da_tela).count(),
+                # "Leituras do mês" volta junto (oob): o título não fica no "(0)"
+                "registros": _leituras_do_mes(mes_da_tela),
             },
         )
     messages.success(request, f"{sucesso}.")

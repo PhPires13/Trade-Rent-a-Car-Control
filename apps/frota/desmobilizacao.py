@@ -44,17 +44,19 @@ ORIGENS_DE_REPASSE = (Cobranca.Origem.REPASSE_MANUTENCAO, Cobranca.Origem.REPASS
 # (apps/relatorios/services.py), para os dois fecharem entre si.
 
 
-def manutencoes_que_sao_despesa():
-    """Manutenções com custo real, menos o conserto pago pela cota da proteção.
+#: Conserto pago pela cota da proteção (D07). Quando a proteção é acionada, a cota
+#: paga à associação já é despesa no sinistro (franquia_valor); o conserto ligado a
+#: esse sinistro com origem "Evento da proteção" repetiria o mesmo dinheiro — só
+#: conta o que foi pago por fora (origem "Particular"). Regra única da ficha, do
+#: ranking, da média de custo/km e dos relatórios do mês.
+PAGO_PELA_COTA = Q(
+    origem_custo=Manutencao.OrigemCusto.PROTECAO, sinistro__franquia_valor__isnull=False
+)
 
-    Quando a proteção é acionada, a cota paga à associação já é despesa no
-    sinistro (franquia_valor). O conserto ligado a esse sinistro com origem
-    "Evento da proteção" repetiria o mesmo dinheiro — só conta o que foi pago
-    por fora (origem "Particular").
-    """
-    return Manutencao.objects.filter(custo_real__isnull=False).exclude(
-        origem_custo=Manutencao.OrigemCusto.PROTECAO, sinistro__franquia_valor__isnull=False
-    )
+
+def manutencoes_que_sao_despesa():
+    """Manutenções com custo real, menos o conserto pago pela cota da proteção."""
+    return Manutencao.objects.filter(custo_real__isnull=False).exclude(PAGO_PELA_COTA)
 
 
 def multas_que_sao_despesa():
@@ -196,34 +198,28 @@ def _somas_da_frota(ids, campo, **filtros):
     return _somas(Veiculo.objects.filter(pk__in=ids, **filtros), "pk", campo)
 
 
-def _janela_de_manutencoes(ids, inicio_janela):
-    """(custo, dias parado, esporádicas) dos últimos 6 meses por veículo, numa query."""
-    hoje = timezone.localdate()  # dias_parado de manutenção em aberto conta até hoje
+def _janela_de_manutencoes(ids, inicio_janela, hoje):
+    """(custo, dias parado, esporádicas) dos últimos 6 meses por veículo, numa query.
+
+    Manutenção ainda aberta conta os dias parado até ``hoje`` (o mesmo dia da ficha).
+    """
     janela = {}
-    linhas = Veiculo.objects.filter(pk__in=ids, manutencoes__data__gte=inicio_janela).values(
-        "pk",
-        "manutencoes__custo_real",
-        "manutencoes__tipo",
-        "manutencoes__data_entrada",
-        "manutencoes__data_saida",
-        "manutencoes__origem_custo",
-        "manutencoes__sinistro__franquia_valor",
+    linhas = (
+        Manutencao.objects.filter(veiculo_id__in=ids, data__gte=inicio_janela)
+        # o conserto pago pela cota já é despesa no sinistro (D07): fica fora do
+        # custo, mas os dias parado e as esporádicas contam
+        .annotate(pela_cota=ExpressionWrapper(PAGO_PELA_COTA, output_field=BooleanField()))
+        .values("veiculo_id", "custo_real", "tipo", "data_entrada", "data_saida", "pela_cota")
     )
     for linha in linhas:
-        custo, dias, esporadicas = janela.get(linha["pk"], (ZERO, 0, 0))
-        # conserto pago pela cota da proteção já é despesa no sinistro (D07):
-        # mesmo critério de manutencoes_que_sao_despesa; dias/esporádicas contam
-        pela_cota = (
-            linha["manutencoes__origem_custo"] == Manutencao.OrigemCusto.PROTECAO
-            and linha["manutencoes__sinistro__franquia_valor"] is not None
-        )
-        if not pela_cota:
-            custo += linha["manutencoes__custo_real"] or ZERO
-        entrada = linha["manutencoes__data_entrada"]
+        custo, dias, esporadicas = janela.get(linha["veiculo_id"], (ZERO, 0, 0))
+        if not linha["pela_cota"]:
+            custo += linha["custo_real"] or ZERO
+        entrada = linha["data_entrada"]
         if entrada:
-            dias += ((linha["manutencoes__data_saida"] or hoje) - entrada).days
-        esporadicas += 1 if linha["manutencoes__tipo"] == Manutencao.Tipo.ESPORADICA else 0
-        janela[linha["pk"]] = (custo, dias, esporadicas)
+            dias += ((linha["data_saida"] or hoje) - entrada).days
+        esporadicas += 1 if linha["tipo"] == Manutencao.Tipo.ESPORADICA else 0
+        janela[linha["veiculo_id"]] = (custo, dias, esporadicas)
     return janela
 
 
@@ -256,15 +252,20 @@ def montar_fichas_em_lote(veiculos, hoje=None):
     ids = [veiculo.pk for veiculo in veiculos]
 
     # cobranças do contrato: o aluguel semanal numa linha; excedente de km, encargo
-    # e outras do contrato em outra; conserto/franquia que aponte para a alocação
-    # soma nos repasses — uma query só, separada pela origem
+    # e outras do contrato em outra — uma query só, separada pela origem. Conserto e
+    # franquia ligados à manutenção/ao sinistro ficam de fora: contam no carro que
+    # teve a despesa (abaixo), mesmo apontando para o contrato de outro carro
     aluguel, extras_locacao, repasses_da_locacao = {}, {}, {}
     destinos = {
         Cobranca.Origem.ALUGUEL: aluguel,
         **dict.fromkeys(ORIGENS_DE_REPASSE, repasses_da_locacao),
     }
     for linha in (
-        AplicacaoRecebimento.objects.filter(cobranca__alocacao__veiculo_id__in=ids)
+        AplicacaoRecebimento.objects.filter(
+            cobranca__alocacao__veiculo_id__in=ids,
+            cobranca__manutencao_repassada__isnull=True,
+            cobranca__sinistro_franquia__isnull=True,
+        )
         .values("cobranca__alocacao__veiculo", "cobranca__origem")
         .annotate(total=Sum("valor"))
     ):
@@ -273,20 +274,21 @@ def montar_fichas_em_lote(veiculos, hoje=None):
         destino[chave] = destino.get(chave, ZERO) + (linha["total"] or ZERO)
     # Cobrança quitada por desconto de caução também é receita do carro (docs.md §4.3):
     # a da locação soma no aluguel (ou nos extras do contrato); repasse de manutenção
-    # e franquia (sem alocação) somam nos repasses — uma query só, separada pelo tipo
+    # e franquia somam nos repasses do carro consertado — uma query só, separada pelo tipo
     descontos_aluguel, descontos_extras, descontos_repasse = {}, {}, {}
     for linha in (
         MovimentacaoCaucao.objects.filter(tipo=MovimentacaoCaucao.Tipo.DESCONTO)
         .filter(
             Q(cobranca__alocacao__veiculo_id__in=ids)
             | Q(cobranca__manutencao_repassada__veiculo_id__in=ids)
-            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids, cobranca__alocacao__isnull=True)
+            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids)
         )
         .annotate(
+            # o carro da manutenção/do sinistro vem antes do carro do contrato
             veiculo_do_desconto=Coalesce(
-                "cobranca__alocacao__veiculo",
                 "cobranca__manutencao_repassada__veiculo",
                 "cobranca__sinistro_franquia__veiculo",
+                "cobranca__alocacao__veiculo",
             ),
             de_locacao=ExpressionWrapper(
                 Q(cobranca__alocacao__isnull=False), output_field=BooleanField()
@@ -303,14 +305,13 @@ def montar_fichas_em_lote(veiculos, hoje=None):
             destino = descontos_extras
         chave = linha["veiculo_do_desconto"]
         destino[chave] = destino.get(chave, ZERO) + (linha["total"] or ZERO)
-    # repasses de manutenção e a franquia do sinistro cobrada do cliente (D09) —
-    # sem alocação na cobrança (a com alocação já entrou acima), para anular a
-    # franquia que já é despesa do carro; uma query só para as duas origens
+    # repasses de manutenção e a franquia do sinistro cobrada do cliente (D09) — no
+    # carro da manutenção/do sinistro, com ou sem alocação na cobrança, para anular
+    # a despesa desse carro; uma query só para as duas origens
     repasses = _somas(
         AplicacaoRecebimento.objects.filter(
             Q(cobranca__manutencao_repassada__veiculo_id__in=ids)
-            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids),
-            cobranca__alocacao__isnull=True,
+            | Q(cobranca__sinistro_franquia__veiculo_id__in=ids)
         ).annotate(
             veiculo_do_repasse=Coalesce(
                 "cobranca__manutencao_repassada__veiculo", "cobranca__sinistro_franquia__veiculo"
@@ -330,7 +331,7 @@ def montar_fichas_em_lote(veiculos, hoje=None):
     franquias = _somas_da_frota(ids, "sinistros__franquia_valor")
     multas_empresa = _somas(multas_que_sao_despesa().filter(veiculo_id__in=ids), "veiculo", "valor")
     ipvas = _somas(ipvas_pagos().filter(veiculo_id__in=ids), "veiculo", "valor")
-    janela = _janela_de_manutencoes(ids, inicio_janela)
+    janela = _janela_de_manutencoes(ids, inicio_janela, hoje)
     km_rodado = _km_rodado_na_janela(ids, inicio_janela)
 
     for ficha in fichas:
@@ -416,7 +417,7 @@ def media_custo_km_frota(hoje=None):
     inicio_janela = hoje - timedelta(days=JANELA_INDICADORES_DIAS)
     ids = frota_de_locacao().values_list("pk", flat=True)
     km_rodado = _km_rodado_na_janela(ids, inicio_janela)
-    # sem o conserto pago pela cota da proteção (D07), como _janela_de_manutencoes
+    # sem o conserto pago pela cota da proteção (D07): PAGO_PELA_COTA, como o ranking
     custos_manutencao = _somas(
         manutencoes_que_sao_despesa().filter(
             veiculo_id__in=list(km_rodado), data__gte=inicio_janela
@@ -432,7 +433,14 @@ def media_custo_km_frota(hoje=None):
 
 def ranking_da_frota(hoje=None):
     """Fichas avaliadas da frota de locação, piores primeiro (docs.md §4.9)."""
-    fichas = montar_fichas_em_lote(frota_de_locacao(), hoje)
+    return avaliar_e_ordenar(montar_fichas_em_lote(frota_de_locacao(), hoje))
+
+
+def avaliar_e_ordenar(fichas):
+    """(fichas avaliadas, piores primeiro; média de custo/km) — fichas já montadas.
+
+    A tela "Quando vender" monta ativos e vendidos num lote só e avalia só os ativos.
+    """
     custos = [f.custo_por_km_6m for f in fichas if f.custo_por_km_6m is not None]
     media = sum(custos, ZERO) / len(custos) if custos else None
     for ficha in fichas:
@@ -551,8 +559,16 @@ def _validar_data_e_km_da_venda(veiculo, data, km, hoje=None, confirmar_km=False
 
 
 @transaction.atomic
-def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None, confirmar_km=False):
-    """Vende o veículo — só sem alocação ativa, troca aberta nem oficina (docs.md §4.9)."""
+def registrar_venda(
+    veiculo_da_tela, data, valor, comprador="", custos=None, km=None, confirmar_km=False
+):
+    """Vende o veículo — só sem alocação ativa, troca aberta nem oficina (docs.md §4.9).
+
+    Confere e grava a linha do banco travada, não a cópia que a tela carregou: dois
+    toques ou duas abas não vendem duas vezes, e um KM gravado nesse meio-tempo não
+    volta para trás. A cópia de quem chamou só muda se a venda for aceita.
+    """
+    veiculo = Veiculo.objects.select_for_update().get(pk=veiculo_da_tela.pk)
     if veiculo.alocacoes.filter(status=Alocacao.Status.ATIVA).exists():
         raise ValidationError("Encerre a alocação ativa antes de vender o veículo.")
     if TrocaTemporaria.objects.filter(
@@ -568,7 +584,6 @@ def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None, co
     na_oficina = oficina_impede_venda(veiculo)
     if na_oficina:
         raise ValidationError(texto_oficina_impede_venda(na_oficina))
-    # antes de mexer no objeto: a tela reaproveita o veículo para remontar a ficha
     _validar_data_e_km_da_venda(veiculo, data, km, confirmar_km=confirmar_km)
     # a venda não se desfaz: valor zero/negativo estragaria o resultado final do carro
     erros_valor = []
@@ -587,5 +602,8 @@ def registrar_venda(veiculo, data, valor, comprador="", custos=None, km=None, co
     if km and km > veiculo.km_atual:
         veiculo.km_atual = km
     veiculo.status = Veiculo.Status.VENDIDO
-    veiculo.save()
+    gravados = [*CAMPOS_DA_VENDA, "km_atual", "status"]
+    veiculo.save(update_fields=gravados)
+    for campo in gravados:
+        setattr(veiculo_da_tela, campo, getattr(veiculo, campo))
     return veiculo

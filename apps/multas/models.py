@@ -1,11 +1,31 @@
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Q
 from simple_history.models import HistoricalRecords
 
 from apps.frota.models import Veiculo
 from apps.pessoas.models import Cliente, CondutorAutorizado
 
 from .fields import CampoCriptografado
+
+#: mensagem do valor negativo — a mesma das telas
+MSG_NEGATIVO = "O valor não pode ser negativo."
+#: no /admin o erro aparece no próprio campo (a trava do banco daria um aviso solto)
+SEM_NEGATIVO = MinValueValidator(0, message=MSG_NEGATIVO)
+
+
+def trava_sem_negativo(campo, nome):
+    """Trava no banco: dinheiro negativo não grava por caminho nenhum (Etapa 15).
+
+    As telas já recusam; o /admin e um script não passavam por elas e a multa
+    negativa virava uma ND e uma cobrança negativas. Vazio continua valendo.
+    """
+    return models.CheckConstraint(
+        condition=Q(**{f"{campo}__isnull": True}) | Q(**{f"{campo}__gte": 0}),
+        name=nome,
+        violation_error_message=MSG_NEGATIVO,
+    )
 
 
 def placa_ou_aviso(registro):
@@ -139,6 +159,7 @@ class Multa(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
+        validators=[SEM_NEGATIVO],
         help_text="Vazio quando convertida em advertência",
     )
     pontos = models.PositiveSmallIntegerField("pontos na CNH", null=True, blank=True)
@@ -197,6 +218,7 @@ class Multa(models.Model):
     class Meta:
         verbose_name = "multa"
         ordering = ["-data_infracao"]
+        constraints = [trava_sem_negativo("valor", "multa_valor_nao_negativo")]
 
     def __str__(self):
         rotulo = self.descricao or self.codigo
@@ -214,7 +236,17 @@ class Multa(models.Model):
         ):
             # infração de antes da compra do carro: é do dono anterior (docs.md §4.9)
             self.responsavel = self.Responsavel.VENDEDOR
-        if self.cliente_id is None and self.veiculo_id and self.data_infracao:
+        update_fields = kwargs.get("update_fields")
+        if (
+            self.cliente_id is None
+            and self.veiculo_id
+            and self.data_infracao
+            # a NIC fica com o cliente da multa original (ou sem): quem está com o
+            # carro hoje não tem relação com a infração antiga
+            and self.multa_origem_nic_id is None
+            # salvar só outros campos não grava o cliente: não há o que buscar
+            and (update_fields is None or "cliente" in update_fields)
+        ):
             # carro parado durante uma troca: o cliente dirigia o substituto
             from .services import cliente_dirigindo
 

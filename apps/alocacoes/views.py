@@ -16,7 +16,7 @@ from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
 from apps.campos import FormularioBR, exibir_dinheiro, id_valido, ler_data
 from apps.financeiro.models import Caucao
-from apps.financeiro.services import gerar_cobrancas_semanais
+from apps.financeiro.services import FalhaEmAlguns, gerar_cobrancas_semanais
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
@@ -25,9 +25,9 @@ from apps.manutencao.services import manutencoes_em_aberto, oficina_por_veiculo
 from apps.pessoas.models import Cliente
 
 from . import checklist
-from .entrega import situacao_da_devolucao
+from .entrega import passos_da_entrega, situacao_da_devolucao
 from .km_aviso import base_da_vistoria, suspeita_de_km
-from .models import KM_MAXIMO, Alocacao, TrocaTemporaria, Vistoria
+from .models import ALOCACAO_JA_ENCERRADA, KM_MAXIMO, Alocacao, TrocaTemporaria, Vistoria
 from .services import linha_do_tempo
 
 
@@ -114,6 +114,21 @@ def _km_com_milhar(form, nome):
     )
     novo.validators = list(antigo.validators)
     form.fields[nome] = novo
+
+
+#: Valor com centavos demais ("650,00650" — o leigo digitou depois do valor já
+#: preenchido): a mensagem diz o que fazer, em vez do "Certifique-se…" do Django.
+MENSAGENS_DE_DINHEIRO = {
+    "max_decimal_places": "Confira o valor — use só 2 casas depois da vírgula (ex.: 650,00).",
+    "max_digits": "Confira o valor — está grande demais.",
+    "max_whole_digits": "Confira o valor — está grande demais.",
+}
+
+
+def _mensagens_de_dinheiro(form):
+    for campo in form.fields.values():
+        if isinstance(campo, forms.DecimalField):
+            campo.error_messages = {**campo.error_messages, **MENSAGENS_DE_DINHEIRO}
 
 
 #: Franquia mensal abaixo disso é quase sempre "3.000" lido como 3 (ou dígito faltando).
@@ -203,6 +218,7 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         hoje = timezone.localdate()
+        _mensagens_de_dinheiro(self)
         self.fields["data_inicio"].widget.attrs["max"] = hoje.isoformat()
         _km_com_milhar(self, "km_entrega")
         _km_com_milhar(self, "franquia_km_mensal")
@@ -350,7 +366,7 @@ class AlocacaoForm(FormularioBR, forms.ModelForm):
                 f"Este contrato começou em {inicio:%d/%m/%Y}, há mais de uma semana. "
                 "Diga a partir de que dia o sistema deve cobrar o aluguel — as semanas "
                 "antes disso não serão lançadas. Para cobrar tudo desde o início, "
-                "repita aqui a data de início.",
+                "toque em “Cobrar desde o início” (ou repita aqui a data de início).",
             )
         cobrar = dados.get("cobrar_a_partir_de")
         # a data de início nunca é futura (Alocacao.clean): a conta parte de hoje,
@@ -400,6 +416,7 @@ class AlocacaoEdicaoForm(FormularioBR, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        _mensagens_de_dinheiro(self)
         _km_com_milhar(self, "franquia_km_mensal")
         self.fields[
             "valor_semanal"
@@ -465,6 +482,7 @@ class TrocaForm(FormularioBR, forms.ModelForm):
 
     def __init__(self, *args, alocacao=None, **kwargs):
         super().__init__(*args, **kwargs)
+        _mensagens_de_dinheiro(self)
         campo = self.fields["veiculo_substituto"]
         campo.queryset = Veiculo.objects.filter(
             status=Veiculo.Status.DISPONIVEL, uso=Veiculo.Uso.LOCACAO
@@ -909,7 +927,17 @@ def nova(request):
                 # o cartão "Próximos passos" mostra o valor e o botão de receber na hora.
                 # Só desta alocação: um contrato com dado ruim em outro carro não
                 # pode barrar o cadastro (a rotina diária cuida da frota).
-                gerar_cobrancas_semanais(alocacao=alocacao)
+                try:
+                    gerar_cobrancas_semanais(alocacao=alocacao)
+                except FalhaEmAlguns:
+                    # o carro já saiu: a alocação fica, a semana fica para a rotina
+                    # da noite (o erro já foi para o log) — sem erro 500 na tela
+                    messages.warning(
+                        request,
+                        "Atenção: a alocação foi registrada, mas a cobrança da 1ª semana "
+                        "não foi lançada agora. O sistema tenta de novo esta noite — "
+                        "confira amanhã na ficha do cliente e, se não aparecer, peça ajuda.",
+                    )
         except _FormularioComErro:
             pass
         except IntegrityError:
@@ -963,11 +991,11 @@ def _depois_de_alocar(request, alocacao):
             request,
             f"Atenção: a CNH de {cliente.nome} está vencida desde {cliente.cnh_validade:%d/%m/%Y}.",
         )
-    messages.success(
-        request,
-        f"Veículo {alocacao.veiculo.placa} alocado a {cliente.nome}. "
-        "Siga os próximos passos da entrega logo abaixo.",
-    )
+    texto = f"Veículo {alocacao.veiculo.placa} alocado a {cliente.nome}."
+    if passos_da_entrega(alocacao) is not None:
+        # só aponta para o cartão quando ele aparece (entrega lançada com atraso não tem)
+        texto += " Siga os próximos passos da entrega logo abaixo."
+    messages.success(request, texto)
     return redirect("pessoas:detalhe", cliente.pk)
 
 
@@ -988,24 +1016,43 @@ def editar(request, alocacao_id):
     )
     if alocacao.status != Alocacao.Status.ATIVA:
         # Contrato encerrado é registro histórico — não se altera.
-        messages.error(request, "Alocação encerrada não pode ser editada.")
+        messages.error(request, f"{ALOCACAO_JA_ENCERRADA} Não dá mais para editar.")
         return redirect("alocacoes:lista")
     form = AlocacaoEdicaoForm(request.POST or None, instance=alocacao)
     if request.method == "POST" and form.is_valid():
-        form.save()  # com caução, o signal do financeiro abre o registro (C01)
-        if not alocacao.caucao_valor:
-            # caução tirada do contrato: some o registro que nunca recebeu dinheiro
-            Caucao.objects.filter(alocacao=alocacao, movimentacoes__isnull=True).delete()
-        if "valor_semanal" in form.changed_data:
-            # valor corrigido: a semana em aberto (sem pagamento) passa ao valor novo
-            from apps.financeiro.services import refazer_alugueis_em_aberto
+        # tudo ou nada: valor novo gravado sem a semana em aberto refeita ficava
+        # assim para sempre (o 2º envio não refaz, o valor já não "mudou")
+        refeitas = []
+        with transaction.atomic():
+            # mesma ordem de travas do encerrar (cliente → alocação): duas abas ao
+            # mesmo tempo esperam uma pela outra em vez de travar para sempre, e o
+            # contrato encerrado no meio não é reaberto pelo save desta tela
+            Cliente.objects.select_for_update().filter(pk=alocacao.cliente_id).first()
+            ainda_ativa = (
+                Alocacao.objects.select_for_update(no_key=True)
+                .filter(pk=alocacao.pk, status=Alocacao.Status.ATIVA)
+                .values_list("pk", flat=True)
+                .first()
+            )
+            if ainda_ativa:
+                form.save()  # com caução, o signal do financeiro abre o registro (C01)
+                if not alocacao.caucao_valor:
+                    # caução tirada do contrato: some o registro que nunca recebeu dinheiro
+                    Caucao.objects.filter(alocacao=alocacao, movimentacoes__isnull=True).delete()
+                if "valor_semanal" in form.changed_data:
+                    # valor corrigido: a semana em aberto (sem pagamento) passa ao valor novo
+                    from apps.financeiro.services import refazer_alugueis_em_aberto
 
-            for cobranca in refazer_alugueis_em_aberto(alocacao) or []:
-                messages.info(
-                    request,
-                    f"A semana de {cobranca.vencimento:%d/%m} em aberto foi refeita: "
-                    f"{brl(cobranca.valor)}.",
-                )
+                    refeitas = refazer_alugueis_em_aberto(alocacao) or []
+        if not ainda_ativa:
+            messages.error(request, f"{ALOCACAO_JA_ENCERRADA} Não dá mais para editar.")
+            return redirect("alocacoes:lista")
+        for cobranca in refeitas:
+            messages.info(
+                request,
+                f"A semana de {cobranca.vencimento:%d/%m} em aberto foi refeita: "
+                f"{brl(cobranca.valor)}.",
+            )
         messages.success(
             request,
             f"Alocação de {alocacao.veiculo.placa} → {alocacao.cliente.nome} atualizada.",
@@ -1030,7 +1077,7 @@ def encerrar(request, alocacao_id):
         pk=alocacao_id,
     )
     if alocacao.status != Alocacao.Status.ATIVA:
-        messages.warning(request, "Esta alocação já está encerrada.")
+        messages.warning(request, ALOCACAO_JA_ENCERRADA)
         return redirect("alocacoes:lista")
     aviso_km = None
     retirada_errada = corrigir_retirada = False
@@ -1204,7 +1251,7 @@ def troca_nova(request, alocacao_id):
     )
     # clique duplo, Voltar ou duas abas: a troca já foi feita ou a locação acabou
     if alocacao.status != Alocacao.Status.ATIVA:
-        messages.info(request, "Esta locação já foi encerrada — não dá mais para trocar o carro.")
+        messages.info(request, f"{ALOCACAO_JA_ENCERRADA} Não dá mais para trocar o carro.")
         return _ficha(alocacao)
     em_andamento = alocacao.troca_ativa
     if em_andamento:
@@ -1214,9 +1261,12 @@ def troca_nova(request, alocacao_id):
             f"{em_andamento.veiculo_substituto.placa}. Devolva-o antes de trocar de novo.",
         )
         return _ficha(alocacao)
-    form = TrocaForm(
-        request.POST or None, initial={"data_retirada": timezone.localdate()}, alocacao=alocacao
-    )
+    inicial = {"data_retirada": timezone.localdate()}
+    # link da manutenção / ficha do carro já diz o motivo (a pessoa ainda pode mudar)
+    motivo = request.GET.get("motivo", "").strip()
+    if motivo:
+        inicial["motivo"] = motivo[: TrocaTemporaria._meta.get_field("motivo").max_length]
+    form = TrocaForm(request.POST or None, initial=inicial, alocacao=alocacao)
     if request.method == "POST" and form.is_valid():
         troca = form.save(commit=False)
         troca.alocacao = alocacao
@@ -1487,6 +1537,8 @@ def vistoria_nova(request, alocacao_id):
         "alocacoes/vistoria_form.html",
         {
             "alocacao": alocacao,
+            # título com o carro que vem marcado: na troca, o substituto (não o principal)
+            "veiculo_vistoria": vigente,
             "form": form,
             "token": uuid4().hex,
             "km_sugerido": not form.is_bound,

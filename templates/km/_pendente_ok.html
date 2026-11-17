@@ -1,4 +1,4 @@
-{# Resposta do htmx ao registrar: a linha do pendente vira a confirmação e o contador de "faltam" se atualiza. #}
+{# Resposta do htmx ao registrar: a linha do pendente vira a confirmação; o contador de "faltam" e as "Leituras do mês" se atualizam. #}
 <div id="pendente-{{ registro.veiculo.pk }}" data-linha-km data-registrado
      class="bg-green-50 p-4 text-green-900 sm:px-3 sm:py-3" role="status">
   <p class="font-semibold">✓ {{ sucesso }}.</p>
@@ -16,3 +16,4 @@
   {% endfor %}
 </div>
 {% include "km/_contador_pendentes.html" with oob=True %}
+{% include "km/_leituras_do_mes.html" with oob=True %}

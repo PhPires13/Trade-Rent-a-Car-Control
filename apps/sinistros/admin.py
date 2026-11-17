@@ -9,6 +9,7 @@ from .models import AuxilioMotorista, Sinistro
 class AuxilioInline(admin.TabularInline):
     model = AuxilioMotorista
     extra = 0
+    max_num = 1  # um auxílio por sinistro (trava um_auxilio_por_sinistro)
 
 
 @admin.register(Sinistro)

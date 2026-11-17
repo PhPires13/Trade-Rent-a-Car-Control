@@ -25,7 +25,7 @@ from apps.busca import (
     so_letras_e_digitos,
 )
 from apps.financeiro.devedores import resumo_do_dia
-from apps.financeiro.models import ZERO, Cobranca
+from apps.financeiro.models import ZERO, Caucao, Cobranca
 from apps.financeiro.services import _proximo_dia, proximo_vencimento
 from apps.frota.alertas import vigencias_a_vencer
 from apps.frota.desmobilizacao import ranking_da_frota
@@ -287,6 +287,19 @@ def _preventivas_do_painel():
     return {"alertas_preventivas": alertas, "preventivas_sem_registro": sem_registro}
 
 
+def _caucoes_a_repor():
+    """Contratos ativos cuja caução pagou cobranças e ficou abaixo do combinado.
+
+    Uma consulta só (saldos anotados em lote), seja qual for o tamanho da frota.
+    """
+    caucoes = Caucao.com_saldos_anotados(
+        Caucao.objects.filter(alocacao__status=Alocacao.Status.ATIVA)
+        .select_related("alocacao__cliente", "alocacao__veiculo")
+        .order_by("alocacao__cliente__nome")
+    )
+    return [c for c in caucoes if c.a_repor > ZERO]
+
+
 def painel(request):
     """Painel inicial — dinheiro, frota e alertas do dia (docs.md §5).
 
@@ -345,12 +358,13 @@ def painel(request):
     semana_total = sum((c.valor for c in da_semana), ZERO) + a_lancar
     semana_recebido = sum((c.total_quitado for c in da_semana), ZERO)
 
-    # prefetch das manutenções: auxilio_disponivel lê dias_parado de cada
-    # sinistro, o que consultava uma vez por sinistro aberto
+    # prefetch das manutenções e dos auxílios: auxilio_disponivel lê dias_parado e
+    # auxilios.exists() de cada sinistro (o exists() usa o que o prefetch trouxe),
+    # o que consultava duas vezes por sinistro aberto
     sinistros_abertos = (
         Sinistro.objects.exclude(status=Sinistro.Status.CONCLUIDO)
         .select_related("veiculo")
-        .prefetch_related("manutencoes")
+        .prefetch_related("manutencoes", "auxilios")
     )
     fichas, _ = ranking_da_frota(hoje)
     # "Na oficina agora": todo carro com ida à oficina em aberto — o alugado que
@@ -402,6 +416,7 @@ def painel(request):
         "auxilios_disponiveis": [s for s in sinistros_abertos if s.auxilio_disponivel],
         "candidatos_venda": [f for f in fichas if f.nivel in ("preparar", "vender")],
         "vigencias": vigencias_a_vencer(hoje),
+        "caucoes_a_repor": _caucoes_a_repor(),
         # bloco "Hoje": quem paga hoje e quem está devendo (proposta #8)
         **resumo_do_dia(hoje),
     }

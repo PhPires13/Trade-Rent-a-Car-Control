@@ -102,7 +102,7 @@
           <a href="{% url 'pessoas:editar' cobranca.cliente.pk %}" class="block text-xs text-gray-500 underline"
              title="Cadastre o telefone do cliente, com DDD, para cobrar pelo WhatsApp">Sem WhatsApp: {% if cobranca.cliente.telefone %}telefone incompleto{% else %}cliente sem telefone{% endif %}</a>
           {% endif %}
-          {% if encargo or cobranca.status == "atrasado" or cobranca.status == "judicial" or cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.origem in origens_cancelaveis %}
+          {% if encargo or cobranca.status == "atrasado" or cobranca.status == "judicial" or cobranca.status != "pago" and cobranca.status != "cancelada" and cobranca.origem in origens_cancelaveis or cobranca.status == "pendente" and cobranca.sinistro_franquia %}
           {# decisões menos frequentes ficam recolhidas: com 13 semanas atrasadas, a lista não vira um muro de formulários #}
           <details class="text-xs">
             <summary class="flex min-h-11 cursor-pointer select-none list-none items-center text-gray-600 underline sm:min-h-0 sm:py-1 [&::-webkit-details-marker]:hidden">Mais ▾</summary>
@@ -141,6 +141,10 @@
               <input type="hidden" name="voltar" value="{{ voltar }}">
               <button class="py-1 text-gray-600 underline">{% if cobranca.origem == "nota_debito" %}cancelar a ND{% else %}não cobrar{% endif %}</button>
             </form>
+            {% endif %}
+            {% if cobranca.sinistro_franquia and not cobranca.total_quitado and cobranca.status == "pendente" or cobranca.sinistro_franquia and not cobranca.total_quitado and cobranca.status == "atrasado" %}
+            {# a franquia se cancela no sinistro (o botão de lá, só sem pagamento, libera o sinistro para corrigir); atrasada e paga em parte continua "atrasado": o total pago decide #}
+            <a href="{% url 'sinistros:editar' cobranca.sinistro_franquia.pk %}" class="block py-1 text-gray-600 underline" data-cancelar-no-sinistro>não cobrar: abrir o sinistro</a>
             {% endif %}
             </div>
           </details>

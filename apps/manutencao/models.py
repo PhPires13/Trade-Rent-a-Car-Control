@@ -1,4 +1,5 @@
 from django.db import models, transaction
+from django.db.models import F, Q
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
@@ -178,6 +179,32 @@ class Manutencao(models.Model):
         verbose_name = "manutenção"
         verbose_name_plural = "manutenções"
         ordering = ["-data"]
+        # Travas no banco: as telas já recusam antes; isto segura o Admin e scripts
+        # (saída antes da entrada dava "dias parado" negativo no auxílio).
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(data_saida__isnull=True)
+                | Q(data_entrada__isnull=True)
+                | Q(data_saida__gte=F("data_entrada")),
+                name="manutencao_saida_depois_da_entrada",
+                violation_error_message="A saída não pode ser antes da entrada.",
+            ),
+            models.CheckConstraint(
+                condition=Q(data_saida__isnull=True) | Q(data_entrada__isnull=False),
+                name="manutencao_saida_exige_entrada",
+                violation_error_message="Informe também quando o carro entrou na oficina.",
+            ),
+            models.CheckConstraint(
+                condition=Q(custo_real__isnull=True) | Q(custo_real__gte=0),
+                name="manutencao_custo_nao_negativo",
+                violation_error_message="O custo não pode ser negativo.",
+            ),
+            models.CheckConstraint(
+                condition=Q(valor_cobrado_cliente__isnull=True) | Q(valor_cobrado_cliente__gte=0),
+                name="manutencao_valor_cliente_nao_negativo",
+                violation_error_message="O valor a cobrar do cliente não pode ser negativo.",
+            ),
+        ]
 
     def __str__(self):
         rotulo = self.item.nome if self.item else self.get_tipo_display()

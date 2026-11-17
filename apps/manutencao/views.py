@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import uuid4
 
 from django import forms
@@ -10,9 +11,9 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.html import format_html
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
-from django.views.decorators.http import require_POST
 
 from apps.alocacoes.km_aviso import suspeita_de_km
 from apps.alocacoes.models import VALIDADOR_KM
@@ -779,6 +780,47 @@ def _carro_foi_para_oficina(request, manutencao, acabou_de_entrar=True):
         _sugerir_substituto(request, veiculo)
 
 
+#: mesma manutenção gravada há menos disto = envio repetido ("Voltar" + Salvar)
+JANELA_MANUTENCAO_REPETIDA = timedelta(minutes=2)
+
+
+def _data_de_entrada(texto):
+    """Data "AAAA-MM-DD" do link da troca ativa, ou None se vier inválida ou no futuro."""
+    try:
+        data = parse_date(texto[:10]) if texto else None
+    except ValueError:
+        return None
+    if data is None or data > timezone.localdate() or data.year < 2000:
+        return None
+    return data
+
+
+def _registrada_agora_ha_pouco(veiculo, dados):
+    """Mesmo carro, item, data, KM, custo e descrição gravados há menos de 2 minutos.
+
+    A descrição entra na conta: dois serviços diferentes lançados juntos na mesma
+    ida à oficina (mesmo dia e KM, custo ainda em branco) não são repetição.
+    Trava o carro (select_for_update) para dois envios ao mesmo tempo esperarem
+    um pelo outro. Usa o histórico (data em que a manutenção foi criada).
+    """
+    Veiculo.objects.select_for_update().filter(pk=veiculo.pk).first()
+    criadas = Manutencao.history.filter(
+        history_type="+",
+        history_date__gte=timezone.now() - JANELA_MANUTENCAO_REPETIDA,
+        veiculo_id=veiculo.pk,
+    ).values_list("id", flat=True)
+    item = dados.get("item")
+    return Manutencao.objects.filter(
+        pk__in=list(criadas),
+        veiculo=veiculo,
+        item_id=item.pk if item else None,
+        data=dados.get("data"),
+        km=dados.get("km"),
+        custo_real=dados.get("custo_real"),
+        descricao=dados.get("descricao") or "",
+    ).exists()
+
+
 def registrar(request, veiculo_id):
     veiculo = get_object_or_404(Veiculo, pk=veiculo_id)
     # "Informar última troca" (item nunca registrado): a troca foi no passado, então
@@ -800,6 +842,11 @@ def registrar(request, veiculo_id):
             # o conserto pago pela Auto Truck não é despesa da empresa (só a franquia,
             # que já entra pelo sinistro) — "Particular" contava o dinheiro duas vezes
             inicial["origem_custo"] = Manutencao.OrigemCusto.PROTECAO
+    entrada = _data_de_entrada(request.GET.get("entrada", ""))
+    if entrada is not None and not informar_ultima:
+        # veio da troca ativa ("Registrar a manutenção do …"): o carro está na oficina
+        # desde a retirada do substituto — com hoje, os dias parado (auxílio) sumiam
+        inicial.update(data=entrada, data_entrada=entrada)
     # Cada formulário leva um código único (como a ND e a multa): clique duplo,
     # internet lenta ou "Voltar" não gravam a mesma manutenção duas vezes.
     token = request.POST.get("token", "") if request.method == "POST" else ""
@@ -820,14 +867,27 @@ def registrar(request, veiculo_id):
                     "e nada foi gravado em dobro.",
                 )
                 return redirect(_volta(request, reverse("manutencao:historico", args=[veiculo.pk])))
+            if _registrada_agora_ha_pouco(veiculo, form.cleaned_data):
+                # "Voltar" + Salvar traz um código novo: a trava é pelo conteúdo
+                # (como o Receber) — custo e repasse não entram em dobro
+                messages.warning(
+                    request,
+                    "Esta manutenção já foi registrada agora há pouco — não foi gravada de "
+                    "novo. Se for mesmo um segundo serviço igual, espere 2 minutos e "
+                    "registre outra vez.",
+                )
+                return redirect(reverse("manutencao:historico", args=[veiculo.pk]))
             manutencao = form.save(commit=False)
             manutencao.veiculo = veiculo
             manutencao.save()
-        messages.success(request, f"Manutenção registrada para {veiculo.placa}.")
-        _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
-        _carro_foi_para_oficina(request, manutencao)
-        if manutencao.data_saida:
-            _carro_voltou(request, manutencao)
+            messages.success(request, f"Manutenção registrada para {veiculo.placa}.")
+            # na mesma transação: se o efeito no carro ou o repasse falhar, nada fica
+            # gravado pela metade (carro na oficina aparecendo para alugar) e o
+            # formulário pode ser reenviado
+            _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
+            _carro_foi_para_oficina(request, manutencao)
+            if manutencao.data_saida:
+                _carro_voltou(request, manutencao)
         return redirect(_volta(request, reverse("manutencao:historico", args=[veiculo.pk])))
     return render(
         request,
@@ -857,15 +917,16 @@ def editar(request, manutencao_id):
                 # KM corrigido para menos (ou apagado): o KM atual do carro não fica
                 # preso no número errado (preventivas "Vencida" para sempre).
                 aviso_km = ajustar_km_atual(veiculo, km_antigo)
-        messages.success(request, f"Manutenção de {veiculo.placa} atualizada.")
-        if aviso_km:
-            messages.info(request, aviso_km)
-        _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
-        _carro_foi_para_oficina(request, manutencao, acabou_de_entrar=not estava_aberta)
-        segue_aberta = manutencao.data_entrada and not manutencao.data_saida
-        if estava_aberta and not segue_aberta:
-            # saída informada — ou a entrada apagada por engano: o carro não fica preso
-            _carro_voltou(request, manutencao)
+            messages.success(request, f"Manutenção de {veiculo.placa} atualizada.")
+            if aviso_km:
+                messages.info(request, aviso_km)
+            # na mesma transação da edição (como no registrar)
+            _avisar_cobranca(request, manutencao, form.cleaned_data.get("gerar_cobranca"))
+            _carro_foi_para_oficina(request, manutencao, acabou_de_entrar=not estava_aberta)
+            segue_aberta = manutencao.data_entrada and not manutencao.data_saida
+            if estava_aberta and not segue_aberta:
+                # saída informada — ou a entrada apagada por engano: o carro não fica preso
+                _carro_voltou(request, manutencao)
         return redirect(_volta(request, reverse("manutencao:historico", args=[veiculo.pk])))
     return render(
         request,
@@ -874,9 +935,20 @@ def editar(request, manutencao_id):
     )
 
 
-@require_POST
 def apagar(request, manutencao_id):
-    """Apaga uma manutenção lançada por engano e desfaz o que ela mudou no carro."""
+    """Apaga uma manutenção lançada por engano e desfaz o que ela mudou no carro.
+
+    Só apaga no POST (botão "Apagar"). Um GET — o "next" depois do login com a
+    sessão expirada — volta para a tela da manutenção sem apagar nada (antes:
+    página em branco 405).
+    """
+    if request.method != "POST":
+        if Manutencao.objects.filter(pk=manutencao_id).exists():
+            messages.info(
+                request, "Nada foi apagado. Se ainda quiser apagar, toque em “Apagar” de novo."
+            )
+            return redirect("manutencao:editar", manutencao_id)
+        return redirect("manutencao:preventivas")
     manutencao = get_object_or_404(
         Manutencao.objects.select_related("veiculo", "cobranca_repasse"), pk=manutencao_id
     )
@@ -935,13 +1007,16 @@ def voltou(request, manutencao_id):
         request.POST or None, instance=manutencao, initial={"data_saida": timezone.localdate()}
     )
     if request.method == "POST" and form.is_valid():
-        manutencao = form.save()
-        messages.success(
-            request,
-            f"{veiculo.placa} saiu da oficina — {manutencao.dias_parado} "
-            f"dia{'s' if manutencao.dias_parado != 1 else ''} parado.",
-        )
-        _carro_voltou(request, manutencao)
+        # numa transação só (como no registrar/editar): falhou a volta do carro,
+        # a saída não fica gravada com o carro preso em "Em manutenção"
+        with transaction.atomic():
+            manutencao = form.save()
+            messages.success(
+                request,
+                f"{veiculo.placa} saiu da oficina — {manutencao.dias_parado} "
+                f"dia{'s' if manutencao.dias_parado != 1 else ''} parado.",
+            )
+            _carro_voltou(request, manutencao)
         return redirect(_volta(request, historico_url))
     return render(
         request,

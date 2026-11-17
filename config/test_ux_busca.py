@@ -98,7 +98,7 @@ def test_motivo_explica_por_que_o_cliente_apareceu(usuario_logado, joao):
 def test_nada_encontrado_explica_o_que_da_para_buscar(usuario_logado, db):
     html = usuario_logado.get("/buscar/", {"q": "zzzz"}).content.decode()
     assert "Nenhum resultado" in html and "AIT" in html
-    assert "placa, nome, CPF, telefone ou nº da multa" in html
+    assert "placa, nome, CPF, telefone ou nº do AIT" in html
 
 
 def test_lista_de_clientes_busca_sem_acento_e_por_cpf(usuario_logado, joao):

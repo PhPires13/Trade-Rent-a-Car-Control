@@ -127,7 +127,7 @@ def test_multa_em_nd_nao_vira_responsabilidade_da_empresa(veiculo, bruno):
     services.gerar_nd_de_multas(bruno, [multa], HOJE)
     form = MultaEdicaoForm(_dados(multa, responsavel="empresa"), instance=multa)
     assert not form.is_valid()
-    assert "cancele a nota de débito" in str(form.errors["responsavel"])
+    assert "cancele a ND" in str(form.errors["responsavel"])
 
 
 def test_multa_em_nd_nao_troca_cliente_ao_corrigir_data(veiculo, bruno):

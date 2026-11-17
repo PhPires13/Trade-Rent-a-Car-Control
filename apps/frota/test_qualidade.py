@@ -92,7 +92,8 @@ def test_detalhe_roda_com_queries_fixas(
     # 12 do detalhe original + 8 fixas da faixa de pendências (4 das preventivas,
     # 2 do KM esquecido — mesma regra do painel —, multas sem FICI e sinistros
     # abertos) + folga de 1 — não crescem com o número de registros do carro.
-    with django_assert_max_num_queries(21):
+    # Etapa 18c: as 4 contagens dos atalhos vêm junto com o carro (21 → 17).
+    with django_assert_max_num_queries(17):
         assert usuario_logado.get(f"/frota/veiculo/{veiculo.pk}/").status_code == 200
 
 

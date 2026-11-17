@@ -31,7 +31,13 @@ def mensagem_recibo(resumo):
     if resumo.get("credito_usado"):
         linhas.append(f"• Usamos também {brl(resumo['credito_usado'])} do seu crédito guardado.")
     for cobranca, valor in resumo["quitadas"]:
-        linhas.append(f"✓ Quitado: {cobranca.descricao} ({brl(valor)})")
+        # semana já paga em partes: "(R$ 250,00)" sozinho parecia o preço da semana
+        quanto = (
+            f"restante {brl(valor)} de {brl(cobranca.valor)}"
+            if valor < cobranca.valor
+            else brl(valor)
+        )
+        linhas.append(f"✓ Quitado: {cobranca.descricao} ({quanto})")
     for cobranca, valor in resumo["parciais"]:
         linhas.append(
             f"• Abatido {brl(valor)} de {cobranca.descricao} (ainda falta {brl(cobranca.saldo)})"

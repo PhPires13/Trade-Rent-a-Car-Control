@@ -117,7 +117,7 @@ def test_encerrar_com_copia_velha_da_alocacao_nao_refaz_o_acerto(alocacao):
     copia_da_outra_aba = Alocacao.objects.get(pk=alocacao.pk)
     alocacao.encerrar(data_termino=HOJE, km_devolucao=51_000)
     assert copia_da_outra_aba.status == Alocacao.Status.ATIVA  # ainda não sabe
-    with pytest.raises(ValidationError, match="já encerrada"):
+    with pytest.raises(ValidationError, match="já foi encerrada"):
         copia_da_outra_aba.encerrar(data_termino=HOJE, km_devolucao=52_000)
     alocacao.refresh_from_db()
     assert alocacao.km_devolucao == 51_000

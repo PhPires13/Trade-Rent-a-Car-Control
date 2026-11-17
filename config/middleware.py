@@ -15,6 +15,7 @@ from django.contrib.auth.signals import user_logged_in
 from django.dispatch import receiver
 from django.http import HttpResponse, JsonResponse
 from django.middleware.csrf import REASON_NO_CSRF_COOKIE
+from django.middleware.gzip import GZipMiddleware
 from django.shortcuts import redirect, render, resolve_url
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -137,3 +138,22 @@ class SessaoRenovadaMiddleware:
             if marcada and marcada != timezone.localdate().isoformat():
                 marcar_sessao_renovada(request)  # sessão alterada → validade renovada
         return self.get_response(request)
+
+
+class GZipSoTexto(GZipMiddleware):
+    """Comprime só as páginas (HTML) e as respostas JSON.
+
+    A lista de alocações tem ~230 KB de HTML e vira ~11 KB comprimida: no 3G do
+    pátio é a diferença entre ~1 s e quase nada. Foto, PDF e planilha já vêm
+    comprimidos (e o /midia/ é servido em pedaços): ficam como estão. Os arquivos
+    estáticos o WhiteNoise já entrega comprimidos. O Django mistura bytes
+    aleatórios no gzip (defesa contra o ataque BREACH) e mascara o token CSRF a
+    cada resposta.
+    """
+
+    TIPOS = ("text/html", "application/json")
+
+    def process_response(self, request, response):
+        if not response.get("Content-Type", "").startswith(self.TIPOS):
+            return response
+        return super().process_response(request, response)

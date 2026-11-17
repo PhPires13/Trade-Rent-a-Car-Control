@@ -96,11 +96,12 @@
       </div>
       <div class="shrink-0 text-right">
         <div class="text-xs text-gray-500">Resultado final</div>
-        <div class="whitespace-nowrap text-lg font-black {% if f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">{{ f.resultado_final|brl }}</div>
+        <div class="whitespace-nowrap text-lg font-black {% if f.resultado_final is None %}text-gray-500{% elif f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">{{ f.resultado_final|brl }}</div>
       </div>
     </div>
     <p class="mt-2 text-gray-600">
       <span class="whitespace-nowrap">Venda {{ f.veiculo.valor_venda|brl }}</span> ·
+      {% if f.veiculo.custos_venda %}<span class="whitespace-nowrap">custos da venda {{ f.veiculo.custos_venda|brl }}</span> ·{% endif %}
       <span class="whitespace-nowrap">investido {{ f.investido|brl }}</span>
     </p>
   </li>
@@ -111,7 +112,7 @@
     <thead class="bg-marca-preto text-left text-white">
       <tr>
         <th class="px-3 py-2">Veículo</th><th class="px-3 py-2">Venda</th><th class="px-3 py-2">Valor</th>
-        <th class="px-3 py-2">Investido</th><th class="px-3 py-2" title="Tudo que o carro rendeu + valor da venda − investimento − gastos">Resultado final</th>
+        <th class="px-3 py-2">Investido</th><th class="px-3 py-2" title="Tudo que o carro rendeu − gastos + valor da venda − custos da venda − investimento">Resultado final</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100">
@@ -119,9 +120,9 @@
       <tr>
         <td class="px-3 py-2 font-medium"><a href="{% url 'frota:ficha' f.veiculo.pk %}" class="underline">{{ f.veiculo.placa }}</a> {{ f.veiculo.marca_modelo }}</td>
         <td class="px-3 py-2">{{ f.veiculo.data_venda|date:"d/m/Y" }}</td>
-        <td class="px-3 py-2">{{ f.veiculo.valor_venda|brl }}</td>
+        <td class="px-3 py-2">{{ f.veiculo.valor_venda|brl }}{% if f.veiculo.custos_venda %}<span class="block text-xs text-gray-500">custos da venda {{ f.veiculo.custos_venda|brl }}</span>{% endif %}</td>
         <td class="px-3 py-2">{{ f.investido|brl }}</td>
-        <td class="px-3 py-2 font-black {% if f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">
+        <td class="px-3 py-2 font-black {% if f.resultado_final is None %}text-gray-500{% elif f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">
           {{ f.resultado_final|brl }}
         </td>
       </tr>

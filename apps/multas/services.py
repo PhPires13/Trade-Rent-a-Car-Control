@@ -79,11 +79,8 @@ def registrar_nic(multa, data_infracao=None, valor=None):
         fici_status=Multa.Fici.NAO_SE_APLICA,
         multa_origem_nic=multa,
     )
-    if multa.cliente_id is None and nic.cliente_id is not None:
-        # o save() buscou quem está com o carro na data da NIC (hoje) — outro
-        # motorista, sem relação com a infração original: a NIC fica sem cliente
-        Multa.objects.filter(pk=nic.pk).update(cliente=None)
-        nic.cliente = None
+    # multa original sem cliente: a NIC também fica sem (o save() não busca quem
+    # está com o carro hoje — outro motorista, sem relação com a infração)
     return nic
 
 
@@ -103,7 +100,12 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
     # relê do banco depois da trava: dois "Gerar ND" ao mesmo tempo (clique duplo)
     # viam as duas a multa "A cobrar" e ela entrava em duas NDs
     pks = {multa.pk for multa in multas}
-    multas = list(Multa.objects.select_related("veiculo").filter(pk__in=pks).order_by("pk"))
+    multas = list(
+        Multa.objects.select_related("veiculo")
+        .prefetch_related(Multa.PREFETCH_REPASSE)  # `repasse` sem 2 consultas por multa
+        .filter(pk__in=pks)
+        .order_by("pk")
+    )
     if len(multas) != len(pks):
         # excluída em outra aba entre abrir a tela e clicar: sem isso saía uma ND
         # sem a multa (ou de R$ 0,00, sem itens) e sem aviso nenhum
@@ -124,13 +126,15 @@ def gerar_nd_de_multas(cliente, multas, data_emissao, vencimento=None):
         vencimento = proximo_dia_pagamento(cliente, data_emissao)
     nd = NotaDebito(cliente=cliente, data_emissao=data_emissao, vencimento=vencimento, numero=None)
     nd.save()
-    for multa in multas:
-        ItemNotaDebito.objects.create(
+    ItemNotaDebito.objects.bulk_create(
+        ItemNotaDebito(
             nota_debito=nd,
             descricao=_descricao_item_nd(multa),
             valor=multa.valor,
             multa=multa,
         )
+        for multa in multas
+    )
     Cobranca.objects.create(
         cliente=cliente,
         origem=Cobranca.Origem.NOTA_DEBITO,

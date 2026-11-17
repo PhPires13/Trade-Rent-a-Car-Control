@@ -39,7 +39,8 @@ ENCARGO_CURTO = Decimal("0.05")
 ENCARGO_LONGO = Decimal("0.10")
 ENCARGO_DIAS_CORTE = 4
 DIAS_PARA_INADIMPLENCIA = 1
-#: Mesmo cliente + valor + data dentro desta janela = toque duplo no Confirmar.
+#: Mesmo cliente + valor + data + forma + cobranças dentro desta janela = toque
+#: duplo no Confirmar (o reenvio do mesmo formulário já é barrado pelo token).
 JANELA_RECEBIMENTO_REPETIDO = timedelta(minutes=2)
 
 
@@ -91,7 +92,8 @@ class RecebimentoRepetido(ValidationError):
     def __init__(self, recebimento):
         super().__init__(
             "Este pagamento já foi lançado agora há pouco — não foi lançado de novo. "
-            "Se for mesmo um segundo pagamento igual, espere 2 minutos e lance outra vez."
+            'Se for mesmo um segundo pagamento igual, toque em "É outro pagamento" '
+            "e lance outra vez."
         )
         self.recebimento = recebimento
 
@@ -601,6 +603,7 @@ def registrar_recebimento(
     mes_passado_confirmado=True,
     hoje=None,
     caucao_acima_confirmado=False,
+    cobrancas_do_formulario=None,
 ):
     """Lança um pagamento e distribui nas cobranças, com travas (docs.md §4.3).
 
@@ -608,9 +611,12 @@ def registrar_recebimento(
     saldo da cobrança; total aplicado nunca acima do recebido. Sobra vira
     crédito do cliente ou reforço de caução.
 
-    bloquear_repetido (tela de receber): o mesmo cliente + valor + data lançado
-    há menos de 2 minutos levanta RecebimentoRepetido — toque duplo no
-    Confirmar com internet lenta não vira pagamento em dobro.
+    bloquear_repetido (tela de receber): o mesmo cliente + valor + data + forma,
+    nas mesmas cobranças, lançado há menos de 2 minutos levanta
+    RecebimentoRepetido — toque duplo no Confirmar com internet lenta não vira
+    pagamento em dobro. Outra cobrança (ND 002 e depois ND 003 de R$ 150) ou
+    outra semana passa. `cobrancas_do_formulario`: os pks marcados na tela
+    (sem os encargos criados agora); sem ele, os das `aplicacoes`.
 
     usar_credito: parte do crédito guardado que entra junto com o dinheiro
     novo (ex.: 50 de crédito + Pix de 600 = semana de 650). Vira um lançamento
@@ -643,7 +649,9 @@ def registrar_recebimento(
     # (sem isso, os dois liam o mesmo saldo e pagavam a mesma semana duas vezes)
     Cliente.objects.select_for_update().filter(pk=cliente.pk).first()
     if bloquear_repetido:
-        repetido = _recebimento_recente(cliente, data, valor)
+        if cobrancas_do_formulario is None:
+            cobrancas_do_formulario = [c.pk for c, v in aplicacoes if Decimal(v) > ZERO]
+        repetido = _recebimento_recente(cliente, data, valor, forma, cobrancas_do_formulario)
         if repetido:
             raise RecebimentoRepetido(repetido)
     aplicacoes = [(c, Decimal(v)) for c, v in aplicacoes if Decimal(v) > ZERO]
@@ -811,21 +819,39 @@ def anotar_lancamento(queryset):
 
     O Recebimento não guarda a hora do lançamento — `data` é o dia em que o
     cliente pagou; o momento do registro vem do histórico (simple_history).
+    Vale a ÚLTIMA criação ("+") do id: no SQLite um id apagado é reaproveitado,
+    e a primeira criação seria a do registro antigo (sumia o "Desfazer").
     """
     historico = Recebimento.history.model.objects.filter(
         id=OuterRef("pk"), history_type="+"
-    ).order_by("history_date")
+    ).order_by("-history_date")
     return queryset.annotate(lancado_em=Subquery(historico.values("history_date")[:1]))
 
 
-def _recebimento_recente(cliente, data, valor):
+def _recebimento_recente(cliente, data, valor, forma=None, cobrancas=None):
+    """O lançamento igual feito há menos de 2 minutos (toque duplo), ou None.
+
+    Igual = mesmo cliente, data, valor e forma, e as cobranças marcadas agora
+    (`cobrancas`, pks) todas pagas por lançamentos desses 2 minutos. Assim
+    pagar a ND 003 logo depois da ND 002 (mesmo valor) ou duas semanas
+    seguidas com dois Pix iguais não é barrado.
+    """
     desde = timezone.now() - JANELA_RECEBIMENTO_REPETIDO
-    return (
-        anotar_lancamento(Recebimento.objects.filter(cliente=cliente, data=data, valor=valor))
-        .filter(lancado_em__gte=desde)
-        .order_by("-pk")
-        .first()
+    recentes = anotar_lancamento(Recebimento.objects.filter(cliente=cliente)).filter(
+        lancado_em__gte=desde
     )
+    iguais = recentes.filter(data=data, valor=valor)
+    if forma is not None:
+        iguais = iguais.filter(forma=forma)
+    candidato = iguais.order_by("-pk").first()
+    if candidato is None or cobrancas is None:
+        return candidato
+    pagas_agora = set(
+        AplicacaoRecebimento.objects.filter(recebimento__in=recentes.values("pk")).values_list(
+            "cobranca_id", flat=True
+        )
+    )
+    return candidato if {int(pk) for pk in cobrancas} <= pagas_agora else None
 
 
 def pode_desfazer(recebimento, hoje=None):
@@ -837,8 +863,9 @@ def pode_desfazer(recebimento, hoje=None):
     hoje = hoje or timezone.localdate()
     lancado_em = getattr(recebimento, "lancado_em", None)
     if not hasattr(recebimento, "lancado_em"):  # sem anotar_lancamento: busca no histórico
-        primeiro = recebimento.history.filter(history_type="+").order_by("history_date").first()
-        lancado_em = primeiro.history_date if primeiro else None
+        # a última criação: no SQLite o id apagado é reaproveitado (anotar_lancamento)
+        criacao = recebimento.history.filter(history_type="+").order_by("-history_date").first()
+        lancado_em = criacao.history_date if criacao else None
     return lancado_em is not None and timezone.localdate(lancado_em) == hoje
 
 
@@ -1071,6 +1098,8 @@ def descricao_da_nd(numero, descricoes):
 
 #: vencimento de ND mais longe que isso da emissão pede confirmação (ano errado)
 DIAS_VENCIMENTO_DISTANTE = 60
+#: emissão de ND mais antiga que isso pede confirmação (2016 no lugar de 2026)
+DIAS_EMISSAO_ANTIGA = 60
 
 
 @transaction.atomic
@@ -1081,12 +1110,17 @@ def emitir_nota_debito(
     vencimento=None,
     observacoes="",
     vencimento_distante_confirmado=False,
+    emissao_antiga_confirmada=True,
 ):
     """Emite ND com numeração automática e cria a cobrança única (docs.md §4.3).
 
     Sem vencimento informado, vence no próximo dia de pagamento do cliente.
     Emissão nunca no futuro (ano digitado errado sumia a dívida do "Quem deve"
-    por um ano); vencimento a mais de 60 dias da emissão só com confirmação.
+    por um ano); emissão mais de 60 dias atrás (2016 no lugar de 2026: a
+    cobrança nascia vencida há 10 anos) e vencimento a mais de 60 dias da
+    emissão só com confirmação. `emissao_antiga_confirmada` vem True por padrão
+    (como o `mes_passado_confirmado` do recebimento): a tela da ND manda o que
+    a pessoa marcou.
     """
     itens = [(descricao, Decimal(valor)) for descricao, valor in itens if Decimal(valor) > ZERO]
     if not itens:
@@ -1099,6 +1133,15 @@ def emitir_nota_debito(
     if data_emissao > hoje:
         raise ValidationError(
             f"A data de emissão ({data_emissao:%d/%m/%Y}) não pode ser no futuro (confira o ano)."
+        )
+    # a emissão vem antes do vencimento: com a emissão no ano errado, o aviso do
+    # vencimento distante culpava o campo certo
+    dias_atras = (hoje - data_emissao).days
+    if dias_atras > DIAS_EMISSAO_ANTIGA and not emissao_antiga_confirmada:
+        raise ValidationError(
+            f"A data de emissão ({data_emissao:%d/%m/%Y}) é de {dias_atras} dias atrás. "
+            "Confira o ano da data de emissão; se estiver certa, marque "
+            '"Confirmo: emissão antiga".'
         )
     if (
         vencimento is not None
@@ -1324,8 +1367,9 @@ def pode_desfazer_movimentacao(movimentacao, hoje=None):
         return False  # desfaz-se pelo recebimento que a gerou
     lancado_em = getattr(movimentacao, "lancado_em", ...)
     if lancado_em is ...:
-        primeiro = movimentacao.history.filter(history_type="+").order_by("history_date").first()
-        lancado_em = primeiro.history_date if primeiro else None
+        # a última criação: id reaproveitado no SQLite (como em anotar_lancamento)
+        criacao = movimentacao.history.filter(history_type="+").order_by("-history_date").first()
+        lancado_em = criacao.history_date if criacao else None
     return lancado_em is not None and timezone.localdate(lancado_em) == hoje
 
 
@@ -1333,7 +1377,7 @@ def anotar_lancamento_caucao(queryset):
     """Anota `lancado_em` nas movimentações de caução (para o "desfazer" do dia)."""
     historico = MovimentacaoCaucao.history.model.objects.filter(
         id=OuterRef("pk"), history_type="+"
-    ).order_by("history_date")
+    ).order_by("-history_date")  # a última criação (id reaproveitado no SQLite)
     return queryset.annotate(lancado_em=Subquery(historico.values("history_date")[:1]))
 
 

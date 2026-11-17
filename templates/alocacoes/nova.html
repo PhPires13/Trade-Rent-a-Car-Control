@@ -34,6 +34,7 @@
         sugeridaCaucao: false,
         sugeridoValor: false,
         contratoAntigo: {{ abrir_contrato_antigo|yesno:'true,false' }},
+        inicioAntigo: false,
         campo(nome) { return document.getElementById('id_' + nome) },
         init() {
           const c = this.clientes[this.cliente];
@@ -45,10 +46,14 @@
         },
         conferirInicio() {
           // início antigo (contrato que já rodava): abre o campo de cobrar a partir de
+          // (com mais de uma semana o campo passa a ser obrigatório — AlocacaoForm.clean)
           const valor = this.campo('data_inicio').value;
-          if (!valor) return;
-          const dias = (Date.now() - new Date(valor + 'T12:00:00').getTime()) / 86400000;
-          if (dias > {{ dias_inicio_antigo }}) this.contratoAntigo = true;
+          const dias = valor ? (Date.now() - new Date(valor + 'T12:00:00').getTime()) / 86400000 : 0;
+          this.inicioAntigo = dias > {{ dias_inicio_antigo }};
+          if (this.inicioAntigo) this.contratoAntigo = true;
+        },
+        cobrarDesdeOInicio() {
+          this.campo('cobrar_a_partir_de').value = this.campo('data_inicio').value;
         },
         mudou(alvo) {
           if (alvo.name === 'veiculo') {
@@ -81,7 +86,9 @@
         }
       }"
       @change="mudou($event.target)"
-      @input="if ($event.target.name === 'caucao_valor') sugeridaCaucao = false; if ($event.target.name === 'valor_semanal') sugeridoValor = false">
+      @input="if ($event.target.name === 'caucao_valor') sugeridaCaucao = false; if ($event.target.name === 'valor_semanal') sugeridoValor = false"
+      @focusin="if (['valor_semanal', 'caucao_valor'].includes($event.target.name) && $event.target.value) { const c = $event.target; setTimeout(() => c.select()) }">
+  {# dinheiro já preenchido: tocar seleciona tudo, e digitar troca o valor (antes virava "650,00650") #}
   {% csrf_token %}
   {# token único: toque duplo em "Alocar" não cria nada em dobro #}
   <input type="hidden" name="token" value="{{ token }}">
@@ -142,14 +149,22 @@
   {% endif %}
   {% endfor %}
 
-  {# Contrato antigo (carga inicial, D01): abre sozinho com início antigo, valor ou erro #}
+  {# Contrato antigo (carga inicial, D01): abre sozinho com início antigo, valor ou erro. #}
+  {# Início com mais de uma semana: o campo é obrigatório (AlocacaoForm.clean) e o texto diz isso. #}
   <details class="rounded border border-gray-200 bg-gray-50 p-3" :open="contratoAntigo"
            {% if abrir_contrato_antigo %}open{% endif %}>
-    <summary class="flex min-h-11 cursor-pointer items-center text-sm font-medium">Contrato que já rodava antes do sistema?</summary>
+    <summary class="flex min-h-11 cursor-pointer items-center text-sm font-medium">
+      <span x-show="!inicioAntigo">Contrato que já rodava antes do sistema?</span>
+      <span x-show="inicioAntigo" x-cloak>Início há mais de uma semana: de quando cobrar?</span>
+    </summary>
     <div class="mt-2">
-      <label class="mb-1 block text-sm font-medium" for="{{ form.cobrar_a_partir_de.id_for_label }}">{{ form.cobrar_a_partir_de.label }}</label>
+      {# o "(opcional)" fica escrito aqui (o ux.js não acrescenta outro) e some quando o campo é obrigatório #}
+      <label class="mb-1 block text-sm font-medium" for="{{ form.cobrar_a_partir_de.id_for_label }}">{{ form.cobrar_a_partir_de.label }}<span x-show="!inicioAntigo" class="font-normal text-gray-600"> (opcional)</span><span x-show="inicioAntigo" x-cloak class="font-normal text-gray-600"> (obrigatório)</span></label>
       {{ form.cobrar_a_partir_de }}
-      <p class="mt-1 text-xs text-gray-500">{{ form.cobrar_a_partir_de.help_text }}</p>
+      <p x-show="!inicioAntigo" class="mt-1 text-xs text-gray-500" data-ajuda-cobrar="opcional">Só para contrato que já rodava antes do sistema: as semanas antes desta data não são lançadas (já foram acertadas por fora). Vazio = cobra desde a data de início.</p>
+      <p x-show="inicioAntigo" x-cloak class="mt-1 text-xs text-gray-500" data-ajuda-cobrar="obrigatorio">Obrigatório quando o início tem mais de uma semana. Para cobrar tudo desde o início, repita a data de início (ou toque no botão abaixo). Se o contrato já rodava antes do sistema, ponha o dia em que o sistema deve começar a cobrar — as semanas antes disso não são lançadas.</p>
+      <button type="button" x-show="inicioAntigo" x-cloak @click="cobrarDesdeOInicio()"
+              class="mt-2 min-h-11 rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold">Cobrar desde o início</button>
       {% for erro in form.cobrar_a_partir_de.errors %}<p class="mt-1 text-xs text-red-600">{{ erro }}</p>{% endfor %}
     </div>
   </details>

@@ -49,12 +49,12 @@
 
     <p class="text-sm">
       {% if card.alocacao_ativa %}
-        🚗 <a href="{% url 'alocacoes:timeline' card.alocacao_ativa.veiculo.pk %}" class="underline">{{ card.alocacao_ativa.veiculo.placa }}</a>
+        🚗 <a href="{% url 'alocacoes:timeline' card.alocacao_ativa.veiculo.pk %}" class="inline-flex min-h-11 items-center underline sm:min-h-0">{{ card.alocacao_ativa.veiculo.placa }}</a>
         <span class="text-gray-500">{{ card.alocacao_ativa.veiculo.marca_modelo }}</span>
       {% else %}
         <span class="text-gray-600">Sem carro</span>
         {% if card.cliente.status != "inativo" %}
-        · <a href="{% url 'alocacoes:nova' %}?cliente={{ card.cliente.pk }}" class="text-gray-700 underline">alocar um carro</a>
+        · <a href="{% url 'alocacoes:nova' %}?cliente={{ card.cliente.pk }}" class="inline-flex min-h-11 items-center text-gray-700 underline sm:min-h-0">alocar um carro</a>
         {% endif %}
       {% endif %}
     </p>

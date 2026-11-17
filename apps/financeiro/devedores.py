@@ -52,7 +52,14 @@ class Devedor:
 
     @property
     def telefone_discagem(self):
-        """Só os dígitos, para o link tel: — "(31) 98888-7777" não disca em todo celular."""
+        """Só os dígitos, para o link tel: — "(31) 98888-7777" não disca em todo celular.
+
+        Vazio quando o número não tem DDD + 8/9 dígitos (a mesma regra do
+        WhatsApp): "123456" abria o discador com um número que não existe, e a
+        lista de cobranças dizia "telefone incompleto" para o mesmo cliente.
+        """
+        if not whatsapp.telefone_whatsapp(self.cliente.telefone):
+            return ""
         return "".join(c for c in (self.cliente.telefone or "") if c.isdigit())
 
 

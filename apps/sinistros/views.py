@@ -5,7 +5,6 @@ from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.core.validators import MinValueValidator
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -20,6 +19,7 @@ from apps.campos import OPCAO_VAZIA, CampoDinheiro, FormularioBR, id_valido, ler
 from apps.financeiro.views import _envio_unico
 from apps.formatos import brl
 from apps.frota.models import Veiculo, normalizar_placa
+from apps.multas.models import SEM_NEGATIVO  # franquia e auxílio: negativo viraria crédito falso
 from apps.multas.services import cliente_dirigindo, troca_do_carro_parado
 
 from . import services
@@ -28,9 +28,6 @@ from .models import DIAS_CARENCIA_AUXILIO, AuxilioMotorista, Sinistro, numero_do
 # input type="date" só entende AAAA-MM-DD; no formato pt-BR (01/07/2026) a data
 # some da tela ao editar um sinistro já salvo.
 _DATA = {"type": "date"}
-
-#: franquia e auxílio são dinheiro pago/recebido: negativo viraria crédito falso
-SEM_NEGATIVO = MinValueValidator(0, message="O valor não pode ser negativo.")
 
 
 class SinistroForm(FormularioBR, forms.ModelForm):

@@ -16,9 +16,16 @@
   Copie os dados da notificação que chegou do órgão. O sistema descobre sozinho qual cliente estava com o carro
   na data da infração.
 </p>
+{# Voltar do navegador depois de registrar: a página volta vazia (autocomplete="off")
+   e com este aviso, para a mesma multa não ser registrada duas vezes #}
+<p x-data="{ voltou: (performance.getEntriesByType('navigation')[0] || {}).type === 'back_forward' }"
+   x-show="voltou" x-cloak role="status" data-aviso-voltar
+   class="mb-4 max-w-2xl rounded border-l-4 border-marca-amarelo bg-yellow-50 px-4 py-3 text-sm">
+  Você voltou para um formulário já enviado? Confira na <a href="{% url 'multas:lista' %}" class="font-semibold underline">lista de multas</a> antes de registrar de novo.
+</p>
 {% endif %}
 
-<form method="post" class="max-w-2xl space-y-6"
+<form method="post" class="max-w-2xl space-y-6"{% if not multa %} autocomplete="off"{% endif %}
       x-data="{ tipo: '{{ form.tipo_condutor.value|default:'cliente'|escapejs }}', resp: '{{ form.responsavel.value|default:'cliente'|escapejs }}', mexeuResp: false }">
   {% csrf_token %}
   {% include "_erros_form.html" %}

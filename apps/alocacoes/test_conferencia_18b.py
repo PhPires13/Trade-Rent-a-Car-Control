@@ -71,5 +71,5 @@ def test_encerrar_duas_vezes_continua_barrado(alocacao):
     alocacao.encerrar(HOJE, 40_500)
     velha = Alocacao.objects.get(pk=alocacao.pk)
     velha.status = Alocacao.Status.ATIVA  # a 2ª aba ainda acha que está ativa
-    with pytest.raises(ValidationError, match="já encerrada"):
+    with pytest.raises(ValidationError, match="já foi encerrada"):
         velha.encerrar(HOJE, 40_600)

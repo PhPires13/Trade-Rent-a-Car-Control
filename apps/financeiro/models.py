@@ -424,6 +424,17 @@ class Caucao(models.Model):
         return self.recebido - self.descontado - self.devolvido
 
     @property
+    def a_repor(self):
+        """Quanto o cliente precisa repor: a caução pagou cobranças com o contrato
+        ainda ativo e ficou abaixo do combinado. O depósito que nunca completou
+        não entra aqui (é o "falta depositar"). Mesma conta da tela da caução."""
+        if self.alocacao.status != Alocacao.Status.ATIVA or self.descontado <= ZERO:
+            return ZERO
+        combinado = self.alocacao.caucao_valor or ZERO
+        falta_depositar = max(combinado - self.recebido, ZERO)
+        return max(combinado - self.saldo - falta_depositar, ZERO)
+
+    @property
     def status(self):
         if self.recebido == ZERO:
             return "Sem depósito"

@@ -220,7 +220,7 @@
             {% if registro.judicial > 0 %}{% if registro.judicial == registro.total %}<span class="rounded bg-purple-100 px-1 text-xs text-purple-800">na Justiça</span>{% else %}<span class="rounded bg-purple-100 px-1 text-xs text-purple-800">dos quais {{ registro.judicial|brl }} na Justiça</span>{% endif %}{% endif %}
             <span class="block text-xs text-gray-600" data-recebivel-detalhe>
               {% if registro.vencido > 0 %}deve hoje {{ registro.vencido|brl }}{% if registro.a_vencer > 0 %} (+ {{ registro.a_vencer|brl }} a vencer){% endif %}{% else %}nada vencido — {{ registro.a_vencer|brl }} a vencer{% endif %}
-              {% if registro.credito > 0 %}<span class="block text-green-800" data-recebivel-credito>tem {{ registro.credito|brl }} de crédito guardado — {% if registro.liquido > 0 %}descontando o crédito, falta {{ registro.liquido|brl }}{% else %}o crédito já cobre tudo{% endif %}</span>{% endif %}
+              {% if registro.credito > 0 %}<span class="block text-green-800" data-recebivel-credito>tem {{ registro.credito|brl }} de crédito — {% if registro.liquido > 0 %}descontando o crédito, falta {{ registro.liquido|brl }}{% else %}o crédito já cobre tudo{% endif %}</span>{% endif %}
             </span>
           </td>
           <td class="px-2 py-1.5 text-right font-semibold">{{ registro.total|brl }}</td>

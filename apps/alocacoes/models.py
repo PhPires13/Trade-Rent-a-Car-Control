@@ -8,6 +8,7 @@ from simple_history.models import HistoricalRecords
 from apps.campos import validar_tamanho_arquivo
 from apps.formatos import brl, milhar
 from apps.frota.models import Veiculo
+from apps.multas.models import placa_ou_aviso
 from apps.pessoas.models import Cliente
 
 #: Nenhum carro de aplicativo chega perto disso — acima, é dígito a mais (D27).
@@ -18,6 +19,25 @@ VALIDADOR_KM = MaxValueValidator(
 )
 #: Foto ou PDF do checklist — .html/.svg rodariam script no navegador do dono (C17).
 EXTENSOES_VISTORIA = ["jpg", "jpeg", "png", "webp", "pdf"]
+#: Um só jeito de dizer, em todas as telas, que o contrato já acabou.
+ALOCACAO_JA_ENCERRADA = "Esta alocação já foi encerrada."
+
+
+def _nome_ou_aviso(registro):
+    """Nome do cliente — sem derrubar o Histórico/Admin quando o cliente não existe mais."""
+    try:
+        return registro.cliente.nome
+    except Cliente.DoesNotExist:
+        return "cliente apagado"
+
+
+def _campos_simples(modelo, menos=()):
+    """Colunas do modelo que não são id nem chave estrangeira (para reler sob a trava)."""
+    return [
+        campo.attname
+        for campo in modelo._meta.concrete_fields
+        if not campo.primary_key and not campo.is_relation and campo.attname not in menos
+    ]
 
 
 def _validar_data_nao_futura(data, rotulo="devolução"):
@@ -142,7 +162,7 @@ class Alocacao(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.veiculo.placa} → {self.cliente.nome} ({self.get_status_display()})"
+        return f"{placa_ou_aviso(self)} → {_nome_ou_aviso(self)} ({self.get_status_display()})"
 
     def save(self, *args, **kwargs):
         if self.dia_vencimento is None and self.data_inicio:
@@ -223,11 +243,15 @@ class Alocacao(models.Model):
         no_banco = (
             Alocacao.objects.select_for_update(no_key=True)
             .filter(pk=self.pk)
-            .values_list("status", flat=True)
+            .values(*_campos_simples(Alocacao))
             .first()
         )
-        if self.status != self.Status.ATIVA or no_banco != self.Status.ATIVA:
-            raise ValidationError("Alocação já encerrada.")
+        if self.status != self.Status.ATIVA or (no_banco or {}).get("status") != self.Status.ATIVA:
+            raise ValidationError(ALOCACAO_JA_ENCERRADA)
+        # tela aberta antes de outra gravar (observação, contrato): as contas e a
+        # versão do histórico usam o que está no banco, não a cópia velha da tela
+        for campo, valor in no_banco.items():
+            setattr(self, campo, valor)
         trocas = self.trocas.aggregate(
             abertas=models.Count("pk", filter=models.Q(data_devolucao__isnull=True)),
             ultima=Max("data_devolucao"),
@@ -251,7 +275,9 @@ class Alocacao(models.Model):
         self.data_termino = data_termino
         self.km_devolucao = km_devolucao
         self.status = self.Status.ENCERRADA
-        self.save()
+        # só o que o encerrar muda: observação ou contrato gravados por outra tela
+        # entre abrir e enviar esta não são apagados com os valores velhos
+        self.save(update_fields=["data_termino", "km_devolucao", "status"])
         # cada semana mexida termina gravada com o status final logo abaixo: sem o
         # recálculo dos sinais ao apagar o pagamento, o histórico não ganha uma
         # versão intermediária falsa (atrasado/pendente) antes da "cancelada"
@@ -434,10 +460,16 @@ class TrocaTemporaria(models.Model):
         ]
 
     def __str__(self):
-        return (
-            f"{self.alocacao.cliente.nome} com {self.veiculo_substituto.placa} "
-            f"desde {self.data_retirada:%d/%m/%Y}"
-        )
+        try:
+            cliente = _nome_ou_aviso(self.alocacao)
+        except Alocacao.DoesNotExist:
+            cliente = "cliente apagado"
+        try:
+            placa = self.veiculo_substituto.placa
+        except Veiculo.DoesNotExist:
+            placa = "carro apagado"
+        dia = f"{self.data_retirada:%d/%m/%Y}" if self.data_retirada else "sem data"
+        return f"{cliente} com {placa} desde {dia}"
 
     def save(self, *args, **kwargs):
         criando = self._state.adding
@@ -535,14 +567,19 @@ class TrocaTemporaria(models.Model):
     @transaction.atomic
     def devolver(self, data_devolucao, km_devolucao):
         # mesma trava do encerramento: o 2º envio não devolve o substituto de novo
+        # o KM da retirada fica o da memória: a tela de devolução pode tê-lo corrigido
         no_banco = (
             TrocaTemporaria.objects.select_for_update()
             .filter(pk=self.pk)
-            .values_list("data_devolucao", flat=True)
+            .values(*_campos_simples(TrocaTemporaria, menos=["km_retirada"]))
             .first()
         )
-        if self.data_devolucao or no_banco:
+        if self.data_devolucao or (no_banco and no_banco["data_devolucao"]):
             raise ValidationError("Substituto já devolvido.")
+        # motivo/observações gravados por outra tela no meio: a versão do histórico
+        # e o rateio usam o que está no banco, não a cópia velha da tela
+        for campo, valor in (no_banco or {}).items():
+            setattr(self, campo, valor)
         if data_devolucao < self.data_retirada:
             raise ValidationError(
                 f"Data de devolução anterior à retirada ({self.data_retirada:%d/%m/%Y})."
@@ -553,7 +590,9 @@ class TrocaTemporaria(models.Model):
         _validar_km_maximo(km_devolucao)
         self.data_devolucao = data_devolucao
         self.km_devolucao = km_devolucao
-        self.save()
+        # só o que a devolução muda (o KM da retirada pode ter sido corrigido na
+        # mesma tela): motivo/observações gravados por outra tela no meio ficam
+        self.save(update_fields=["data_devolucao", "km_devolucao", "km_retirada"])
         substituto = self.veiculo_substituto
         # Só libera quem está alocado — não sobrescreve Vendido/Em manutenção/Inativo.
         if substituto.status == Veiculo.Status.ALOCADO:
@@ -627,8 +666,12 @@ class Vistoria(models.Model):
         ordering = ["-data", "-pk"]
 
     def __str__(self):
-        placa = (self.veiculo or self.alocacao.veiculo).placa
-        return f"{self.get_tipo_display()} — {placa} em {self.data:%d/%m/%Y}"
+        try:
+            placa = placa_ou_aviso(self) if self.veiculo_id else placa_ou_aviso(self.alocacao)
+        except Alocacao.DoesNotExist:
+            placa = "carro apagado"
+        dia = f"{self.data:%d/%m/%Y}" if self.data else "sem data"
+        return f"{self.get_tipo_display()} — {placa} em {dia}"
 
     def save(self, *args, **kwargs):
         if self.veiculo_id is None and self.alocacao_id:

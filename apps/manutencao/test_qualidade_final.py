@@ -161,7 +161,9 @@ def test_apagar_bloqueado_com_cobranca_de_repasse(usuario_logado, veiculo):
 
 def test_apagar_so_por_post(usuario_logado, veiculo):
     manutencao = _manutencao(veiculo)
-    assert usuario_logado.get(f"/manutencao/apagar/{manutencao.pk}/").status_code == 405
+    # GET (o "next" do login com sessão expirada) volta para a manutenção sem apagar
+    # (etapa 18c: antes era 405, página em branco)
+    assert usuario_logado.get(f"/manutencao/apagar/{manutencao.pk}/").status_code == 302
     assert Manutencao.objects.filter(pk=manutencao.pk).exists()
 
 

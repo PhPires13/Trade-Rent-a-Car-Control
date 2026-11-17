@@ -6,7 +6,7 @@
 <h1 class="mb-4 text-2xl font-bold">Busca{% if consulta %}: “{{ consulta }}”{% endif %}</h1>
 
 <form method="get" action="" class="mb-6 flex max-w-lg gap-2" role="search">
-  <input type="search" name="q" value="{{ consulta }}" placeholder="placa, nome, CPF, telefone ou nº da multa" aria-label="Buscar"
+  <input type="search" name="q" value="{{ consulta }}" placeholder="placa, nome, CPF, telefone ou nº do AIT" aria-label="Buscar"
          class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2.5 text-base" {% if not consulta %}autofocus{% endif %}>
   <button class="min-h-11 rounded bg-marca-preto px-4 py-2 font-semibold text-white hover:brightness-125">Buscar</button>
 </form>

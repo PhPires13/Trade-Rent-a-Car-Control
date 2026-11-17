@@ -50,7 +50,8 @@
                  class="w-full rounded border border-gray-300 px-2 py-2 sm:w-40 sm:py-1">
         </td>
         <td class="block sm:table-cell sm:px-3 sm:py-2">
-          <label class="flex items-center gap-2">
+          {# rótulo com 44px de altura: no celular o toque perto da caixinha também marca #}
+          <label class="flex min-h-11 items-center gap-2">
             <input type="checkbox" name="ativo" form="item-{{ item.pk }}" class="h-5 w-5" {% if item.ativo %}checked{% endif %}>
             <span class="text-sm text-gray-600">Em uso</span>
           </label>

@@ -39,6 +39,10 @@
       input[type=checkbox],input[type=radio]{width:1.25rem;height:1.25rem}
       /* link de ação no meio do texto (placa, "registrar devolução"): área de toque de 44px */
       .alvo-toque{display:inline-flex;align-items:center;min-height:44px}
+      /* "Mais opções", "Como ler esta tela"...: o <summary> também ganha 44px de altura;
+         :where não pesa nada — o summary que já tem altura/padding próprio fica como está */
+      :where(summary){min-height:44px}
+      :where(summary:not(.flex)){padding-block:.625rem}
       /* todo outro link do conteúdo ("Editar", "← Voltar", abas, placas): área de toque
          de 44px de altura por uma camada invisível — o layout não muda. Quando outro
          alvo está perto (link, botão, select), static/js/ux.js encurta a camada até o
@@ -80,18 +84,20 @@
     <div class="flex w-full items-center justify-between gap-4 px-4 py-3">
       <a href="{% url 'painel' %}" class="flex shrink-0 items-center gap-2" aria-label="Trade Rent a Car — início">
         <span class="rounded bg-marca-amarelo px-2 py-1 text-lg font-black tracking-tight text-marca-preto">TRADE</span>
-        <span class="hidden text-sm italic text-gray-200 sm:inline">Rent a Car</span>
+        <span class="hidden text-sm italic text-gray-200 sm:inline lg:hidden xl:inline">Rent a Car</span>
       </a>
 
       {# centro: navegação dos módulos — seção atual destacada (sublinhado amarelo) #}
-      <nav class="hidden flex-1 items-center justify-center gap-x-1 text-sm xl:flex" aria-label="Seções">
+      {# a partir de 1024px (notebook com zoom de 125%): menu completo; de 1024 a 1279px a busca #}
+      {# vira a lupa e somem "Rent a Car" e o nome da conta, para os 10 itens caberem numa linha #}
+      <nav class="hidden flex-1 items-center justify-center gap-x-0.5 text-sm lg:flex" aria-label="Seções">
         {% include "_menu_itens.html" with estilo="topo" %}
       </nav>
 
       {# direita: busca + conta #}
       <div class="flex shrink-0 items-center gap-2 text-sm">
-        <form method="get" action="{% url 'buscar' %}" class="hidden sm:block" role="search">
-          <label for="busca-global" class="sr-only">Buscar placa, nome, CPF, telefone ou nº da multa</label>
+        <form method="get" action="{% url 'buscar' %}" class="hidden sm:block lg:hidden xl:block" role="search">
+          <label for="busca-global" class="sr-only">Buscar placa, nome, CPF, telefone ou nº do AIT</label>
           <input id="busca-global" type="search" name="q" value="{{ request.GET.q }}" placeholder="Placa, nome, CPF, telefone…"
                  class="w-56 rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-white placeholder-gray-400 focus:border-marca-amarelo focus:outline-none">
         </form>
@@ -102,7 +108,8 @@
                   :aria-expanded="conta" aria-haspopup="menu"
                   aria-label="Conta: {{ user.first_name|default:user.get_username }} — sair ou Retaguarda">
             <span class="flex h-6 w-6 items-center justify-center rounded-full bg-marca-amarelo text-xs font-black text-marca-preto">{{ user.get_username|first|upper }}</span>
-            <span class="hidden md:inline">{{ user.first_name|default:user.get_username }}</span>
+            {# nome comprido não empurra o menu para fora da tela (o nome inteiro está no aria-label e no menu) #}
+            <span class="hidden max-w-[8rem] truncate md:inline lg:hidden xl:inline">{{ user.first_name|default:user.get_username }}</span>
             <span aria-hidden="true" class="text-xs">▾</span>
           </button>
           <div x-show="conta" x-cloak x-transition.opacity
@@ -118,19 +125,19 @@
             </form>
           </div>
         </div>
-        {# celular: a busca fica à vista (antes só aparecia dentro do ☰) #}
-        <a href="{% url 'buscar' %}" data-alvo-livre aria-label="Buscar placa, nome, CPF, telefone ou nº da multa"
-           class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 sm:hidden"><span aria-hidden="true">🔍</span></a>
-        <button type="button" @click="menu = !menu" x-ref="botaoMenu" class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 xl:hidden"
+        {# celular (e notebook de 1024 a 1279px): a busca fica à vista como lupa #}
+        <a href="{% url 'buscar' %}" data-alvo-livre aria-label="Buscar placa, nome, CPF, telefone ou nº do AIT"
+           class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 sm:hidden lg:flex xl:hidden"><span aria-hidden="true">🔍</span></a>
+        <button type="button" @click="menu = !menu" x-ref="botaoMenu" class="flex h-11 w-11 items-center justify-center rounded text-xl leading-none hover:bg-gray-800 lg:hidden"
                 :aria-expanded="menu" aria-controls="menu-movel" aria-label="Abrir menu">☰</button>
       </div>
     </div>
 
     {# menu em telas menores: lista vertical + busca #}
-    <div id="menu-movel" x-show="menu" x-cloak class="border-t border-gray-800 px-4 pb-4 xl:hidden">
+    <div id="menu-movel" x-show="menu" x-cloak class="border-t border-gray-800 px-4 pb-4 lg:hidden">
       <form method="get" action="{% url 'buscar' %}" class="mt-3 sm:hidden" role="search">
-        <label for="busca-movel" class="sr-only">Buscar placa, nome, CPF, telefone ou nº da multa</label>
-        <input id="busca-movel" type="search" name="q" value="{{ request.GET.q }}" placeholder="Placa, nome, CPF, telefone ou nº da multa"
+        <label for="busca-movel" class="sr-only">Buscar placa, nome, CPF, telefone ou nº do AIT</label>
+        <input id="busca-movel" type="search" name="q" value="{{ request.GET.q }}" placeholder="Placa, nome, CPF, telefone ou nº do AIT"
                class="w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-400 focus:border-marca-amarelo focus:outline-none">
       </form>
       <nav class="mt-2 grid grid-cols-2 gap-1 text-sm sm:grid-cols-5" aria-label="Seções">
@@ -142,7 +149,7 @@
   {% endif %}
 
   {# no celular sobra espaço embaixo para a barra de atalhos fixa não cobrir o fim da página #}
-  <main id="conteudo" tabindex="-1" class="mx-auto max-w-6xl px-4 py-6 focus:outline-none{% if user.is_authenticated %} pb-28 xl:pb-6 print:pb-0{% endif %}">
+  <main id="conteudo" tabindex="-1" class="mx-auto max-w-6xl px-4 py-6 focus:outline-none{% if user.is_authenticated %} pb-28 lg:pb-6 print:pb-0{% endif %}">
     {% if messages %}
       <div class="mb-4 space-y-2">
       {% for message in messages %}
@@ -171,8 +178,8 @@
   {% block barra_inferior %}
   {% if user.is_authenticated %}
   {% with ns=request.resolver_match.namespace nome=request.resolver_match.url_name %}
-  {# celular/tablet: barra fixa embaixo com o que mais se faz no dia a dia (no computador, o menu do topo) #}
-  <nav class="nao-imprime fixed inset-x-0 bottom-0 z-40 border-t border-gray-800 bg-marca-preto text-white xl:hidden print:hidden"
+  {# celular/tablet: barra fixa embaixo com o que mais se faz no dia a dia (de 1024px para cima, o menu do topo) #}
+  <nav class="nao-imprime fixed inset-x-0 bottom-0 z-40 border-t border-gray-800 bg-marca-preto text-white lg:hidden print:hidden"
        style="padding-bottom: env(safe-area-inset-bottom)" aria-label="Atalhos"
        x-data="{ lancar: false }" @keydown.escape.window="if (lancar) { lancar = false; $refs.botaoLancar.focus() }">
     <div class="relative mx-auto grid max-w-lg grid-cols-4 gap-1 px-2 py-1 text-xs font-semibold">

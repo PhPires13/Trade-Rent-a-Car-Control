@@ -363,9 +363,10 @@ def test_apagar_entrada_por_engano_devolve_o_carro_a_disponivel(usuario_logado, 
 
 
 def test_carro_com_duas_idas_abertas_so_volta_quando_a_ultima_fecha(usuario_logado, veiculo):
-    for _ in range(2):
+    for descricao in ("Troca da embreagem", "Troca do freio"):
         usuario_logado.post(
-            f"/manutencao/registrar/{veiculo.pk}/", _dados(data_entrada=HOJE.isoformat())
+            f"/manutencao/registrar/{veiculo.pk}/",
+            _dados(data_entrada=HOJE.isoformat(), descricao=descricao),
         )
     primeira, segunda = veiculo.manutencoes.order_by("pk")
     saida = {"data_saida": HOJE.isoformat(), "custo_real": "100,00", "pagamento_custo": "pago"}

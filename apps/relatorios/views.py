@@ -91,14 +91,17 @@ def _exportar(tipo, formato, ano, mes, hoje):
     de hoje, não o mês escolhido, para ninguém achar que é foto do passado.
     """
     if tipo == "tudo":
+        # as receitas do mês já trazem o resumo do DAS: calculado uma vez só
+        # para as três abas que usam (antes eram três vezes o mesmo cálculo)
+        receitas = services.receitas_do_mes(ano, mes)
         abas = [
-            _PLANILHAS["receitas"](ano, mes),
+            _planilha_receitas(ano, mes, receitas),
             _PLANILHAS["despesas"](ano, mes),
-            _planilha_das(ano, mes),
+            _planilha_das(ano, mes, receitas),
             _PLANILHAS["recebiveis"](ano, mes),
             _PLANILHAS["frota"](ano, mes),
             # cada pagamento que compõe o DAS (a 2ª aba do Financeiro › DAS)
-            _planilha_pagamentos_das(ano, mes),
+            _planilha_pagamentos_das(ano, mes, receitas),
         ]
         return exportar.planilha_xlsx_abas(f"contabilidade-{ano}-{mes:02d}", abas)
     if tipo not in _PLANILHAS:
@@ -108,18 +111,19 @@ def _exportar(tipo, formato, ano, mes, hoje):
     return exportar.exportar(formato, f"{tipo}-{sufixo}", titulo, colunas, linhas)
 
 
-def _planilha_das(ano, mes):
+def _planilha_das(ano, mes, resumo=None):
     """Aba do DAS — as mesmas linhas da planilha de Financeiro › DAS."""
-    return "DAS", ["Grupo", "Valor (R$)", "Entra na base do DAS?"], linhas_base_das(ano, mes)
+    linhas = linhas_base_das(ano, mes, resumo)
+    return "DAS", ["Grupo", "Valor (R$)", "Entra na base do DAS?"], linhas
 
 
-def _planilha_pagamentos_das(ano, mes):
+def _planilha_pagamentos_das(ano, mes, resumo=None):
     """Cada pagamento do DAS e o que entrou fora dele — a mesma 2ª aba de Financeiro › DAS."""
-    return "Pagamentos do DAS", COLUNAS_PAGAMENTOS, linhas_pagamentos_das(ano, mes)
+    return "Pagamentos do DAS", COLUNAS_PAGAMENTOS, linhas_pagamentos_das(ano, mes, resumo)
 
 
-def _planilha_receitas(ano, mes):
-    r = services.receitas_do_mes(ano, mes)
+def _planilha_receitas(ano, mes, r=None):
+    r = r or services.receitas_do_mes(ano, mes)
     linhas = [["Receita de locação (fatura) — BASE DO DAS", float(r["locacao"]), "Sim"]]
     for rotulo, valor in r["diversos"].items():
         linhas.append([f"Pagamentos diversos — {rotulo} (ND)", float(valor), "Não"])
@@ -236,11 +240,11 @@ def _planilha_recebiveis(ano, mes):
                 ]
             )
         if registro["credito"]:
-            # crédito guardado abate do que o cliente deve (valor negativo), mas
+            # crédito do cliente abate do que o cliente deve (valor negativo), mas
             # só até zerar a dívida: a soma do cliente fecha com o "falta" da tela
             # e nunca fica negativa; o que sobra de crédito vai só no texto
             abate = min(registro["credito"], registro["total"])
-            descricao = "Crédito guardado do cliente (abate do que deve)"
+            descricao = "Crédito do cliente (abate do que deve)"
             if registro["credito"] > abate:
                 descricao += (
                     f" — tem {brl(registro['credito'])} de crédito; "

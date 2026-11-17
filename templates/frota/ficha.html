@@ -51,16 +51,16 @@
     <h2 class="mb-3 font-semibold">Composição</h2>
     <table class="w-full text-sm">
       <tbody class="divide-y divide-gray-100">
-        <tr><td class="py-1.5">Aluguéis recebidos</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_aluguel|brl }}</td></tr>
+        <tr><td class="py-1.5">Aluguéis recebidos</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-green-700">+ {{ f.receita_aluguel|brl }}</td></tr>
         {% if f.receita_extras_locacao %}
-        <tr><td class="py-1.5">Excedente de km, encargos e outras cobranças do contrato</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_extras_locacao|brl }}</td></tr>
+        <tr><td class="py-1.5">Excedente de km, encargos e outras cobranças do contrato</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-green-700">+ {{ f.receita_extras_locacao|brl }}</td></tr>
         {% endif %}
-        <tr><td class="py-1.5">Consertos e franquias cobrados dos clientes</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_repasses|brl }}</td></tr>
-        <tr><td class="py-1.5">Auxílio motorista recebido</td><td class="py-1.5 text-right text-green-700">+ {{ f.receita_auxilios|brl }}</td></tr>
-        <tr><td class="py-1.5">Manutenções (custo real)</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_manutencao|brl }}</td></tr>
-        <tr><td class="py-1.5">Franquias de eventos</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_franquias|brl }}</td></tr>
-        <tr><td class="py-1.5">Multas absorvidas pela empresa</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_multas_empresa|brl }}</td></tr>
-        <tr><td class="py-1.5">IPVA pago (todos os anos)</td><td class="py-1.5 text-right text-red-700">− {{ f.despesa_ipva|brl }}</td></tr>
+        <tr><td class="py-1.5">Consertos e franquias cobrados dos clientes</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-green-700">+ {{ f.receita_repasses|brl }}</td></tr>
+        <tr><td class="py-1.5">Auxílio motorista recebido</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-green-700">+ {{ f.receita_auxilios|brl }}</td></tr>
+        <tr><td class="py-1.5">Manutenções (custo real)</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-red-700">− {{ f.despesa_manutencao|brl }}</td></tr>
+        <tr><td class="py-1.5">Franquias de eventos</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-red-700">− {{ f.despesa_franquias|brl }}</td></tr>
+        <tr><td class="py-1.5">Multas absorvidas pela empresa</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-red-700">− {{ f.despesa_multas_empresa|brl }}</td></tr>
+        <tr><td class="py-1.5">IPVA pago (todos os anos)</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-red-700">− {{ f.despesa_ipva|brl }}</td></tr>
         <tr><td class="py-1.5">Proteção Auto Truck (estimada pela mensalidade)</td>
           {% if veiculo.mensalidade_protecao and not veiculo.data_aquisicao %}
           <td class="py-1.5 text-right text-amber-800">sem data de compra: proteção não calculada
@@ -70,12 +70,18 @@
           <td class="py-1.5 text-right text-amber-800">sem data da venda: proteção não calculada
             <a href="{% url 'admin:frota_veiculo_change' veiculo.pk %}#id_data_venda" class="block text-xs underline">informar a data da venda</a></td>
           {% else %}
-          <td class="py-1.5 text-right text-red-700">− {{ f.despesa_protecao_estimada|brl }}</td>
+          <td class="whitespace-nowrap py-1.5 pl-3 text-right text-red-700">− {{ f.despesa_protecao_estimada|brl }}</td>
           {% endif %}</tr>
-        <tr class="font-semibold"><td class="py-1.5">Resultado operacional <span class="font-normal text-gray-500">(receitas − despesas)</span></td><td class="py-1.5 text-right">{{ f.resultado_operacional|brl }}</td></tr>
+        <tr class="font-semibold"><td class="py-1.5">Resultado operacional <span class="font-normal text-gray-500">(receitas − despesas)</span></td><td class="whitespace-nowrap py-1.5 pl-3 text-right">{{ f.resultado_operacional|brl }}</td></tr>
         {% if f.resultado_final is not None %}
-        <tr class="bg-yellow-50 font-black"><td class="py-1.5">Resultado final (com a venda de {{ veiculo.valor_venda|brl }})</td>
-          <td class="py-1.5 text-right {% if f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">{{ f.resultado_final|brl }}</td></tr>
+        {# a conta da venda linha a linha, para quem confere fechar o resultado final na mão #}
+        <tr><td class="py-1.5">Venda do carro</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-green-700">+ {{ veiculo.valor_venda|brl }}</td></tr>
+        {% if veiculo.custos_venda %}
+        <tr><td class="py-1.5">Custos da venda (comissão, transferência…)</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-red-700">− {{ veiculo.custos_venda|brl }}</td></tr>
+        {% endif %}
+        <tr><td class="py-1.5">Investido (compra + entrada)</td><td class="whitespace-nowrap py-1.5 pl-3 text-right text-red-700">− {{ f.investido|brl }}</td></tr>
+        <tr class="bg-yellow-50 font-black"><td class="py-1.5">Resultado final <span class="font-normal text-gray-500">(operacional + venda − custos − investido)</span></td>
+          <td class="whitespace-nowrap py-1.5 pl-3 text-right {% if f.resultado_final >= 0 %}text-green-700{% else %}text-red-700{% endif %}">{{ f.resultado_final|brl }}</td></tr>
         {% endif %}
       </tbody>
     </table>

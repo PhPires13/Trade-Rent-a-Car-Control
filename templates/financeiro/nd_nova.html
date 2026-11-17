@@ -21,13 +21,20 @@
                 venc: "{{ post.vencimento|default:''|escapejs }}",
                 manual: {% if post.vencimento %}true{% else %}false{% endif %},
                 confirmaDistante: {% if post.confirmar_vencimento_distante == "1" %}true{% else %}false{% endif %},
+                confirmaAntiga: {% if post.confirmar_emissao_antiga == "1" %}true{% else %}false{% endif %},
+                hojeIso: "{{ hoje|date:'Y-m-d' }}",
+                /* emissão mais de 60 dias atrás: quase sempre o ano errado (2016 no lugar de 2026) */
+                get antiga() {
+                  if (!this.emissao) return false;
+                  return (new Date(this.hojeIso + "T12:00:00") - new Date(this.emissao + "T12:00:00")) / 86400000 > 60;
+                },
                 /* vencimento a mais de 60 dias da emissão: quase sempre o ano errado */
                 get distante() {
                   if (!this.venc || !this.emissao) return false;
                   return (new Date(this.venc + "T12:00:00") - new Date(this.emissao + "T12:00:00")) / 86400000 > 60;
                 },
                 /* sempre true/false: o Alpine só tira o "disabled" com false/null */
-                get bloqueado() { return !!(this.enviando || this.temIncompleta || (this.distante && !this.confirmaDistante)); },
+                get bloqueado() { return !!(this.enviando || this.temIncompleta || (this.antiga && !this.confirmaAntiga) || (this.distante && !this.confirmaDistante)); },
                 nomesDias: ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"],
                 diaDoCliente() { const d = this.dias[this.cliente]; return d === undefined ? null : d; },
                 sugerido() {
@@ -96,6 +103,10 @@
             x-on:click="manual = false; ajustar()">usar a data sugerida</button>
     <span x-show="!cliente">Se deixar em branco, a nota vence no próximo dia de pagamento do cliente — nunca no mesmo dia da emissão.</span>
   </p>
+  <label x-show="antiga" x-cloak class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-emissao-antiga>
+    <input type="checkbox" name="confirmar_emissao_antiga" value="1" x-model="confirmaAntiga" class="mt-1 h-4 w-4" style="width:auto">
+    <span><strong>Confirmo: emissão antiga</strong> — a data de emissão é de mais de 60 dias atrás e a nota já nasce vencida. Confira o ano da emissão.</span>
+  </label>
   <label x-show="distante" x-cloak class="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-vencimento-distante>
     <input type="checkbox" name="confirmar_vencimento_distante" value="1" x-model="confirmaDistante" class="mt-1 h-4 w-4" style="width:auto">
     <span><strong>Confirmo: vencimento distante</strong> — vence mais de 60 dias depois da emissão. Confira o ano do vencimento.</span>

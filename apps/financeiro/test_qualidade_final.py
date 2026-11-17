@@ -613,7 +613,7 @@ def test_extrato_mostra_totais_e_falta(usuario_logado, cliente):
     semana = _aluguel(cliente)
     services.registrar_recebimento(cliente, HOJE, Decimal("380"), "pix", [(semana, Decimal("330"))])
     html = usuario_logado.get(f"/financeiro/cliente/{cliente.pk}/").content.decode()
-    assert "Deve hoje" in html and "A vencer" in html and "Caução guardada" in html
+    assert "Deve hoje" in html and "A vencer" in html and "Caução retida" in html
     assert "falta R$ 320,00" in html
     assert "sobra" in html and "→ crédito" in html
     assert "Extrato — Patrícia — Trade Rent a Car" in html

@@ -160,6 +160,8 @@ def test_marcar_atrasos_nao_desfaz_cancelar_ou_judicial_feito_enquanto_roda(
 
     def lista_velha_e_muda_no_meio(queryset):
         velha = list(original(queryset))
+        # só a primeira leitura é velha: a releitura da rotina usa a anotação de verdade
+        monkeypatch.setattr(Cobranca, "com_quitacao_anotada", original)
         Cobranca.objects.filter(pk=vencida.pk).update(status=mudanca)
         return velha
 
@@ -232,3 +234,117 @@ def test_telas_do_financeiro_sem_os_termos_antigos():
             "dinheiro guardado",
         ):
             assert antigo not in texto, f"{arquivo.name}: “{antigo}”"
+
+
+# ---------- 1b. a franquia no painel leva ao sinistro ----------
+
+
+def _franquia_do_sinistro(cliente, alocacao, valor="800.00"):
+    from apps.sinistros.models import Sinistro
+
+    franquia = _cobranca(cliente, Cobranca.Origem.REPASSE_SINISTRO, valor)
+    sinistro = Sinistro.objects.create(
+        veiculo=alocacao.veiculo, data=HOJE - timedelta(days=5), cobranca_franquia=franquia
+    )
+    return franquia, sinistro
+
+
+def test_painel_leva_a_franquia_em_aberto_ao_sinistro(usuario_logado, cliente, alocacao):
+    franquia, sinistro = _franquia_do_sinistro(cliente, alocacao)
+    html = usuario_logado.get("/financeiro/").content.decode()
+    assert "data-cancelar-no-sinistro" in html
+    assert f"/sinistros/{sinistro.pk}/editar/" in html
+    # e não oferece o "não cobrar" do painel, que recusaria
+    assert f"/financeiro/cobranca/{franquia.pk}/cancelar/" not in html
+
+
+def test_painel_nao_leva_ao_sinistro_quando_a_franquia_ja_tem_pagamento(
+    usuario_logado, cliente, alocacao
+):
+    franquia, _ = _franquia_do_sinistro(cliente, alocacao)
+    services.registrar_recebimento(
+        cliente, HOJE, Decimal("100"), "pix", [(franquia, Decimal("100"))]
+    )
+    html = usuario_logado.get("/financeiro/").content.decode()
+    # lá o botão "Cancelar esta cobrança" só aparece sem pagamento
+    assert "data-cancelar-no-sinistro" not in html
+
+
+def test_franquia_com_pagamento_recusada_pelo_motivo_certo(usuario_logado, cliente, alocacao):
+    franquia, _ = _franquia_do_sinistro(cliente, alocacao)
+    services.registrar_recebimento(
+        cliente, HOJE, Decimal("100"), "pix", [(franquia, Decimal("100"))]
+    )
+    html = _cancelar(usuario_logado, franquia).content.decode()
+    assert "com pagamento aplicado não pode ser cancelada" in html
+    assert "menu Sinistros" not in html
+
+
+def test_painel_com_franquias_nao_faz_consulta_por_linha(
+    usuario_logado, cliente, alocacao, django_assert_max_num_queries
+):
+    _franquia_do_sinistro(cliente, alocacao)
+    usuario_logado.get("/financeiro/")  # aquece sessão/cache
+    with django_assert_max_num_queries(60) as antes:
+        usuario_logado.get("/financeiro/")
+    for _ in range(5):
+        _franquia_do_sinistro(cliente, alocacao)
+    with django_assert_max_num_queries(len(antes.captured_queries)):
+        usuario_logado.get("/financeiro/")
+
+
+# ---------- 4b. frases sem "crédito do cliente" repetido ----------
+
+
+def test_aviso_de_credito_sem_termo_repetido(usuario_logado, cliente):
+    services.emitir_nota_debito(cliente, HOJE, [("Avaria", Decimal("300.00"))])
+    MovimentoCredito.objects.create(
+        cliente=cliente, tipo=MovimentoCredito.Tipo.ENTRADA, valor=Decimal("50.00"), data=HOJE
+    )
+    nds = usuario_logado.get("/financeiro/nd/").content.decode()
+    assert "tem R$ 50,00 de crédito — dá para usar nesta ND" in nds
+    receber = usuario_logado.get(f"/financeiro/receber/?cliente={cliente.pk}").content.decode()
+    assert "tem R$ 50,00 de crédito — usar antes?" in receber
+
+
+# ---------- revisão: franquia atrasada com pagamento e rótulo da caução ----------
+
+
+def test_painel_nao_leva_ao_sinistro_quando_a_franquia_atrasada_tem_pagamento(
+    usuario_logado, cliente, alocacao
+):
+    # vencida + paga em parte continua "Atrasado" (não "Parcial"): o link também some
+    franquia, _ = _franquia_do_sinistro(cliente, alocacao)
+    Cobranca.objects.filter(pk=franquia.pk).update(vencimento=HOJE - timedelta(days=4))
+    services.registrar_recebimento(
+        cliente, HOJE, Decimal("100"), "pix", [(franquia, Decimal("100"))]
+    )
+    franquia.refresh_from_db()
+    assert franquia.status == Cobranca.Status.ATRASADO
+    html = usuario_logado.get("/financeiro/?status=todas").content.decode()
+    assert "data-cancelar-no-sinistro" not in html
+
+
+def test_painel_leva_ao_sinistro_a_franquia_atrasada_sem_pagamento(
+    usuario_logado, cliente, alocacao
+):
+    franquia, sinistro = _franquia_do_sinistro(cliente, alocacao)
+    Cobranca.objects.filter(pk=franquia.pk).update(
+        vencimento=HOJE - timedelta(days=4), status=Cobranca.Status.ATRASADO
+    )
+    html = usuario_logado.get("/financeiro/?status=todas").content.decode()
+    assert f"/sinistros/{sinistro.pk}/editar/" in html
+
+
+def test_caucao_devolvida_nao_diz_retida_entre_parenteses(usuario_logado, cliente, alocacao):
+    from apps.financeiro.models import Caucao, MovimentacaoCaucao
+
+    caucao = Caucao.objects.get_or_create(alocacao=alocacao)[0]
+    for tipo in (MovimentacaoCaucao.Tipo.RECEBIMENTO, MovimentacaoCaucao.Tipo.DEVOLUCAO):
+        MovimentacaoCaucao.objects.create(
+            caucao=caucao, tipo=tipo, valor=Decimal("1000"), data=HOJE
+        )
+    html = usuario_logado.get(f"/financeiro/caucoes/{caucao.pk}/").content.decode()
+    # antes: "Caução retida (Devolvida)" ao lado de R$ 0,00
+    assert "Caução retida (Devolvida)" not in html
+    assert "caução devolvida" in html

@@ -62,7 +62,7 @@ def test_painel_tem_botao_recebi_para_quem_deve():
 def test_busca_do_topo_explica_o_que_procura(usuario_logado):
     html = usuario_logado.get("/").content.decode()
     assert "Buscar placa ou cliente" not in html
-    assert 'placeholder="Placa, nome, CPF, telefone ou nº da multa"' in html
+    assert 'placeholder="Placa, nome, CPF, telefone ou nº do AIT"' in html
 
 
 def test_cabecalho_some_na_impressao(usuario_logado):

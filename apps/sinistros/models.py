@@ -6,7 +6,7 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.frota.models import Veiculo
-from apps.multas.models import placa_ou_aviso
+from apps.multas.models import SEM_NEGATIVO, placa_ou_aviso, trava_sem_negativo
 from apps.pessoas.models import Cliente
 
 DIAS_CARENCIA_AUXILIO = 7  # decisão nº 10: auxílio quando conserto de colisão passa de 7 dias
@@ -79,6 +79,7 @@ class Sinistro(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
+        validators=[SEM_NEGATIVO],
         help_text="Zero quando coberta pelas franquias gratuitas do plano",
     )
 
@@ -109,13 +110,21 @@ class Sinistro(models.Model):
     class Meta:
         verbose_name = "sinistro"
         ordering = ["-data"]
+        constraints = [trava_sem_negativo("franquia_valor", "sinistro_franquia_nao_negativa")]
 
     def __str__(self):
         dia = f"{self.data:%d/%m/%Y}" if self.data else "sem data"
         return f"{placa_ou_aviso(self)} — {self.get_tipo_display()} em {dia}"
 
     def save(self, *args, **kwargs):
-        if self.cliente_id is None and self.veiculo_id and self.data:
+        update_fields = kwargs.get("update_fields")
+        if (
+            self.cliente_id is None
+            and self.veiculo_id
+            and self.data
+            # salvar só outros campos não grava o cliente: não há o que buscar
+            and (update_fields is None or "cliente" in update_fields)
+        ):
             # carro parado durante uma troca: o cliente estava com o substituto
             from apps.multas.services import cliente_dirigindo
 
@@ -194,6 +203,7 @@ class AuxilioMotorista(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
+        validators=[SEM_NEGATIVO],
         help_text="Um salário mínimo cheio",
     )
     status = models.CharField(
@@ -209,6 +219,16 @@ class AuxilioMotorista(models.Model):
         verbose_name = "auxílio motorista"
         verbose_name_plural = "auxílios motorista"
         ordering = ["-pk"]
+        constraints = [
+            trava_sem_negativo("valor", "auxilio_valor_nao_negativo"),
+            # um auxílio por sinistro (como a tela já faz): pelo /admin dava para pôr
+            # dois e a receita de auxílio dobrava nos relatórios
+            models.UniqueConstraint(
+                fields=["sinistro"],
+                name="um_auxilio_por_sinistro",
+                violation_error_message="Este sinistro já tem auxílio registrado.",
+            ),
+        ]
 
     def __str__(self):
         try:

@@ -175,7 +175,8 @@ def test_ficha_em_lote_soma_cada_veiculo_sem_misturar(cliente, db):
     )
     vazio = Veiculo.objects.create(placa="BBB2B22", marca_modelo="Voyage", km_atual=50_000)
 
-    # dois sinistros, com auxílio recebido e não recebido no mesmo sinistro
+    # dois sinistros com franquia e um sem; auxílio recebido e não recebido
+    # (um auxílio por sinistro — etapa 18c)
     primeiro = Sinistro.objects.create(
         veiculo=carro,
         data=HOJE - timedelta(days=40),
@@ -189,7 +190,12 @@ def test_ficha_em_lote_soma_cada_veiculo_sem_misturar(cliente, db):
         franquia_valor=Decimal("800.00"),
     )
     AuxilioMotorista.objects.create(sinistro=primeiro, valor=Decimal("500.00"), status="recebido")
-    AuxilioMotorista.objects.create(sinistro=primeiro, valor=Decimal("300.00"), status="solicitado")
+    sem_franquia = Sinistro.objects.create(
+        veiculo=carro, data=HOJE - timedelta(days=20), envolvido="terceiro"
+    )
+    AuxilioMotorista.objects.create(
+        sinistro=sem_franquia, valor=Decimal("300.00"), status="solicitado"
+    )
     AuxilioMotorista.objects.create(sinistro=segundo, valor=Decimal("200.00"), status="recebido")
 
     # só a multa da empresa é despesa do carro
@@ -325,6 +331,7 @@ def test_ranking_da_frota_na_tela_com_queries_fixas(
         Veiculo.objects.filter(pk=veiculo.pk).update(
             status=Veiculo.Status.VENDIDO, data_venda=HOJE, valor_venda=Decimal("30000.00")
         )
-    with django_assert_max_num_queries(25):
+    # ativos e vendidos montados num lote só (etapa 18c: 24 → 14)
+    with django_assert_max_num_queries(15):
         resposta = usuario_logado.get("/frota/desmobilizacao/")
     assert resposta.status_code == 200

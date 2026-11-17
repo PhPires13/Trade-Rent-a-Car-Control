@@ -17,13 +17,13 @@
   <div class="rounded-lg bg-white p-4 shadow"><div class="whitespace-nowrap text-2xl font-black">{{ caucao.recebido|brl }}</div><div class="text-sm text-gray-500">Recebido</div></div>
   <div class="rounded-lg bg-white p-4 shadow"><div class="whitespace-nowrap text-2xl font-black">{{ caucao.descontado|brl }}</div><div class="text-sm text-gray-500">Descontos</div></div>
   <div class="rounded-lg bg-white p-4 shadow"><div class="whitespace-nowrap text-2xl font-black">{{ caucao.devolvido|brl }}</div><div class="text-sm text-gray-500">Devolvido</div></div>
-  <div class="col-span-2 rounded-lg bg-marca-preto p-4 text-white shadow sm:col-span-1"><div class="whitespace-nowrap text-2xl font-black text-marca-amarelo">{{ caucao.saldo|brl }}</div><div class="text-sm text-gray-300">Saldo guardado ({{ caucao.status }})</div></div>
+  <div class="col-span-2 rounded-lg bg-marca-preto p-4 text-white shadow sm:col-span-1"><div class="whitespace-nowrap text-2xl font-black text-marca-amarelo">{{ caucao.saldo|brl }}</div><div class="text-sm text-gray-300">Caução retida{% if caucao.status != "Retida" %} (caução {{ caucao.status|lower }}){% endif %}</div></div>
 </div>
 
 {% if credito > 0 %}
 <div class="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm" data-credito-cliente>
   <p class="font-semibold">{{ cliente.nome }} também tem {{ credito|brl }} de crédito (pagou adiantado ou sobrou de semanas não usadas).</p>
-  <p class="mt-1 text-gray-700">Esse valor não faz parte da caução. {% if pendentes %}Ainda há cobrança em aberto: use o crédito para pagá-la antes de mexer na caução.{% else %}Não há cobrança em aberto: combine a devolução junto com a da caução.{% endif %}</p>
+  <p class="mt-1 text-gray-700">Esse valor não faz parte da caução. {% if pendentes %}Ainda há cobrança em aberto: use o crédito para pagá-la antes de mexer na caução.{% elif alocacao_ativa %}Com o contrato rodando, o crédito será usado nas próximas semanas (botão “Usar o crédito” no Receber) — não precisa devolver agora.{% else %}Não há cobrança em aberto: combine a devolução junto com a da caução.{% endif %}</p>
   <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2">
     {% if pendentes %}
     <a href="{% url 'financeiro:receber' %}?cliente={{ cliente.pk }}&usar_credito=1&voltar={{ request.path|urlencode }}" class="rounded bg-marca-amarelo px-4 py-2 font-bold text-marca-preto hover:brightness-95" data-usar-credito>Usar o crédito nas cobranças →</a>

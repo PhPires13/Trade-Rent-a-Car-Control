@@ -284,6 +284,7 @@ def test_nd_clique_duplo_nao_duplica(usuario_logado, cliente):
     dados = {
         "cliente": cliente.pk,
         "data_emissao": "2026-07-10",
+        "confirmar_emissao_antiga": "1",  # emissão de meses atrás pede a confirmação
         "token": "tok-unico-123",
         "item_descricao": ["Multa avanço de sinal"],
         "item_valor": ["234,78"],

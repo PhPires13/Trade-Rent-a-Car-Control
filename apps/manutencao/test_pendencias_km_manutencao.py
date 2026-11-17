@@ -47,8 +47,9 @@ def test_registrar_reenviado_nao_grava_em_dobro(usuario_logado, veiculo):
     segunda = usuario_logado.post(_url(veiculo), dados, follow=True)
     assert Manutencao.objects.count() == 1
     assert "envio repetido foi ignorado" in segunda.content.decode()
-    # outro formulário (outro código) grava normalmente
-    usuario_logado.post(_url(veiculo), _dados(token="codigo-manut-2"))
+    # outro formulário (outro código) com outro serviço grava normalmente
+    # (o mesmo serviço logo depois cai na trava de conteúdo — test_etapa18c)
+    usuario_logado.post(_url(veiculo), _dados(token="codigo-manut-2", descricao="Troca do freio"))
     assert Manutencao.objects.count() == 2
 
 

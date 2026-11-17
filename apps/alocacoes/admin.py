@@ -2,6 +2,7 @@ from django import forms
 from django.contrib import admin, messages
 from simple_history.admin import SimpleHistoryAdmin
 
+from apps.financeiro.admin import coluna_em_reais
 from apps.formatos import brl
 from apps.km.forms import CampoKm
 
@@ -53,9 +54,10 @@ class AlocacaoAdmin(CicloDeVidaTravado):
         "cliente",
         "data_inicio",
         "data_termino",
-        "valor_semanal",
+        "valor_semanal_rs",
         "status",
     ]
+    valor_semanal_rs = coluna_em_reais("valor_semanal", "valor semanal", "valor_semanal")
     list_filter = ["status", "limite_km"]
     search_fields = ["veiculo__placa", "cliente__nome"]
     campos_travados = [
@@ -76,8 +78,11 @@ class TrocaTemporariaAdmin(CicloDeVidaTravado):
         "veiculo_substituto",
         "data_retirada",
         "data_devolucao",
-        "valor_semanal_ajustado",
+        "valor_ajustado_rs",
     ]
+    valor_ajustado_rs = coluna_em_reais(
+        "valor_semanal_ajustado", "valor semanal durante a troca", "valor_semanal_ajustado"
+    )
     search_fields = ["veiculo_substituto__placa", "alocacao__cliente__nome"]
     campos_travados = [
         "alocacao",

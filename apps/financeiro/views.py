@@ -224,7 +224,10 @@ def cobrancas(request):
         .values("cobranca_origem")
     )
     qs = Cobranca.com_quitacao_anotada(
-        Cobranca.objects.select_related("cliente", "alocacao__veiculo", "nota_debito")
+        # sinistro_franquia: a franquia se cancela no sinistro — a linha leva até ele
+        Cobranca.objects.select_related(
+            "cliente", "alocacao__veiculo", "nota_debito", "sinistro_franquia"
+        )
     ).annotate(
         encargo_aplicado=Subquery(encargos.annotate(t=Sum("valor")).values("t")),
         encargos_ativos=Subquery(encargos.annotate(n=Count("pk")).values("n")),
@@ -392,14 +395,8 @@ def cancelar(request, cobranca_id):
 
 def _cancelar(request, cobranca):
     """As conferências e o cancelamento em si (a cobrança já vem travada)."""
-    if cobranca.origem == Cobranca.Origem.REPASSE_SINISTRO:
-        _erro_no_painel(
-            request,
-            "A franquia de sinistro se cancela no próprio sinistro: abra o sinistro "
-            "(menu Sinistros) e use “Cancelar esta cobrança”. Assim o sinistro fica "
-            "livre para corrigir e cobrar de novo.",
-        )
-    elif cobranca.origem not in ORIGENS_CANCELAVEIS:
+    franquia = cobranca.origem == Cobranca.Origem.REPASSE_SINISTRO
+    if cobranca.origem not in ORIGENS_CANCELAVEIS and not franquia:
         _erro_no_painel(
             request,
             "Só cobranças de excedente, encargo, nota de débito, conserto ou avulsas "
@@ -411,6 +408,14 @@ def _cancelar(request, cobranca):
         _erro_no_painel(request, "Cobrança com pagamento aplicado não pode ser cancelada.")
     elif cobranca.status == Cobranca.Status.CANCELADA:
         messages.info(request, f"Esta cobrança já estava cancelada: {cobranca.descricao}.")
+    elif franquia:
+        # o botão do sinistro também libera o sinistro para corrigir e cobrar de novo
+        _erro_no_painel(
+            request,
+            "A franquia de sinistro se cancela no próprio sinistro: abra o sinistro "
+            "(menu Sinistros) e use “Cancelar esta cobrança”. Assim o sinistro fica "
+            "livre para corrigir e cobrar de novo.",
+        )
     elif cobranca.nota_debito_id:
         _cancelar_nota_debito(request, cobranca)
     else:
@@ -506,6 +511,11 @@ def _resumo_do_recibo(request, cliente):
         services.juntar_resumo_do_credito(resumo, junto)
     resumo["link_whatsapp"] = recibo.link_recibo(resumo)
     resumo["pode_desfazer"] = services.pode_desfazer(recebimento)
+    # recibo aberto pelo aviso de "já foi lançado agora há pouco": mostra o
+    # botão "É outro pagamento" (uma vez só, para este recibo)
+    resumo["veio_do_repetido"] = request.session.get("receber_repetido") == recebimento.pk
+    if resumo["veio_do_repetido"]:
+        request.session.pop("receber_repetido", None)
     return resumo
 
 
@@ -599,6 +609,28 @@ def _ler_aplicacoes(post, cliente, cobrancas_abertas):
             )
         aplicacoes.append((cobranca, valor))
     return aplicacoes
+
+
+def _cobrancas_do_formulario(post):
+    """pks das cobranças com valor nas chaves aplicar_<pk> (sem os encargos a criar).
+
+    Para a trava de toque duplo: só é "o mesmo pagamento" se for nas mesmas
+    cobranças. Não confere saldo (o 2º toque acha a cobrança já paga).
+    """
+    pks = []
+    for chave, bruto in post.items():
+        if not chave.startswith("aplicar_") or chave.startswith("aplicar_encargo_"):
+            continue
+        pk = chave.removeprefix("aplicar_")
+        if not _id_valido(pk) or not bruto.strip():
+            continue
+        try:
+            if _dinheiro(bruto, "") <= ZERO:
+                continue
+        except (ValidationError, InvalidOperation, ValueError):
+            pass  # valor inválido: o erro certo aparece adiante (_ler_aplicacoes)
+        pks.append(int(pk))
+    return pks
 
 
 def _encargos_sugeridos(cobrancas_abertas, hoje):
@@ -718,10 +750,14 @@ def receber(request):
                 usar_credito = ZERO
                 if post.get("usar_credito_junto") == "1" and forma != Recebimento.Forma.CREDITO:
                     usar_credito = max(MovimentoCredito.saldo_do_cliente(cliente), ZERO)
-                # toque duplo: o 2º envio acha a cobrança já paga — o aviso certo é o de repetido
-                repetido = services._recebimento_recente(cliente, data, valor)
-                if repetido:
-                    raise services.RecebimentoRepetido(repetido)
+                # toque duplo: o 2º envio acha a cobrança já paga — o aviso certo é o de repetido.
+                # "É outro pagamento" (depois do aviso) desliga a trava para este envio
+                outro_pagamento = post.get("confirmar_outro_pagamento") == "1"
+                marcadas = _cobrancas_do_formulario(post)
+                if not outro_pagamento:
+                    repetido = services._recebimento_recente(cliente, data, valor, forma, marcadas)
+                    if repetido:
+                        raise services.RecebimentoRepetido(repetido)
                 aplicacoes = _ler_aplicacoes(post, cliente, cobrancas_abertas)
                 with transaction.atomic():
                     # cliente travado antes do encargo (que trava o aluguel): a mesma
@@ -739,7 +775,8 @@ def receber(request):
                         aplicacoes=aplicacoes,
                         sobra_destino=post.get("sobra_destino", "credito"),
                         observacoes=post.get("observacoes", ""),
-                        bloquear_repetido=True,
+                        bloquear_repetido=not outro_pagamento,
+                        cobrancas_do_formulario=marcadas,
                         usar_credito=usar_credito,
                         mes_passado_confirmado=post.get("confirmar_mes_passado") == "1",
                         hoje=hoje,
@@ -769,8 +806,10 @@ def receber(request):
                     destino += "&" + urlencode({"voltar": voltar})
                 return redirect(destino)
         except services.RecebimentoRepetido as repetido:
-            # toque duplo: mostra o resumo do lançamento que já valeu
+            # toque duplo: mostra o resumo do lançamento que já valeu, com o botão
+            # "É outro pagamento" para quando era mesmo um segundo pagamento igual
             messages.warning(request, repetido.messages[0])
+            request.session["receber_repetido"] = repetido.recebimento.pk
             return redirect(f"{request.path}?cliente={cliente.pk}&recibo={repetido.recebimento.pk}")
         except ValidationError as erro:
             messages.error(request, "; ".join(erro.messages))
@@ -832,6 +871,9 @@ def receber(request):
             # um por formulário: "Voltar" depois do recibo e Confirmar de novo não lança em dobro
             "token": uuid4().hex,
             "abrir_com_credito": request.GET.get("usar_credito") == "1" and not post,
+            # "É outro pagamento" (depois do aviso de repetido): o envio passa pela trava
+            "outro_pagamento": request.GET.get("outro") == "1"
+            or bool(post and post.get("confirmar_outro_pagamento") == "1"),
             "resumo": resumo,
             # o cartão verde do recibo já diz "Pagamento lançado": sem o aviso repetido
             "sucesso_no_cartao": bool(resumo),
@@ -839,6 +881,36 @@ def receber(request):
             "voltar": _voltar_seguro(request),
         },
     )
+
+
+def _mensagem_do_desfazer(recebimento, junto, valor, cliente, reabertas, sobra_credito, reforco):
+    """O que o desfazer mudou, com o valor que a pessoa lançou (sem somar o crédito)."""
+    if recebimento.forma == Recebimento.Forma.CREDITO:
+        texto = f"Uso de {brl(valor)} do crédito de {cliente.nome} desfeito"
+    else:
+        texto = f"Lançamento de {brl(valor)}"
+        if junto is not None:
+            texto += f" (e o uso de {brl(junto.valor)} do crédito)"
+        texto += f" de {cliente.nome} desfeito"
+    efeitos = []
+    if reabertas:
+        efeitos.append(
+            "a cobrança voltou a ficar em aberto"
+            if len({c.pk for c in reabertas}) == 1
+            else "as cobranças voltaram a ficar em aberto"
+        )
+    if recebimento.forma == Recebimento.Forma.CREDITO:
+        efeitos.append(f"os {brl(valor)} voltaram para o crédito")
+    elif junto is not None:
+        efeitos.append(f"os {brl(junto.valor)} voltaram para o crédito")
+    if sobra_credito > ZERO:
+        efeitos.append(f"o crédito de {brl(sobra_credito)} que ele gerou foi retirado")
+    if reforco is not None:
+        efeitos.append(f"o reforço de {brl(reforco.valor)} na caução foi retirado")
+    if efeitos:
+        texto += " — " + ", ".join(efeitos[:-1]) + (" e " if len(efeitos) > 1 else "")
+        texto += efeitos[-1]
+    return texto + ". Se precisar, lance de novo com os dados certos."
 
 
 def desfazer_recebimento(request, recebimento_id):
@@ -869,14 +941,22 @@ def desfazer_recebimento(request, recebimento_id):
     # "Pagamento lançado" do Receber, que fazia parecer que tinha dado certo
     do_extrato = request.POST.get("voltar") == "extrato"
     extrato = reverse("financeiro:extrato_cliente", args=[cliente.pk])
+    # o que o lançamento fez, lido antes de apagar: a mensagem diz o efeito exato
+    sobra_credito = (
+        recebimento.movimentos_credito.filter(tipo=MovimentoCredito.Tipo.ENTRADA).aggregate(
+            t=Sum("valor")
+        )["t"]
+        or ZERO
+    )
+    reforco = services._reforco_do_recebimento(recebimento)
     try:
         with transaction.atomic():
+            reabertas = []
             # o crédito sai primeiro: se ele pagou o encargo cobrado junto, o encargo
             # fica sem pagamento e o desfazer do dinheiro consegue cancelá-lo
             if junto is not None:
-                services.desfazer_recebimento(junto)
-                valor += junto.valor
-            services.desfazer_recebimento(recebimento)
+                reabertas += services.desfazer_recebimento(junto)
+            reabertas += services.desfazer_recebimento(recebimento)
     except ValidationError as erro:
         texto = "; ".join(erro.messages)
         if "já foi usado" in texto and "crédito" in texto:
@@ -893,8 +973,9 @@ def desfazer_recebimento(request, recebimento_id):
         return redirect(destino)
     messages.success(
         request,
-        f"Lançamento de {brl(valor)} de {cliente.nome} desfeito — as cobranças voltaram "
-        "a ficar em aberto. Se precisar, lance de novo com os dados certos.",
+        _mensagem_do_desfazer(
+            recebimento, junto, valor, cliente, reabertas, sobra_credito, reforco
+        ),
     )
     if do_extrato:
         return redirect(extrato)
@@ -1060,6 +1141,7 @@ def nd_nova(request):
                     itens=itens,
                     observacoes=post.get("observacoes", ""),
                     vencimento_distante_confirmado=post.get("confirmar_vencimento_distante") == "1",
+                    emissao_antiga_confirmada=post.get("confirmar_emissao_antiga") == "1",
                 )
             messages.success(request, f"ND {nd.numero:03d} emitida ({brl(nd.total)}).")
             return redirect(_voltar_seguro(request)[0] or "financeiro:nds")
@@ -1220,9 +1302,8 @@ def caucao_detalhe(request, caucao_id):
     falta = max(combinado - caucao.recebido, ZERO) if ativa else ZERO
     # caução usada para pagar cobranças com o carro ainda com o cliente: a
     # garantia caiu abaixo do combinado e o cliente precisa repor a diferença
-    repor = (
-        max(combinado - caucao.saldo - falta, ZERO) if ativa and caucao.descontado > ZERO else ZERO
-    )
+    # (a mesma conta do aviso do painel)
+    repor = caucao.a_repor
     # depósito incompleto e caução já usada: sugere as duas partes juntas
     # (fica no combinado, sem cair na trava de "acima do combinado")
     sugerido = falta + repor
@@ -1573,7 +1654,7 @@ def extrato_cliente(request, cliente_id):
         ).order_by("-alocacao__data_inicio", "-pk")
     )
     caucao = sum((c.saldo for c in caucoes_do_cliente), ZERO)
-    # o card "Caução guardada" leva à caução que ainda tem dinheiro (ou à mais recente)
+    # o card "Caução retida" leva à caução que ainda tem dinheiro (ou à mais recente)
     caucao_link = next(
         (c for c in caucoes_do_cliente if c.saldo > ZERO),
         caucoes_do_cliente[0] if caucoes_do_cliente else None,

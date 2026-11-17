@@ -351,7 +351,14 @@ def _resumo(cliente, hoje):
         for alocacao in ativas:
             alocacao.na_oficina = oficina.get(alocacao.veiculo_id)
             caucao = caucoes.get(alocacao.pk)
+            if caucao:
+                caucao.alocacao = alocacao  # a_repor lê a alocação sem nova query
             alocacao.caucao_recebida = caucao.recebido if caucao else ZERO
+            # saldo e "falta repor" com a mesma conta da tela da caução: a caução
+            # usada para pagar cobrança não pode continuar aparecendo "depositada"
+            alocacao.caucao_saldo = caucao.saldo if caucao else ZERO
+            alocacao.caucao_a_repor = caucao.a_repor if caucao else ZERO
+            alocacao.caucao_id_ficha = caucao.pk if caucao else None
     return card
 
 

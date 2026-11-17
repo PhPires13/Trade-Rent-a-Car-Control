@@ -145,6 +145,10 @@
     {% if alocacao_ativa.caucao_recebida >= alocacao_ativa.caucao_valor %}<span class="text-green-700">— depositada</span>
     {% elif alocacao_ativa.caucao_recebida > 0 %}<span class="font-semibold text-yellow-800">— depositado {{ alocacao_ativa.caucao_recebida|brl }}</span>
     {% else %}<span class="font-semibold text-yellow-800">— ainda não depositada</span>{% endif %}
+    {% if alocacao_ativa.caucao_a_repor > 0 %}
+    <span class="font-semibold text-yellow-800" data-caucao-repor>— usada para pagar cobranças: saldo {{ alocacao_ativa.caucao_saldo|brl }}, falta repor {{ alocacao_ativa.caucao_a_repor|brl }}</span>
+    · <a href="{% url 'financeiro:caucao_detalhe' alocacao_ativa.caucao_id_ficha %}" class="alvo-toque font-semibold underline">Repor a caução</a>
+    {% endif %}
   </p>
   {% endif %}
   {% if alocacao_ativa.na_oficina and not alocacao_ativa.troca_ativa %}

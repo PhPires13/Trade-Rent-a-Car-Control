@@ -73,6 +73,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # páginas e JSON comprimidos (gzip): a lista de alocações cai de ~230 KB para ~11 KB
+    "config.middleware.GZipSoTexto",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -218,8 +220,9 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     # HSTS: depois da primeira visita o navegador só usa https, sem o salto em
-    # http que um atacante na mesma rede Wi-Fi interceptaria. 30 dias, sem
-    # subdomínios e sem preload (preload é irreversível na prática).
+    # http que um atacante na mesma rede Wi-Fi interceptaria. 30 dias; por padrão
+    # sem subdomínios e sem preload (preload é irreversível na prática). Só ligue
+    # pelas variáveis com domínio próprio e todos os subdomínios já em https.
     SECURE_HSTS_SECONDS = 2592000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
-    SECURE_HSTS_PRELOAD = False
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
+    SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)

@@ -51,7 +51,12 @@ def passos_da_entrega(alocacao):
         alocacao is None
         or alocacao.status != Alocacao.Status.ATIVA
         or alocacao.passos_entrega_dispensados
-        or alocacao.cobrar_a_partir_de is not None
+        # "cobrar a partir de" igual ao início = entrega de verdade lançada com
+        # atraso (cobra tudo), não carga de contrato antigo: o cartão continua
+        or (
+            alocacao.cobrar_a_partir_de is not None
+            and alocacao.cobrar_a_partir_de != alocacao.data_inicio
+        )
         or alocacao.data_inicio < timezone.localdate() - timedelta(days=DIAS_PASSOS_ENTREGA)
     ):
         return None

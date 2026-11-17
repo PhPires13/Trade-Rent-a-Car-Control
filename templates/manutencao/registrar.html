@@ -14,7 +14,8 @@
 </p>
 
 {{ form.tipos_por_item|json_script:"tipos-por-item" }}
-<form method="post" class="form-cadastro max-w-lg space-y-6 rounded-lg bg-white p-4 shadow sm:p-6"
+{# registro novo: autocomplete="off" — "Voltar" depois de salvar não devolve o formulário preenchido (salvar de novo duplicava) #}
+<form method="post" class="form-cadastro max-w-lg space-y-6 rounded-lg bg-white p-4 shadow sm:p-6"{% if not editando %} autocomplete="off"{% endif %}
       x-data="{ item: '{{ form.item.value|default:''|escapejs }}', responsavel: '{{ form.responsavel.value|default:'empresa'|escapejs }}', tipos: JSON.parse(document.getElementById('tipos-por-item').textContent),
                get tipo() { return this.tipos[this.item] || 'corretiva' } }"
       @change="const n = $event.target.name;

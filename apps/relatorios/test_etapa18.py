@@ -96,7 +96,7 @@ def test_planilha_recebiveis_credito_maior_que_divida_nao_fica_negativa(cliente)
     saldo = colunas.index("Saldo devedor (R$)")
     # soma do cliente = o "falta" da tela (zero: o crédito já cobre tudo)
     assert sum(linha[saldo] for linha in linhas) == 0
-    [credito] = [linha for linha in linhas if "Crédito guardado" in linha[1]]
+    [credito] = [linha for linha in linhas if "Crédito do cliente" in linha[1]]
     assert credito[saldo] == -100.0
     assert "R$ 300,00" in credito[1] and "sobram R$ 200,00" in credito[1]
 
@@ -116,8 +116,8 @@ def test_planilha_recebiveis_credito_menor_que_divida_abate_tudo(cliente):
     _, colunas, linhas = views._planilha_recebiveis(hoje.year, hoje.month)
     saldo = colunas.index("Saldo devedor (R$)")
     assert sum(linha[saldo] for linha in linhas) == 600.0
-    [credito] = [linha for linha in linhas if "Crédito guardado" in linha[1]]
-    assert credito[1] == "Crédito guardado do cliente (abate do que deve)"
+    [credito] = [linha for linha in linhas if "Crédito do cliente" in linha[1]]
+    assert credito[1] == "Crédito do cliente (abate do que deve)"
 
 
 def test_setas_de_mes_iguais_as_do_das(usuario_logado):

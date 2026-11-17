@@ -124,20 +124,28 @@ SESSAO_TOKENS_MULTA = "multa_tokens_usados"
 
 def nova(request):
     """Cadastro de multa. Cada formulário leva um código único (como a ND):
-    reenviar o mesmo formulário (internet lenta, Voltar, duas abas) não grava
-    a multa duas vezes — senão o cliente acabava cobrado em dobro."""
+    reenviar o mesmo formulário (internet lenta, duas abas) não grava a multa
+    duas vezes — senão o cliente acabava cobrado em dobro. O Voltar do navegador
+    busca a página com um código NOVO: aí quem segura é o formulário vazio
+    (autocomplete="off") e a conferência de multa sem AIT "acabou de ser
+    registrada" (MultaForm)."""
     token = request.POST.get("token", "") if request.method == "POST" else ""
+    aviso_repetido = (
+        "Esta multa já tinha sido registrada — o envio repetido foi ignorado e "
+        "nada foi gravado em dobro."
+    )
+    if token and token in request.session.get(SESSAO_TOKENS_MULTA, []):
+        # o mesmo formulário de novo: avisa já, antes da conferência de "acabou de
+        # ser registrada" (multa sem AIT), que mostraria um erro no formulário
+        messages.warning(request, aviso_repetido)
+        return redirect("multas:lista")
     form = MultaForm(request.POST or None, initial={"data_infracao": timezone.localdate()})
     if request.method == "POST" and form.is_valid():
         # mesma trava da ND: a linha da sessão fica travada até gravar, então o 2º
         # envio de um clique duplo com internet lenta espera e vê o código já usado
         with _envio_unico(request, SESSAO_TOKENS_MULTA, token) as repetido:
             if repetido:
-                messages.warning(
-                    request,
-                    "Esta multa já tinha sido registrada — o envio repetido foi ignorado e "
-                    "nada foi gravado em dobro.",
-                )
+                messages.warning(request, aviso_repetido)
                 return redirect("multas:lista")
             multa = form.save()
         nome = multa.cliente.nome if multa.cliente else "nenhum cliente na data"

@@ -40,7 +40,7 @@
     {% if nd.pode_receber %}
     <a href="{% url 'financeiro:receber' %}?cliente={{ nd.cliente.pk }}&cobranca={{ nd.cobranca.pk }}"
        class="mt-3 block rounded bg-marca-amarelo px-3 py-2.5 text-center font-semibold text-marca-preto hover:brightness-95">✓ Recebi</a>
-    {% if nd.credito %}<p class="mt-1 text-xs text-amber-800">{{ nd.cliente.nome }} tem {{ nd.credito|brl }} de crédito guardado — dá para usar nesta ND.</p>{% endif %}
+    {% if nd.credito %}<p class="mt-1 text-xs text-amber-800">{{ nd.cliente.nome }} tem {{ nd.credito|brl }} de crédito — dá para usar nesta ND.</p>{% endif %}
     {% endif %}
     {% if nd.link_whatsapp %}
     <a href="{{ nd.link_whatsapp }}" target="_blank" rel="noopener"

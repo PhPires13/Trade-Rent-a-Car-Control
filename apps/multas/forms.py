@@ -6,10 +6,13 @@ tratamento de credenciais: um form próprio no admin já devolveu a senha do
 """
 
 import string
+from datetime import timedelta
 
 from django import forms
 from django.db.models import Q
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import format_html
 
 from apps.busca import so_letras_e_digitos
 from apps.campos import FormularioBR
@@ -175,12 +178,61 @@ class MultaForm(FormularioBR, forms.ModelForm):
             .order_by("pk")
         )
         repetida = next((multa for multa in candidatas if normalizar_ait(multa.ait) == ait), None)
+        if repetida is None:
+            return
+        link = reverse("multas:editar", args=[repetida.pk])
+        if self.instance.pk:
+            # na edição ninguém está cadastrando: o número digitado é que está errado
+            erro = format_html(
+                "Outra multa já usa este AIT ({}, {}) — confira o número na notificação. "
+                '<a href="{}" class="font-semibold underline">Abrir a outra multa</a>.',
+                repetida.veiculo.placa,
+                f"{repetida.data_infracao:%d/%m/%Y}",
+                link,
+            )
+        else:
+            erro = format_html(
+                "Esta multa já foi cadastrada: AIT {}, {} em {} — "
+                '<a href="{}" class="font-semibold underline">abra-a</a> em vez de '
+                "cadastrar de novo.",
+                repetida.ait,
+                repetida.veiculo.placa,
+                f"{repetida.data_infracao:%d/%m/%Y}",
+                link,
+            )
+        self.add_error("ait", erro)
+
+    #: janela em que a mesma multa sem AIT é tida como reenvio (Voltar + Registrar)
+    JANELA_REENVIO = timedelta(minutes=10)
+
+    def _conferir_reenvio_sem_ait(self, dados):
+        """Voltar + "Registrar" de novo gravava a multa sem AIT em dobro (e a ND
+        cobrava as duas). Sem AIT não há como saber se é a mesma multa, então só
+        barra a cópia exata (carro, data, valor e descrição) gravada há poucos
+        minutos — proteção contra reenvio, não muda a regra da multa repetida."""
+        veiculo, dia, valor = dados.get("veiculo"), dados.get("data_infracao"), dados.get("valor")
+        if self.instance.pk or dados.get("ait") or not veiculo or not dia:
+            return
+        recentes = Multa.history.filter(
+            history_type="+",
+            history_date__gte=timezone.now() - self.JANELA_REENVIO,
+            veiculo_id=veiculo.pk,
+            data_infracao=dia,
+            valor=valor,  # sem valor (None) compara com "sem valor"
+            descricao__iexact=(dados.get("descricao") or "").strip(),
+        ).values("id")
+        repetida = Multa.objects.filter(pk__in=recentes).order_by("-pk").first()
         if repetida is not None:
             self.add_error(
-                "ait",
-                f"Esta multa já foi cadastrada: AIT {repetida.ait}, {repetida.veiculo.placa} "
-                f"em {repetida.data_infracao:%d/%m/%Y}. Procure-a na lista de multas "
-                "(filtro Concluídas ou pela placa) em vez de cadastrar de novo.",
+                None,
+                format_html(
+                    "Esta multa acabou de ser registrada ({} em {}) — confira na lista; "
+                    '<a href="{}" class="font-semibold underline">abra-a</a> em vez de '
+                    "registrar de novo.",
+                    veiculo.placa,
+                    f"{dia:%d/%m/%Y}",
+                    reverse("multas:editar", args=[repetida.pk]),
+                ),
             )
 
     def _novo_ou_mudou(self, *campos):
@@ -189,6 +241,7 @@ class MultaForm(FormularioBR, forms.ModelForm):
     def clean(self):
         dados = super().clean()
         self._conferir_ait_repetido(dados)
+        self._conferir_reenvio_sem_ait(dados)
         infracao, prazo = dados.get("data_infracao"), dados.get("fici_prazo")
         if (
             infracao
@@ -418,8 +471,9 @@ class MultaEdicaoForm(MultaForm):
                 if campo in self.changed_data and campo in dados:
                     self.add_error(
                         campo,
-                        f"Esta multa já está na ND {item.nota_debito.numero:03d}, cobrada do "
-                        "cliente com o valor antigo. Ajuste ou cancele a nota de débito antes.",
+                        f"Esta multa já está na ND {item.nota_debito.numero:03d}, que está "
+                        "sendo cobrada do cliente. Para mudar valor, cliente ou quem paga, "
+                        "cancele a ND em Financeiro > Notas de débito e emita outra.",
                     )
         return dados
 

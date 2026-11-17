@@ -3,6 +3,7 @@
 from django.db.models import Q
 
 from apps.formatos import brl, milhar
+from apps.pessoas.models import Cliente
 
 from .models import Alocacao, TrocaTemporaria, Vistoria
 
@@ -186,6 +187,9 @@ def refazer_semanas_da_troca(troca, hoje=None):
     )
 
     alocacao = troca.alocacao
+    # trava o cliente antes de comparar com o que já foi pago (como no financeiro):
+    # um pagamento lançado ao mesmo tempo espera esta conta terminar
+    Cliente.objects.select_for_update().filter(pk=alocacao.cliente_id).first()
     abertas = Cobranca.com_quitacao_anotada(
         Cobranca.objects.filter(
             alocacao=alocacao,

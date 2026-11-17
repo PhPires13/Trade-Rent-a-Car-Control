@@ -11,7 +11,6 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.alocacoes.models import Alocacao
@@ -52,11 +51,14 @@ def _multa(veiculo, valor):
 
 
 def test_multa_negativa_nao_vira_nd_nem_erro_500(cliente, carro):
-    boa = _multa(carro, Decimal("195.23"))
-    torta = _multa(carro, Decimal("-50.00"))
-    assert torta.repasse == "A cobrar"  # o caso que chega à tela de gerar ND
-    with pytest.raises(ValidationError, match="valor"):
-        services.gerar_nd_de_multas(cliente, [boa, torta], HOJE)
+    from django.db import IntegrityError, transaction
+
+    _multa(carro, Decimal("195.23"))
+    # etapa 18c: o banco recusa gravar a multa negativa (trava multa_valor_nao_negativo),
+    # então ela nem chega à tela de gerar ND
+    with pytest.raises(IntegrityError), transaction.atomic():
+        _multa(carro, Decimal("-50.00"))
+    assert Multa.objects.count() == 1
     assert not NotaDebito.objects.exists()
     assert not ItemNotaDebito.objects.exists()
     assert not Cobranca.objects.filter(origem=Cobranca.Origem.NOTA_DEBITO).exists()
